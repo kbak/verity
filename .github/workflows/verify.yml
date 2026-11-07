@@ -1354,6 +1354,12 @@ jobs:
           # passes over the importer); run them 4-wide to stay inside the step budget.
           scripts/check_solidity_differential.sh --programs 5 --cases 16 --seed 2438 --jobs 4 --output .lake/import-differential/programs
 
+      - name: Compare legacy Solidity arithmetic and ABI behavior
+        timeout-minutes: 30
+        run: |
+          PYTHONPATH=scripts .lake/slice-testing-venv/bin/python -m solidity_differential.check_legacy --output .lake/import-differential/legacy
+          scripts/check_solidity_differential.sh --mutations --mutant import-legacy-root-checked --mutant import-legacy-helper-checked --output .lake/import-differential/legacy-mutants
+
       - name: Stateful Solidity instrument checks
         # Every check runs to the end and failures are reported together.
         timeout-minutes: 120
