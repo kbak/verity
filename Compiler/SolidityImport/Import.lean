@@ -62,7 +62,8 @@ private def solcReleases : Array SolcRelease := #[
       "a6a8f9f9388c5fcd9222474e00270242c832e936b0f5257c20374d27ee5bd1ab"],
     banners := #[
       "solc, the solidity compiler commandline interface\nVersion: 0.7.6+commit.7338295f.Linux.g++",
-      "solc, the solidity compiler commandline interface\nVersion: 0.7.6+commit.7338295f.Darwin.appleclang"],
+      "solc, the solidity compiler commandline interface\n" ++
+        "Version: 0.7.6+commit.7338295f.Darwin.appleclang"],
     hasNoImportCallbackFlag := false,
     supportedEvmVersions := #["istanbul"],
     supportsViaIR := false },
@@ -7704,7 +7705,9 @@ private partial def inlineStringFn (fnId : Nat) (args : Array CallArg) (at_ : Js
   let some body := (field? fn "body").filter (!·.isNull)
     | failAt fn "function has no body"
   unless implemented do failAt fn "function has no body"
-  modify fun e => { e with stack := frame, currentFile := frameFile, unchecked := e.legacyWrapping, bodyAssigned := bodyAssignedIds body }
+  modify fun e => { e with
+    stack := frame, currentFile := frameFile,
+    unchecked := e.legacyWrapping, bodyAssigned := bodyAssignedIds body }
   let mods ← mArr (← mField fn "modifiers")
   unless mods.isEmpty do failAt fn "modifiers on string-returning helpers are outside this slice"
   let params ← mArr (← mField (← mField fn "parameters") "parameters")
@@ -7870,7 +7873,9 @@ private partial def inlineArrayFn (fnId : Nat) (args : Array CallArg) (expectedE
   let some body := (field? fn "body").filter (!·.isNull)
     | failAt fn "function has no body"
   unless implemented do failAt fn "function has no body"
-  modify fun e => { e with stack := frame, currentFile := frameFile, unchecked := e.legacyWrapping, bodyAssigned := bodyAssignedIds body }
+  modify fun e => { e with
+    stack := frame, currentFile := frameFile,
+    unchecked := e.legacyWrapping, bodyAssigned := bodyAssignedIds body }
   let mods ← mArr (← mField fn "modifiers")
   unless mods.isEmpty do failAt fn "modifiers on array-returning helpers are outside this slice"
   let params ← mArr (← mField (← mField fn "parameters") "parameters")
@@ -7914,7 +7919,9 @@ private partial def inlineStorageRefFn (fnId : Nat) (args : Array CallArg) (at_ 
   let some body := (field? fn "body").filter (!·.isNull)
     | failAt fn "function has no body"
   unless implemented do failAt fn "function has no body"
-  modify fun e => { e with stack := frame, currentFile := frameFile, unchecked := e.legacyWrapping, bodyAssigned := bodyAssignedIds body }
+  modify fun e => { e with
+    stack := frame, currentFile := frameFile,
+    unchecked := e.legacyWrapping, bodyAssigned := bodyAssignedIds body }
   let mods ← mArr (← mField fn "modifiers")
   unless mods.isEmpty do failAt fn "modifiers on storage pointer helpers are outside this slice"
   let params ← mArr (← mField (← mField fn "parameters") "parameters")
@@ -8117,7 +8124,9 @@ private partial def inlineFlatStructFn (fnId : Nat) (args : Array CallArg) (at_ 
   let some body := (field? fn "body").filter (!·.isNull)
     | failAt fn "function has no body"
   unless implemented do failAt fn "function has no body"
-  modify fun e => { e with stack := frame, currentFile := frameFile, unchecked := e.legacyWrapping, bodyAssigned := bodyAssignedIds body }
+  modify fun e => { e with
+    stack := frame, currentFile := frameFile,
+    unchecked := e.legacyWrapping, bodyAssigned := bodyAssignedIds body }
   let mods ← mArr (← mField fn "modifiers")
   let params ← mArr (← mField (← mField fn "parameters") "parameters")
   unless params.size == args.size do
@@ -8328,7 +8337,9 @@ private partial def inlineFn (fnId : Nat) (args : Array CallArg) (at_ : Json) : 
   let some body := (field? fn "body").filter (!·.isNull)
     | failAt fn "function has no body"
   unless implemented do failAt fn "function has no body"
-  modify fun e => { e with stack := frame, currentFile := frameFile, unchecked := e.legacyWrapping, bodyAssigned := bodyAssignedIds body, zeroInitLocals := #[] }
+  modify fun e => { e with
+    stack := frame, currentFile := frameFile,
+    unchecked := e.legacyWrapping, bodyAssigned := bodyAssignedIds body, zeroInitLocals := #[] }
   let mods ← mArr (← mField fn "modifiers")
   let params ← mArr (← mField (← mField fn "parameters") "parameters")
   unless params.size == args.size do
@@ -8427,7 +8438,9 @@ private partial def inlineVoidFn (fnId : Nat) (args : Array CallArg) (at_ : Json
   let some body := (field? fn "body").filter (!·.isNull)
     | failAt fn "function has no body"
   unless implemented do failAt fn "function has no body"
-  modify fun e => { e with stack := frame, currentFile := frameFile, unchecked := e.legacyWrapping, bodyAssigned := bodyAssignedIds body, zeroInitLocals := #[] }
+  modify fun e => { e with
+    stack := frame, currentFile := frameFile,
+    unchecked := e.legacyWrapping, bodyAssigned := bodyAssignedIds body, zeroInitLocals := #[] }
   let mods ← mArr (← mField fn "modifiers")
   let params ← mArr (← mField (← mField fn "parameters") "parameters")
   unless params.size == args.size do
@@ -8513,7 +8526,9 @@ private partial def inlineMsgDataFn (fnId : Nat) (args : Array CallArg) (at_ : J
   let some body := (field? fn "body").filter (!·.isNull)
     | failAt fn "function has no body"
   unless implemented do failAt fn "function has no body"
-  modify fun e => { e with stack := frame, currentFile := frameFile, unchecked := e.legacyWrapping, bodyAssigned := bodyAssignedIds body }
+  modify fun e => { e with
+    stack := frame, currentFile := frameFile,
+    unchecked := e.legacyWrapping, bodyAssigned := bodyAssignedIds body }
   let mods ← mArr (← mField fn "modifiers")
   let params ← mArr (← mField (← mField fn "parameters") "parameters")
   unless params.isEmpty && args.isEmpty do
@@ -8556,7 +8571,9 @@ private partial def inlineMultiFn (fnId : Nat) (args : Array CallArg) (at_ : Jso
   let some body := (field? fn "body").filter (!·.isNull)
     | failAt fn "function has no body"
   unless implemented do failAt fn "function has no body"
-  modify fun e => { e with stack := frame, currentFile := frameFile, unchecked := e.legacyWrapping, bodyAssigned := bodyAssignedIds body }
+  modify fun e => { e with
+    stack := frame, currentFile := frameFile,
+    unchecked := e.legacyWrapping, bodyAssigned := bodyAssignedIds body }
   let mods ← mArr (← mField fn "modifiers")
   let params ← mArr (← mField (← mField fn "parameters") "parameters")
   unless params.size == args.size do
@@ -8855,7 +8872,9 @@ private partial def lowerModifier (modInv : Json) : M (Array Stmt × Array Stmt)
       let saved ← get
       let savedYul := saved.yulNames
       let frameFile := saved.nodeFile.find? modId |>.getD saved.currentFile
-      modify fun e => { e with stack := modId :: saved.stack, currentFile := frameFile, unchecked := e.legacyWrapping, bodyAssigned := bodyAssignedIds body }
+      modify fun e => { e with
+        stack := modId :: saved.stack, currentFile := frameFile,
+        unchecked := e.legacyWrapping, bodyAssigned := bodyAssignedIds body }
       let mut pre : Array Stmt := #[]
       for i in [:params.size] do
         let p := params[i]!
@@ -8903,7 +8922,9 @@ private partial def lowerModifier (modInv : Json) : M (Array Stmt × Array Stmt)
   let savedHelperReturnId := saved.helperReturnId
   let frameFile := saved.nodeFile.find? modId |>.getD saved.currentFile
   let frame := modId :: saved.stack
-  modify fun e => { e with stack := frame, currentFile := frameFile, unchecked := e.legacyWrapping, bodyAssigned := bodyAssignedIds body }
+  modify fun e => { e with
+    stack := frame, currentFile := frameFile,
+    unchecked := e.legacyWrapping, bodyAssigned := bodyAssignedIds body }
   let mut pre : Array Stmt := #[]
   let mut yul := savedYul
   for i in [:params.size] do

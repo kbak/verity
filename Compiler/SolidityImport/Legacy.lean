@@ -35,14 +35,16 @@ partial def validateLegacyDeclaration (node : Json) : M Unit := do
             failAt node s!"Solidity 0.7.6 scalar slice does not support type {ty}"
       if kind == "BinaryOperation" || kind == "Assignment" then
         if #[some "/", some "%", some "/=", some "%="].contains (optStr node "operator") then
-          failAt node "Solidity 0.7.6 division/modulo may execute INVALID; legacy exceptional halt is not modeled"
+          failAt node ("Solidity 0.7.6 division/modulo may execute INVALID; " ++
+            "legacy exceptional halt is not modeled")
       if kind == "FunctionCall" && optStr node "kind" == some "typeConversion" then
         let target := (field? node "typeDescriptions").bind (optStr · "typeString") |>.getD ""
         unless target.startsWith "uint" || target.startsWith "address" do
           failAt node "Solidity 0.7.6 scalar slice admits only unsigned/address conversions"
         for arg in (← mArr (← mField node "arguments")) do
           let source := (field? arg "typeDescriptions").bind (optStr · "typeString") |>.getD ""
-          unless source.startsWith "uint" || source.startsWith "address" || source.startsWith "int_const" do
+          unless source.startsWith "uint" || source.startsWith "address" ||
+              source.startsWith "int_const" do
             failAt node "Solidity 0.7.6 scalar slice admits only unsigned/address conversions"
       if kind == "FunctionCall" && optStr node "kind" == some "functionCall" then
         let callee ← mField node "expression"
@@ -54,7 +56,8 @@ partial def validateLegacyDeclaration (node : Json) : M Unit := do
           -- Ordinary reference/overload resolution is checked by the lowering.
           if let some id := (field? callee "referencedDeclaration").bind (·.getInt?.toOption) then
             if id < 0 && !#[some "require", some "revert"].contains (optStr callee "name") then
-              failAt node "Solidity 0.7.6 builtin call is outside the scalar slice (assert/INVALID is not modeled)"
+              failAt node ("Solidity 0.7.6 builtin call is outside the scalar slice " ++
+                "(assert/INVALID is not modeled)")
     for (_, child) in fields do
       validateLegacyDeclaration child
   | _ => pure ()
