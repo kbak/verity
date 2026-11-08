@@ -12,6 +12,7 @@ contract SequenceFixture {
             total += g + h;
         }
         (uint128 a, , uint128 c) = split(value);
+        (a, c) = (c, a);
         uint256 t = value % 8 days;
         (uint256 start, uint256 end, uint256 lo, uint256 hi) =
             t < 1 days ? (0 days, 1 days, uint256(a) * 3, uint256(c)) :

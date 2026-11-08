@@ -459,11 +459,23 @@ member access is exposed by this internal representation.
 
 Mapping slot observations evaluate keys in the current Denote state and use
 the supplied Keccak oracle, including both hashes for nested mappings. Reached
-key/value reads and writes before rollback remain observable. More than two
-keys, signed/narrow/dynamic key types, unsupported value types, and compound
-assignments remain rejected with source locations. Numeric literals with supported
-denominations use the exact integral lowering described above; nonintegral
+key/value reads and writes before rollback remain observable.
+Signed and unsigned integer mapping keys are supported; dynamic key types and
+unsupported value encodings remain rejected with source locations. Numeric literals
+with supported denominations use the exact integral lowering described above; nonintegral
 results and string literals used as numbers are rejected explicitly.
+
+`SignedMappingKeysSequence.sol` checks signed mapping keys at 8, 64, 128, and
+256 bits against source and compiled-model execution. Fixed inputs cover zero,
+negative one, signed minima/maxima, narrowing aliases, and rollback. The same
+fixture covers packed and raw-slot signed member reads, signed bounds, and signed
+ABI arguments. Narrow signed reads sign-extend the extracted storage bits before
+widening or comparison. The signed-key/member elaboration controls admit these
+supported layouts; unsupported key encodings still reject.
+
+`YulFeeContextChecks.lean` exercises `basefee()` and `gasprice()` with distinct
+nonzero values and wrapping arithmetic boundaries, and checks compilation. The
+Yul arity validator admits both zero-argument builtins.
 
 The mapping dirty-slot campaign seeds identical independently hashed slots in all
 three routes. Its fixed prefix reads a noncanonical true byte, deletes it while
@@ -713,7 +725,7 @@ prerequisite for CREATE2 key-derivation helpers, not an implementation of code d
 
 | Supported Solidity | Lowering boundary |
 | --- | --- |
-| `int256` / `int` scalar parameters, locals, returns, scalar storage fields, and scalar mapping values | Lowered as full 256-bit two's-complement words (`ParamType.int256` and `Word Int256` accessor bridge); narrow signed types (`int8`..`int248`) and signed mapping keys remain rejected. |
+| `int256` / `int` scalar parameters, locals, returns, scalar storage fields, and scalar mapping values | Lowered as full 256-bit two's-complement words (`ParamType.int256` and `Word Int256` accessor bridge); signed integer mapping keys are supported, including the narrow-key checks described above. |
 | `int256` prefix unary `-`, binary `+`, `-`, `*`, `/`, `<`, `>`, `<=`, `>=`, `==`, `!=`, and `+=` / `-=` | Checked `+`, `-`, `*`, `/`, and unary `-` emit `Panic(0x11)` on two's-complement `int256` overflow (including `-type(int256).min`, `type(int256).min * -1`, and `type(int256).min / -1`) and `Panic(0x12)` on division by zero; `UncheckedBlock` switches signed `+`, `-`, `*`, `/`, `+=`, `-=`, and unary `-` to wrapping 256-bit two's-complement arithmetic while preserving division-by-zero `Panic(0x12)`. Signed comparisons use `slt` / `sgt` and signed division uses `sdiv`. |
 | `type(int256).max`, `type(int256).min`, `type(uintN).min`, and `int256(x)` / `uint256(int256_x)` casts | `type(int256).max` lowers to `2^255 - 1`, `type(int256).min` to `2^255` (`-2^255` in two's complement), and `type(uintN).min` to `0`; explicit `int256(...)` and `uint256(...)` casts on 256-bit scalars and bounded constants preserve the 256-bit word representation. |
 | Contract and interface scalar values (`contract Foo`, `address payable`) | Supported as 160-bit address-backed scalar parameters, locals, returns, scalar storage fields, scalar mapping values, and `ContractOrInterface(addr)` / `address(contractVal)` casts; external contract member calls fail closed with located diagnostics. |
@@ -739,7 +751,7 @@ prerequisite for CREATE2 key-derivation helpers, not an implementation of code d
 | --- | --- |
 | Same-contract overloaded function declarations (`overloadedDeclarations` in `refInt`) | When `solc` records non-empty `overloadedDeclarations` on a function reference, `refInt` accepts the resolved `referencedDeclaration` if every candidate in `overloadedDeclarations` either belongs to the same virtual override family (`sameVirtualFamily`) or shares an origin declaring contract across `baseFunctionClosure` (for example `ERC20._approve(3)` and `ERC20._approve(4)` declared in the same contract). Cross-contract overloads with distinct signatures and no override relationship remain rejected (`ambiguous declaration`), and importing two overloaded roots with the same name in a single slice fails closed (`root function name collision`). |
 | Compile-time constant scalar expressions in custom-error arguments (`address(0)`, `type(uintN).max`, named constants) | Alongside decimal literals and direct scalar bindings, `lowerErrorArguments` accepts pure scalar expressions (`numericConstants` identifiers, `typeConversion` casts such as `address(0)`, and `type(T).max`/`min`) whose lowered value has an empty statement prelude (`converted.pre.isEmpty`) and a canonical literal `Expr.literal n` satisfying `Denote.errorScalarValueValid modelType n`. Non-constant or effectful expressions fail closed. |
-| Conditional tuple expressions (`cond ? (a0, ..., ak) : (b0, ..., bk)`) | Supported as the RHS of tuple variable declarations (`lowerLocal`) and tuple assignments (`lowerEffect`), including nested `Conditional` branches whose leaves are `TupleExpression`s or multi-return helper calls of matching arity. Target component types are threaded into each leaf so integer constants (such as `0 days`, `1 days`) convert to the declared component type before branch joining via fresh temporaries and `Stmt.ite`. Stateful or assignment expressions inside tuple components fail closed, as do bare top-level `TupleExpression` RHSs of tuple assignments. |
+| Conditional tuple expressions (`cond ? (a0, ..., ak) : (b0, ..., bk)`) | Supported as the RHS of tuple variable declarations (`lowerLocal`) and tuple assignments (`lowerEffect`), including nested `Conditional` branches whose leaves are `TupleExpression`s or multi-return helper calls of matching arity. Target component types are threaded into each leaf so integer constants (such as `0 days`, `1 days`) convert to the declared component type before branch joining via fresh temporaries and `Stmt.ite`. Stateful or assignment expressions inside tuple components fail closed. Literal tuple assignments are admitted and evaluate every right-hand component before updating targets. |
 | Transient storage `tload(slot)` in single-assignment `InlineAssembly` | `lowerYul` lowers `tload(a)` to `Expr.tload`, covered by `Coverage.exprCovered`, `Quote.quoteExpr`, and `TransactionAccess.expressionAccesses` (evaluating `DenoteState.transientStorage`). `tstore` and multi-statement assembly blocks remain outside this slice. |
 
 ### Development slice: fixed-size unsigned scalar array members in mapping structs and root fixed-size array returns
@@ -835,7 +847,7 @@ prerequisite for CREATE2 key-derivation helpers, not an implementation of code d
 | Supported Solidity | Lowering boundary |
 | --- | --- |
 | Dynamic memory scalar array allocation (`T[] memory a = new T[](len)`), element writes (`a[i] = val` / `delete a[i]`), and pure index preludes (`a[idx++]`) | `lowerLocal` supports non-reassigned `T[] memory` declarations initialized with `new T[](len)` when `T` is `uint8`–`uint256`, `address` / `address payable`, `bool`, or `bytes32` (`newArrayElementType?`). Evaluates `len` to `uint256`, guards `len <= 2^64 - 1` (`Panic(0x41)`), initializes free-memory pointer `0x40` to `0x80` if zero, checks `32 + 32 * len` allocation overflow (`Panic(0x41)`), bumps `0x40`, stores `len` at `ptr`, zero-initializes `len` words via `Stmt.forEach`, and registers an `inMemory := true` `ScalarArrayParam` in `scalarArrays`. `lowerEffect` supports `a[i] = val` and `delete a[i]` on `inMemory := true` scalar arrays with `i < a.length` bounds checks (`Panic(0x32)`) and boolean `0`/`1` normalization. `lowerRef` `IndexAccess` on `.scalarArray` allows index expressions with empty base preludes (such as `leaves[leafPos++]` and `hashes[hashPos++]`). Signed/nested `new` array allocations, reassigned array locals, and `calldata` array element writes fail closed. |
-| Extended mapping key types (`mappingKey`) and mapping struct member types (`buildField`, `memberRead`, `lowerEffect`) | `mappingKey` accepts `address`, `address payable`, `contract` / `interface` types, `bytes32`, `int256`, `bool`, `enum` types, and `uint8`–`uint256` as one- and two-key mapping keys; narrow signed (`int8`–`int248`), fixed-bytes (`bytes1`–`bytes31`), and reference keys fail closed. `buildField` accepts `uint8`–`uint256`, `int256`, `address`, `address payable`, `contract` / `interface` types, `bytes32`, and `bool` as packed or full-word mapping-struct members, recording `booleanMembers` on `FieldInfo` so `memberRead` and `lowerEffect` normalize boolean struct member reads and writes with `Expr.logicalNot (.logicalNot ...)`. |
+| Extended mapping key types (`mappingKey`) and mapping struct member types (`buildField`, `memberRead`, `lowerEffect`) | `mappingKey` accepts `address`, `address payable`, `contract` / `interface` types, `bytes32`, `int256`, `bool`, `enum` types, and `uint8`–`uint256` as one- and two-key mapping keys; narrow signed (`int8`–`int248`) keys are also admitted with sign extension; `bytes4` keys are supported, while other narrow fixed-bytes and reference keys fail closed. `buildField` accepts `uint8`–`uint256`, `int8`–`int256`, `address`, `address payable`, `contract` / `interface` types, `bytes32`, and `bool` as packed or full-word mapping-struct members, recording `booleanMembers` on `FieldInfo` so `memberRead` and `lowerEffect` normalize boolean struct member reads and writes with `Expr.logicalNot (.logicalNot ...)`. |
 | Terminal root `InlineAssembly` assigning to a single named scalar return variable | When a root function has a single named scalar return parameter (`rootNamedReturn`), empty modifier post-statements (`rootPost.isEmpty`), and a terminal `InlineAssembly` statement that only assigns to the return declaration without reading it in Yul (`yulOnlyAssignsDecl`), `lowerRootStatements` routes the assembly block through `helperResult := some (rbinding, rty)` and `cleanHelperResultExpr` before `lowerRoot` emits `Stmt.returnValues`, matching `solc` ABI return masking on narrow return types (such as `address`) while rejecting Yul reads of narrow root return variables. |
 
 ### Development slice: user-defined value types (`type T is U`), direct parameter assignments, chained/conditional multi-returns, zero-arg custom-error helpers, Yul memory-array `keccak256`, and struct-array element helper calls
@@ -1090,6 +1102,6 @@ still reject with located diagnostics. Each fixture has
 metamorphic source variants (`check_storage --fixture unchecked-blocks` /
 `tuple-destructuring`) and scheduled importer mutants
 (`import-unchecked-block-*`, `import-tuple-destructuring-*`). Literal tuples on
-the right of tuple assignments remain rejected.
+the right of tuple assignments are supported when their components satisfy the evaluation-order checks.
 
 Whole-contract frame proofs can use `Transactions.AdversarialEntryPointSequence` and `invariant_of_adversarial_entry_points` to vary both the transaction context and permitted oracle at each public call. Every permitted oracle must satisfy the actual per-entry-point execution obligation. The rule includes observed reverting frames through rollback; ABI decoding, dispatch and value transfers remain separate obligations. `adversarial_sequence_append` composes observed prefixes.

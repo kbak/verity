@@ -166,11 +166,13 @@ private def buildField (types item : Json) : M FieldInfo := do
     if (field? top "members").isSome then
       unless (← mNat (← mField item "offset")) == 0 do
         throwError "top-level storage struct {name} must start at byte offset 0"
-      let (members', names, skipped, booleanMembers, structFixedArrays, structMappings, structDynamicArrays, subStructs) ←
+      let (members', names, skipped, booleanMembers, signedMembers, structFixedArrays,
+          structMappings, structDynamicArrays, subStructs) ←
         decodeStructLayoutMembers name "" 0 types top
       let field : Field := { name, ty := .uint256, slot := some slot }
       return { slot, field, keyCount := 0, memberNames := names, opaqueNames := skipped,
-               booleanMembers, structFixedArrays, structMappings, structDynamicArrays, subStructs,
+               booleanMembers, signedMembers, structFixedArrays, structMappings,
+               structDynamicArrays, subStructs,
                structMembers := members' }
     if let some baseId := optStr top "base" then
       unless (← mNat (← mField item "offset")) == 0 do
@@ -425,7 +427,8 @@ private def buildField (types item : Json) : M FieldInfo := do
     return { slot, field, keyCount := if key2.isSome then 2 else 1,
              memberNames := #[], opaqueNames := #[], scalarMapping := true,
              booleanMapping := leafType == "bool" }
-  let (members', names, skipped, booleanMembers, structFixedArrays, structMappings, structDynamicArrays, subStructs) ←
+  let (members', names, skipped, booleanMembers, signedMembers, structFixedArrays,
+      structMappings, structDynamicArrays, subStructs) ←
     decodeStructLayoutMembers name "" 0 types structTy
   let ty : FieldType :=
     match key2 with
@@ -433,7 +436,8 @@ private def buildField (types item : Json) : M FieldInfo := do
     | none => .mappingStruct key1 members'.toList
   let field : Field := { name, ty, slot := some slot }
   pure { slot, field, keyCount := if key2.isSome then 2 else 1,
-         memberNames := names, opaqueNames := skipped, booleanMembers, structFixedArrays, structMappings,
+         memberNames := names, opaqueNames := skipped, booleanMembers, signedMembers,
+         structFixedArrays, structMappings,
          structDynamicArrays, subStructs, structMembers := members' }
 
 /-- Resolve only reached fields: an unrelated unsupported layout must not
@@ -455,7 +459,11 @@ private def readRawStructScalar (pre : Array Stmt) (baseSlot : Expr) (mInfo : Ra
   let rawWord := Expr.storageArrayElement rawStorageFieldName wordSlot
   let shifted := if mInfo.byteOffset == 0 then rawWord else Expr.shr (.literal (mInfo.byteOffset * 8)) rawWord
   let masked := if mInfo.bitWidth < 256 then Expr.bitAnd shifted (.literal (2 ^ mInfo.bitWidth - 1)) else shifted
-  let cleaned := if mInfo.isBool then Expr.logicalNot (.logicalNot masked) else masked
+  let cleaned :=
+    if mInfo.isBool then Expr.logicalNot (.logicalNot masked)
+    else if (signedBitsOf mInfo.ty).isSome && mInfo.bitWidth < 256 then
+      Expr.signextend (.literal (mInfo.bitWidth / 8 - 1)) masked
+    else masked
   let dest ← fresh
   pure { pre := pre.push (.letVar dest cleaned), expr := .localVar dest }
 
@@ -793,7 +801,12 @@ private def memberRead (pre : Array Stmt) (path : SPath) (member : String) (at_ 
   unless info.memberNames.contains qualMember do
     failAt at_ s!"member {qualMember} is not a layout member of {fieldName}"
   markField fieldName
-  let expr := if info.booleanMembers.contains qualMember then Expr.logicalNot (.logicalNot read) else read
+  let expr :=
+    if info.booleanMembers.contains qualMember then Expr.logicalNot (.logicalNot read)
+    else match info.signedMembers.find? (·.1 == qualMember) with
+      | some (_, bits) =>
+          if bits < 256 then Expr.signextend (.literal (bits / 8 - 1)) read else read
+      | none => read
   pure { pre, expr }
 
 private def scalarMappingRead (pre : Array Stmt) (path : SPath) (at_ : Json) : M Val := do
@@ -1214,7 +1227,7 @@ private partial def lowerYul (j : Json) : M Val := do
         failAt j "Yul create2 must be the whole value of a Yul assignment or variable declaration"
       let expectedArity? : Option Nat := match fname with
         | "caller" | "address" | "timestamp" | "number" | "chainid"
-        | "selfbalance" | "origin" => some 0
+        | "selfbalance" | "origin" | "basefee" | "gasprice" => some 0
         | "iszero" | "not" | "tload" | "sload" | "clz" => some 1
         | "add" | "sub" | "mul" | "div" | "sdiv" | "mod" | "smod" | "exp"
         | "and" | "or" | "xor" | "byte" | "shl" | "shr" | "sar" | "signextend"

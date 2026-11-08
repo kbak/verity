@@ -278,12 +278,15 @@ partial def resolveRawStructInfo (structId : Nat) (at_ : Json) : M RawStructInfo
   return { structId, structName := sName, scalars, mappings, dynamicArrays, subStructs, wordCount }
 
 partial def decodeStructLayoutMembers (name prefixStr : String) (baseWord : Nat) (types structTy : Json) :
-    M (Array StructMember × Array String × Array String × Array String × Array StructFixedArrayInfo × Array StructMappingInfo × Array StructDynamicArrayInfo × Array (String × Nat)) := do
+    M (Array StructMember × Array String × Array String × Array String × Array (String × Nat) ×
+      Array StructFixedArrayInfo × Array StructMappingInfo × Array StructDynamicArrayInfo ×
+      Array (String × Nat)) := do
   let members ← mArr (← mField structTy "members")
   let mut members' : Array StructMember := #[]
   let mut names : Array String := #[]
   let mut skipped : Array String := #[]
   let mut booleanMembers : Array String := #[]
+  let mut signedMembers : Array (String × Nat) := #[]
   let mut structFixedArrays : Array StructFixedArrayInfo := #[]
   let mut structMappings : Array StructMappingInfo := #[]
   let mut structDynamicArrays : Array StructDynamicArrayInfo := #[]
@@ -302,12 +305,14 @@ partial def decodeStructLayoutMembers (name prefixStr : String) (baseWord : Nat)
       if byteOff == 0 && (← mStr (← mField subTy "encoding")) == "inplace" && (field? subTy "members").isSome then
         if let some sid := resolveStructIdFromSolcType? (← get) rawSolcType then
           subStructs := subStructs.push (qualLabel, sid)
-          let (subMembers, subNames, subSkipped, subBools, subFixed, subMaps, subDyns, subSubs) ←
+          let (subMembers, subNames, subSkipped, subBools, subSigned, subFixed, subMaps,
+              subDyns, subSubs) ←
             decodeStructLayoutMembers name qualLabel word types subTy
           members' := members' ++ subMembers
           names := names ++ subNames
           skipped := skipped ++ subSkipped
           booleanMembers := booleanMembers ++ subBools
+          signedMembers := signedMembers ++ subSigned
           structFixedArrays := structFixedArrays ++ subFixed
           structMappings := structMappings ++ subMaps
           structDynamicArrays := structDynamicArrays ++ subDyns
@@ -479,9 +484,12 @@ partial def decodeStructLayoutMembers (name prefixStr : String) (baseWord : Nat)
       names := names.push qualLabel
       if solcType == "t_bool" then
         booleanMembers := booleanMembers.push qualLabel
+      if solcType.startsWith "t_int" then
+        signedMembers := signedMembers.push (qualLabel, bits)
     else
       throwError "unsupported layout member {qualLabel} : {rawSolcType}"
-  pure (members', names, skipped, booleanMembers, structFixedArrays, structMappings, structDynamicArrays, subStructs)
+  pure (members', names, skipped, booleanMembers, signedMembers, structFixedArrays,
+    structMappings, structDynamicArrays, subStructs)
 
 def rawStructMemberSlot (baseSlot : Expr) (wordOffset : Nat) : Expr :=
   if wordOffset == 0 then baseSlot else .add baseSlot (.literal wordOffset)
