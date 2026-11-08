@@ -1,4 +1,5 @@
 """Protocol, determinism and failure classification tests (stdlib only)."""
+import importlib
 import json
 from pathlib import Path
 import tempfile
@@ -15,9 +16,22 @@ from solidity_differential.suite import run_checks, stateful_campaign
 
 
 class SolidityDifferentialTests(unittest.TestCase):
-    def test_storage_mutation_anchors_match_current_sources(self):
+    def test_mutation_anchors_match_current_sources(self):
         from solidity_differential.check_storage_mutations import preflight_mutation_anchors
-        preflight_mutation_anchors(Path(__file__).resolve().parents[1])
+        root = Path(__file__).resolve().parents[1]
+        preflight_mutation_anchors(root)
+        for module, default_source in (
+            ("check_byte_call_mutations", "Verity/Core/Model/Denote.lean"),
+            ("check_environment_mutations", "Compiler/SolidityImport/Import.lean"),
+            ("check_struct_abi_mutations", None),
+            ("check_scalar_array_abi_mutations", None),
+        ):
+            mutations = importlib.import_module("solidity_differential." + module).MUTANTS
+            for name, mutation in mutations.items():
+                relative, anchor = ((default_source, mutation[0]) if default_source
+                                    else mutation[:2])
+                with self.subTest(mutant=name):
+                    self.assertEqual((root / relative).read_text().count(anchor), 1)
 
     def test_reference_compiler_selection_is_exact(self):
         for unsupported in ("0.7.6", "0.7.6+commit.00000000", "0.8.35+commit.00000000"):

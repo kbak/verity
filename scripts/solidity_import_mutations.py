@@ -316,7 +316,8 @@ def setup() -> None:
     if not SOLC.is_file():
         raise SystemExit(f"missing {SOLC}")
     # The checks import the status driver, which `lake build SolidityImportSmoke` does not build.
-    subprocess.run(["lake", "build", "Compiler.SolidityImport.Differential"], cwd=ROOT, check=True)
+    subprocess.run(["lake", "build", "Compiler.SolidityImport.Differential",
+                    "Compiler.SolidityImport.StaticOracleMocks"], cwd=ROOT, check=True)
     WORK.mkdir(parents=True, exist_ok=True)
     # Provision the differential venv and pinned compilers once, before workers share them.
     subprocess.run(["sh", str(ROOT / "scripts/check_solidity_differential.sh"), "--help"],
