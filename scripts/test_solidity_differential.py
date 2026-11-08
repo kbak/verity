@@ -15,6 +15,10 @@ from solidity_differential.suite import run_checks, stateful_campaign
 
 
 class SolidityDifferentialTests(unittest.TestCase):
+    def test_storage_mutation_anchors_match_current_sources(self):
+        from solidity_differential.check_storage_mutations import preflight_mutation_anchors
+        preflight_mutation_anchors(Path(__file__).resolve().parents[1])
+
     def test_reference_compiler_selection_is_exact(self):
         for unsupported in ("0.7.6", "0.7.6+commit.00000000", "0.8.35+commit.00000000"):
             with self.subTest(unsupported=unsupported), self.assertRaisesRegex(HarnessError, "unpinned"):
