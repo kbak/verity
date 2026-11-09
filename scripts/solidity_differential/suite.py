@@ -34,6 +34,9 @@ def stateful_campaign(output, transactions, seed, jobs=1):
     command(['lake', 'env', 'lean', '--run',
              'Contracts/SolidityImportSmoke/SelectorIdentityChecks.lean'],
             log=output / 'selector-identity-checks.log')
+    command(['lake', 'env', 'lean', '--run',
+             'Contracts/SolidityImportSmoke/YulFeeContextChecks.lean'],
+            log=output / 'yul-fee-context.log')
     checks = [
         ('protocol', ['-m', 'unittest', 'discover', '-s', 'scripts', '-p', 'test_solidity_stateful*.py']),
         ('anvil', ['-m', 'solidity_differential.check_anvil']),
@@ -79,6 +82,16 @@ def stateful_campaign(output, transactions, seed, jobs=1):
         checks.append(('storage-' + fixture, ['-m', 'solidity_differential.check_storage',
             '--fixture', fixture, '--transactions', str(transactions), '--seed', str(seed),
             '--output', str(output / ('storage-' + fixture))]))
+    signed_key_edges = [0, 1, 127, 128, 255]
+    for bits in (64, 128):
+        signed_key_edges.extend([(1 << (bits - 1)) - 1, 1 << (bits - 1), (1 << bits) - 1])
+    signed_key_edges.append((1 << 256) - 1)
+    checks.append(('signed-mapping-keys', ['-m', 'solidity_differential.check_stateful',
+        '--transactions', str(max(64, transactions)), '--seed', str(seed), '--argument-bits', '256',
+        '--source-fixture', 'Contracts/SolidityImportSmoke/SignedMappingKeysSequence.sol',
+        '--model-driver', 'Contracts/SolidityImportSmoke/SignedMappingKeysSequenceModel.lean',
+        '--output', str(output / 'signed-mapping-keys'),
+        '--change-prefix', *map(str, signed_key_edges)]))
     checks.append(('mapping-dirty', ['-m', 'solidity_differential.check_stateful',
         '--dirty-mappings', '--transactions', str(max(5, transactions)), '--seed', str(seed),
         '--source-fixture', 'Contracts/SolidityImportSmoke/MappingDirtySequence.sol',

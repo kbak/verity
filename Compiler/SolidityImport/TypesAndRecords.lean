@@ -182,6 +182,8 @@ structure FieldInfo where
   memberNames : Array String
   opaqueNames : Array String
   booleanMembers : Array String := #[]
+  /-- Signed layout member widths, including qualified nested member names. -/
+  signedMembers : Array (String × Nat) := #[]
   structFixedArrays : Array StructFixedArrayInfo := #[]
   structMappings : Array StructMappingInfo := #[]
   structDynamicArrays : Array StructDynamicArrayInfo := #[]

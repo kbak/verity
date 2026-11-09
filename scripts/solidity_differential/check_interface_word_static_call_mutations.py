@@ -41,9 +41,13 @@ MUTANTS = {
         '        else Stmt.ite a.expr [] rhs.toList\n'
         '      pure { pre := (a.pre ++ right.pre).push (.letVar dest a.expr) |>.push branch,',
         'runtime', None),
+    # Remove the synthesized prologue itself: dropping encodingMemory alone
+    # leaves structural free-pointer detection active and changes no model code.
     'import-interface-word-free-pointer-init': (IMPORT,
-        '  modify fun e => { e with encodingMemory := true }\n  pre := pre.push (.ecm',
-        '  pre := pre.push (.ecm', 'runtime', None),
+        '    let mut abiGuards : Array Stmt := if env.explicitAbi || env.encodingMemory || '
+        'stmtListRequiresFreePointerInit body.toList then '
+        '#[.mstore (.literal 64) (.literal 128)] else #[]',
+        '    let mut abiGuards : Array Stmt := #[]', 'runtime', None),
     'import-interface-word-operator-admission': (IMPORT,
         '      if optStr node "operator" == some "&&" || optStr node "operator" == some "||" then',
         '      if true then', 'admission', 'equality-operand'),

@@ -11,6 +11,7 @@ import Compiler.SolidityImport.AbiEncoding
 import Compiler.SolidityImport.TypesAndRecords
 import Compiler.SolidityImport.TransportBarriers
 import Compiler.SolidityImport.LibraryCallGuard
+import Compiler.SolidityImport.Legacy
 import Compiler.SolidityImport.ExprHelpers
 import Compiler.SolidityImport.StorageLayout
 import Compiler.SolidityImport.InlineAssemblyShims
@@ -54,6 +55,18 @@ private structure SolcRelease where
   supportsViaIR : Bool
 
 private def solcReleases : Array SolcRelease := #[
+  { longVersion := "0.7.6+commit.7338295f",
+    binaryName := "solc-0.7.6",
+    sha256s := #[
+      "bd69ea85427bf2f4da74cb426ad951dd78db9dfdd01d791208eccc2d4958a6bb",
+      "a6a8f9f9388c5fcd9222474e00270242c832e936b0f5257c20374d27ee5bd1ab"],
+    banners := #[
+      "solc, the solidity compiler commandline interface\nVersion: 0.7.6+commit.7338295f.Linux.g++",
+      "solc, the solidity compiler commandline interface\n" ++
+        "Version: 0.7.6+commit.7338295f.Darwin.appleclang"],
+    hasNoImportCallbackFlag := false,
+    supportedEvmVersions := #["istanbul"],
+    supportsViaIR := false },
   { longVersion := "0.8.34+commit.80d5c536",
     binaryName := "solc-0.8.34",
     sha256s := #[
@@ -153,11 +166,13 @@ private def buildField (types item : Json) : M FieldInfo := do
     if (field? top "members").isSome then
       unless (← mNat (← mField item "offset")) == 0 do
         throwError "top-level storage struct {name} must start at byte offset 0"
-      let (members', names, skipped, booleanMembers, structFixedArrays, structMappings, structDynamicArrays, subStructs) ←
+      let (members', names, skipped, booleanMembers, signedMembers, structFixedArrays,
+          structMappings, structDynamicArrays, subStructs) ←
         decodeStructLayoutMembers name "" 0 types top
       let field : Field := { name, ty := .uint256, slot := some slot }
       return { slot, field, keyCount := 0, memberNames := names, opaqueNames := skipped,
-               booleanMembers, structFixedArrays, structMappings, structDynamicArrays, subStructs,
+               booleanMembers, signedMembers, structFixedArrays, structMappings,
+               structDynamicArrays, subStructs,
                structMembers := members' }
     if let some baseId := optStr top "base" then
       unless (← mNat (← mField item "offset")) == 0 do
@@ -412,7 +427,8 @@ private def buildField (types item : Json) : M FieldInfo := do
     return { slot, field, keyCount := if key2.isSome then 2 else 1,
              memberNames := #[], opaqueNames := #[], scalarMapping := true,
              booleanMapping := leafType == "bool" }
-  let (members', names, skipped, booleanMembers, structFixedArrays, structMappings, structDynamicArrays, subStructs) ←
+  let (members', names, skipped, booleanMembers, signedMembers, structFixedArrays,
+      structMappings, structDynamicArrays, subStructs) ←
     decodeStructLayoutMembers name "" 0 types structTy
   let ty : FieldType :=
     match key2 with
@@ -420,7 +436,8 @@ private def buildField (types item : Json) : M FieldInfo := do
     | none => .mappingStruct key1 members'.toList
   let field : Field := { name, ty, slot := some slot }
   pure { slot, field, keyCount := if key2.isSome then 2 else 1,
-         memberNames := names, opaqueNames := skipped, booleanMembers, structFixedArrays, structMappings,
+         memberNames := names, opaqueNames := skipped, booleanMembers, signedMembers,
+         structFixedArrays, structMappings,
          structDynamicArrays, subStructs, structMembers := members' }
 
 /-- Resolve only reached fields: an unrelated unsupported layout must not
@@ -442,7 +459,11 @@ private def readRawStructScalar (pre : Array Stmt) (baseSlot : Expr) (mInfo : Ra
   let rawWord := Expr.storageArrayElement rawStorageFieldName wordSlot
   let shifted := if mInfo.byteOffset == 0 then rawWord else Expr.shr (.literal (mInfo.byteOffset * 8)) rawWord
   let masked := if mInfo.bitWidth < 256 then Expr.bitAnd shifted (.literal (2 ^ mInfo.bitWidth - 1)) else shifted
-  let cleaned := if mInfo.isBool then Expr.logicalNot (.logicalNot masked) else masked
+  let cleaned :=
+    if mInfo.isBool then Expr.logicalNot (.logicalNot masked)
+    else if (signedBitsOf mInfo.ty).isSome && mInfo.bitWidth < 256 then
+      Expr.signextend (.literal (mInfo.bitWidth / 8 - 1)) masked
+    else masked
   let dest ← fresh
   pure { pre := pre.push (.letVar dest cleaned), expr := .localVar dest }
 
@@ -780,7 +801,12 @@ private def memberRead (pre : Array Stmt) (path : SPath) (member : String) (at_ 
   unless info.memberNames.contains qualMember do
     failAt at_ s!"member {qualMember} is not a layout member of {fieldName}"
   markField fieldName
-  let expr := if info.booleanMembers.contains qualMember then Expr.logicalNot (.logicalNot read) else read
+  let expr :=
+    if info.booleanMembers.contains qualMember then Expr.logicalNot (.logicalNot read)
+    else match info.signedMembers.find? (·.1 == qualMember) with
+      | some (_, bits) =>
+          if bits < 256 then Expr.signextend (.literal (bits / 8 - 1)) read else read
+      | none => read
   pure { pre, expr }
 
 private def scalarMappingRead (pre : Array Stmt) (path : SPath) (at_ : Json) : M Val := do
@@ -1201,7 +1227,7 @@ private partial def lowerYul (j : Json) : M Val := do
         failAt j "Yul create2 must be the whole value of a Yul assignment or variable declaration"
       let expectedArity? : Option Nat := match fname with
         | "caller" | "address" | "timestamp" | "number" | "chainid"
-        | "selfbalance" | "origin" => some 0
+        | "selfbalance" | "origin" | "basefee" | "gasprice" => some 0
         | "iszero" | "not" | "tload" | "sload" | "clz" => some 1
         | "add" | "sub" | "mul" | "div" | "sdiv" | "mod" | "smod" | "exp"
         | "and" | "or" | "xor" | "byte" | "shl" | "shr" | "sar" | "signextend"
@@ -7692,7 +7718,9 @@ private partial def inlineStringFn (fnId : Nat) (args : Array CallArg) (at_ : Js
   let some body := (field? fn "body").filter (!·.isNull)
     | failAt fn "function has no body"
   unless implemented do failAt fn "function has no body"
-  modify fun e => { e with stack := frame, currentFile := frameFile, unchecked := false, bodyAssigned := bodyAssignedIds body }
+  modify fun e => { e with
+    stack := frame, currentFile := frameFile,
+    unchecked := e.legacyWrapping, bodyAssigned := bodyAssignedIds body }
   let mods ← mArr (← mField fn "modifiers")
   unless mods.isEmpty do failAt fn "modifiers on string-returning helpers are outside this slice"
   let params ← mArr (← mField (← mField fn "parameters") "parameters")
@@ -7858,7 +7886,9 @@ private partial def inlineArrayFn (fnId : Nat) (args : Array CallArg) (expectedE
   let some body := (field? fn "body").filter (!·.isNull)
     | failAt fn "function has no body"
   unless implemented do failAt fn "function has no body"
-  modify fun e => { e with stack := frame, currentFile := frameFile, unchecked := false, bodyAssigned := bodyAssignedIds body }
+  modify fun e => { e with
+    stack := frame, currentFile := frameFile,
+    unchecked := e.legacyWrapping, bodyAssigned := bodyAssignedIds body }
   let mods ← mArr (← mField fn "modifiers")
   unless mods.isEmpty do failAt fn "modifiers on array-returning helpers are outside this slice"
   let params ← mArr (← mField (← mField fn "parameters") "parameters")
@@ -7902,7 +7932,9 @@ private partial def inlineStorageRefFn (fnId : Nat) (args : Array CallArg) (at_ 
   let some body := (field? fn "body").filter (!·.isNull)
     | failAt fn "function has no body"
   unless implemented do failAt fn "function has no body"
-  modify fun e => { e with stack := frame, currentFile := frameFile, unchecked := false, bodyAssigned := bodyAssignedIds body }
+  modify fun e => { e with
+    stack := frame, currentFile := frameFile,
+    unchecked := e.legacyWrapping, bodyAssigned := bodyAssignedIds body }
   let mods ← mArr (← mField fn "modifiers")
   unless mods.isEmpty do failAt fn "modifiers on storage pointer helpers are outside this slice"
   let params ← mArr (← mField (← mField fn "parameters") "parameters")
@@ -8105,7 +8137,9 @@ private partial def inlineFlatStructFn (fnId : Nat) (args : Array CallArg) (at_ 
   let some body := (field? fn "body").filter (!·.isNull)
     | failAt fn "function has no body"
   unless implemented do failAt fn "function has no body"
-  modify fun e => { e with stack := frame, currentFile := frameFile, unchecked := false, bodyAssigned := bodyAssignedIds body }
+  modify fun e => { e with
+    stack := frame, currentFile := frameFile,
+    unchecked := e.legacyWrapping, bodyAssigned := bodyAssignedIds body }
   let mods ← mArr (← mField fn "modifiers")
   let params ← mArr (← mField (← mField fn "parameters") "parameters")
   unless params.size == args.size do
@@ -8222,7 +8256,7 @@ private partial def trySignFlipSelfCall? (fnId : Nat) (args : Array CallArg) (at
   let sub ← stripParens (← mField arg0 "subExpression")
   unless (← mKind sub) == "Identifier" do return none
   unless (← refInt sub) == pid do return none
-  let (bodyStmts, topUnchecked) ← unwrapSignFlipStmts body false
+  let (bodyStmts, topUnchecked) ← unwrapSignFlipStmts body (← get).legacyWrapping
   if bodyStmts.isEmpty then return none
   let topStmt := bodyStmts[0]!
   unless (← mKind topStmt) == "IfStatement" do return none
@@ -8316,7 +8350,9 @@ private partial def inlineFn (fnId : Nat) (args : Array CallArg) (at_ : Json) : 
   let some body := (field? fn "body").filter (!·.isNull)
     | failAt fn "function has no body"
   unless implemented do failAt fn "function has no body"
-  modify fun e => { e with stack := frame, currentFile := frameFile, unchecked := false, bodyAssigned := bodyAssignedIds body, zeroInitLocals := #[] }
+  modify fun e => { e with
+    stack := frame, currentFile := frameFile,
+    unchecked := e.legacyWrapping, bodyAssigned := bodyAssignedIds body, zeroInitLocals := #[] }
   let mods ← mArr (← mField fn "modifiers")
   let params ← mArr (← mField (← mField fn "parameters") "parameters")
   unless params.size == args.size do
@@ -8415,7 +8451,9 @@ private partial def inlineVoidFn (fnId : Nat) (args : Array CallArg) (at_ : Json
   let some body := (field? fn "body").filter (!·.isNull)
     | failAt fn "function has no body"
   unless implemented do failAt fn "function has no body"
-  modify fun e => { e with stack := frame, currentFile := frameFile, unchecked := false, bodyAssigned := bodyAssignedIds body, zeroInitLocals := #[] }
+  modify fun e => { e with
+    stack := frame, currentFile := frameFile,
+    unchecked := e.legacyWrapping, bodyAssigned := bodyAssignedIds body, zeroInitLocals := #[] }
   let mods ← mArr (← mField fn "modifiers")
   let params ← mArr (← mField (← mField fn "parameters") "parameters")
   unless params.size == args.size do
@@ -8501,7 +8539,9 @@ private partial def inlineMsgDataFn (fnId : Nat) (args : Array CallArg) (at_ : J
   let some body := (field? fn "body").filter (!·.isNull)
     | failAt fn "function has no body"
   unless implemented do failAt fn "function has no body"
-  modify fun e => { e with stack := frame, currentFile := frameFile, unchecked := false, bodyAssigned := bodyAssignedIds body }
+  modify fun e => { e with
+    stack := frame, currentFile := frameFile,
+    unchecked := e.legacyWrapping, bodyAssigned := bodyAssignedIds body }
   let mods ← mArr (← mField fn "modifiers")
   let params ← mArr (← mField (← mField fn "parameters") "parameters")
   unless params.isEmpty && args.isEmpty do
@@ -8544,7 +8584,9 @@ private partial def inlineMultiFn (fnId : Nat) (args : Array CallArg) (at_ : Jso
   let some body := (field? fn "body").filter (!·.isNull)
     | failAt fn "function has no body"
   unless implemented do failAt fn "function has no body"
-  modify fun e => { e with stack := frame, currentFile := frameFile, unchecked := false, bodyAssigned := bodyAssignedIds body }
+  modify fun e => { e with
+    stack := frame, currentFile := frameFile,
+    unchecked := e.legacyWrapping, bodyAssigned := bodyAssignedIds body }
   let mods ← mArr (← mField fn "modifiers")
   let params ← mArr (← mField (← mField fn "parameters") "parameters")
   unless params.size == args.size do
@@ -8843,7 +8885,9 @@ private partial def lowerModifier (modInv : Json) : M (Array Stmt × Array Stmt)
       let saved ← get
       let savedYul := saved.yulNames
       let frameFile := saved.nodeFile.find? modId |>.getD saved.currentFile
-      modify fun e => { e with stack := modId :: saved.stack, currentFile := frameFile, unchecked := false, bodyAssigned := bodyAssignedIds body }
+      modify fun e => { e with
+        stack := modId :: saved.stack, currentFile := frameFile,
+        unchecked := e.legacyWrapping, bodyAssigned := bodyAssignedIds body }
       let mut pre : Array Stmt := #[]
       for i in [:params.size] do
         let p := params[i]!
@@ -8891,7 +8935,9 @@ private partial def lowerModifier (modInv : Json) : M (Array Stmt × Array Stmt)
   let savedHelperReturnId := saved.helperReturnId
   let frameFile := saved.nodeFile.find? modId |>.getD saved.currentFile
   let frame := modId :: saved.stack
-  modify fun e => { e with stack := frame, currentFile := frameFile, unchecked := false, bodyAssigned := bodyAssignedIds body }
+  modify fun e => { e with
+    stack := frame, currentFile := frameFile,
+    unchecked := e.legacyWrapping, bodyAssigned := bodyAssignedIds body }
   let mut pre : Array Stmt := #[]
   let mut yul := savedYul
   for i in [:params.size] do
@@ -10195,8 +10241,8 @@ private partial def lowerHelperFrom (stmts : List Json) (retName : String) :
           let (tail, res) ← lowerHelperFrom rest retName
           pure (inner ++ tail, res)
     | "VerityUncheckedEnd" =>
-        -- `unchecked` blocks cannot nest and inlined helpers start checked.
-        modify fun e => { e with unchecked := false }
+        -- `unchecked` blocks cannot nest; restore the compiler default.
+        modify fun e => { e with unchecked := e.legacyWrapping }
         lowerHelperFrom rest retName
     | "VariableDeclarationStatement" =>
         let pre ← lowerLocal s
@@ -15040,7 +15086,8 @@ private def importSlice
       if severity == "error" then
         throwError "solc: {optStr err "formattedMessage" |>.getD "error"}"
   let mut env := Env.init
-  env := { env with files := fileBytes }
+  let legacy := release.longVersion == "0.7.6+commit.7338295f"
+  env := { env with files := fileBytes, legacyWrapping := legacy, unchecked := legacy }
   let sourcesOut ← field parsed "sources"
   let .obj sourceUnits := sourcesOut | throwError "solc sources output is not an object"
   for (logical, _) in sourceUnits do
@@ -15057,6 +15104,10 @@ private def importSlice
   let some targetBases := env.contractBases.find? targetContractId
     | throwError "missing linearizedBaseContracts for {contract}"
   env := { env with linearizedBases := targetBases }
+  -- External decoding is generated in the target contract's source unit,
+  -- including for functions inherited from a differently configured base.
+  let entryAst ← field (← field sourcesOut entry) "ast"
+  let strictAbi := !legacy || legacyAbiV2 entryAst
   let contracts ← field parsed "contracts"
   let entryContracts ← field contracts entry
   let chosen ← field entryContracts contract
@@ -15075,6 +15126,8 @@ private def importSlice
   let mut rootIds : Array Nat := #[]
   for (functionName, written) in roots do
     let (fn, paramTys) ← (selectFunction contract functionName written).run' env
+    if legacy then
+      (validateLegacyDeclaration fn).run' env
     let rootId ← flexNat (← field fn "id")
     if rootIds.contains rootId then throwError "function {contract}.{functionName} is imported twice"
     if specs.any (·.name == functionName) then
@@ -15192,7 +15245,7 @@ private def importSlice
         -- occupy one offset word. Compute scalar offsets from the full ABI.
         let some i := modelParamNames.findIdx? (· == p.name)
           | throwError "missing scalar model parameter {p.name}"
-        let limit := match env.enumBounds.find? p.id with
+        let limit := if !strictAbi then none else match env.enumBounds.find? p.id with
           | some enumMax => some enumMax
           | none => match ty with
             | .uint8 => some (2^8)
@@ -15358,6 +15411,10 @@ private def importSlice
       sortedFields.push { name := rawStorageFieldName, ty := .uint256, slot := some (maxSlot + 1000) }
     else
       sortedFields
+  if legacy then
+    for reached in env.included do
+      if let some declaration := env.funs.find? reached.declId then
+        (validateLegacyDeclaration declaration).run' env
   let model : CompilationModel :=
     { name := contract, constructor := none, fields := sortedFields.toList,
       errors := env.usedErrors, events := env.usedEvents.map Prod.snd, functions := specs.toList }
@@ -15387,6 +15444,8 @@ private def importSlice
   let reportSrc ← moduleText sourceRoot "Compiler/SolidityImport/Report.lean"
   let quoteSrc ← moduleText sourceRoot "Compiler/SolidityImport/Quote.lean"
   let profileSrc ← moduleText sourceRoot "Compiler/SolidityImport/Profile.lean"
+  let legacySrc ← moduleText sourceRoot "Compiler/SolidityImport/Legacy.lean"
+  let exprHelpersSrc ← moduleText sourceRoot "Compiler/SolidityImport/ExprHelpers.lean"
   -- JSON framing prevents distinct file/signature lists from sharing a
   -- concatenation merely because their text contains separator newlines.
   let digestInput := Json.mkObj [
@@ -15398,7 +15457,8 @@ private def importSlice
     ("importerSources", Json.mkObj [
       ("Import.lean", Json.str importer), ("Coverage.lean", Json.str coverage),
       ("Report.lean", Json.str reportSrc), ("Quote.lean", Json.str quoteSrc),
-      ("Profile.lean", Json.str profileSrc)])]
+      ("Profile.lean", Json.str profileSrc), ("Legacy.lean", Json.str legacySrc),
+      ("ExprHelpers.lean", Json.str exprHelpersSrc)])]
   let digest := sha256Hex digestInput.compress.toUTF8
   let report : ImportReport :=
     { importerVersion, solcLongVersion := release.longVersion, solcSha256 := solcSha, settingsJson := settings.compress,

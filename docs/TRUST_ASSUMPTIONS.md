@@ -144,16 +144,26 @@ kernel-checked against those definitions. They inherit the model's layout, so
 they mean the Solidity storage member only as far as the imported layout does.
 
 The source digest hashes `Import.lean`, `Coverage.lean`, `Report.lean`,
-`Quote.lean`, and `Profile.lean` from
+`Quote.lean`, `Profile.lean`, `Legacy.lean`, and `ExprHelpers.lean` from
 the package that contains them: the Verity tree itself, or
 `.lake/packages/verity` when a downstream package elaborates the import. The
 pinned solc binary stays in the elaborating package's
-`.lake/solidity-import/solc-0.8.34` or `.lake/solidity-import/solc-0.8.10`.
+`.lake/solidity-import/solc-<version>` for the explicitly selected release.
+
+The experimental 0.7.6 scalar slice adds a version-dependent arithmetic default
+and per-source-unit ABI coder admission. Its conservative declaration boundary
+rejects unmodeled legacy exceptional halts and composite/dynamic ABI rather
+than interpreting them with 0.8 semantics. Its differential comparisons observe
+0.7.6/Istanbul source bytecode on an Osaka EVM and exclude gas. These are sampled
+execution checks; they establish neither frontend equivalence nor historical
+fork/deployed-bytecode equivalence. See `SOLIDITY_IMPORT.md` for the subset and
+reproduction commands. No proof axiom is added by this importer extension.
 
 The frontend is in the trust base. A covered model is not a proof that the
 model matches the Solidity source or solc's bytecode. `storageLayout` slots and
 packed offsets are copied from the pinned solc release selected by `Profile.solc`
-(`0.8.34+commit.80d5c536` or `0.8.10+commit.fc410830`; linux-amd64 and
+(`0.8.34+commit.80d5c536`, `0.8.26+commit.8a97fa7a`,
+`0.8.10+commit.fc410830`, or `0.7.6+commit.7338295f`; linux-amd64 and
 macosx-amd64 SHA-256 pins in `Import.lean`). Because `solc 0.8.10` lacks
 `--no-import-callback` and silently ignores unknown standard-JSON settings such
 as `"viaIR"`, the importer rejects `viaIR := true` on `0.8.10+commit.fc410830`,
@@ -315,7 +325,9 @@ The `kbak/verity` fork routes proof verification and Turbo-Lean jobs to disposab
 GitHub-hosted Ubuntu 24.04 machines. It uses GitHub caches/artifacts instead of
 the upstream shared disks and artifact hub. These caches remain operational
 inputs, not independent proof evidence. Validation commands, failure handling,
-and the final CI gate remain enabled. The fork does not provision the upstream
+and the final CI gate remain enabled. Restored Foundry executables are checked
+against the pinned version; a cache hit alone cannot satisfy tool installation.
+The fork does not provision the upstream
 OCR model service: OCR is explicitly skipped and supplies no semantic-review
 evidence. See [fork CI operations](FORK_CI.md) for rollout and limitations.
 

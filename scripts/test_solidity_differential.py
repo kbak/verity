@@ -1,4 +1,5 @@
 """Protocol, determinism and failure classification tests (stdlib only)."""
+import importlib
 import json
 from pathlib import Path
 import tempfile
@@ -7,7 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from solidity_differential.cases import generate, canonical
-from solidity_differential.engine import HarnessError, parse_evm, execute, command, run_bounded
+from solidity_differential.engine import HarnessError, parse_evm, execute, command, run_bounded, source_compiler
 from solidity_differential.programs import generated_campaign, source, smaller_expressions
 from solidity_differential.reduce import reduce_failure, signature
 from solidity_differential.mutations import mutation_campaign, snapshot, release
@@ -15,6 +16,46 @@ from solidity_differential.suite import run_checks, stateful_campaign
 
 
 class SolidityDifferentialTests(unittest.TestCase):
+    def test_mutation_anchors_match_current_sources(self):
+        from solidity_differential.check_storage_mutations import preflight_mutation_anchors
+        root = Path(__file__).resolve().parents[1]
+        preflight_mutation_anchors(root)
+        for module, default_source in (
+            ("check_byte_call_mutations", "Verity/Core/Model/Denote.lean"),
+            ("check_environment_mutations", "Compiler/SolidityImport/Import.lean"),
+            ("check_struct_abi_mutations", None),
+            ("check_scalar_array_abi_mutations", None),
+        ):
+            mutations = importlib.import_module("solidity_differential." + module).MUTANTS
+            for name, mutation in mutations.items():
+                relative, anchor = ((default_source, mutation[0]) if default_source
+                                    else mutation[:2])
+                with self.subTest(mutant=name):
+                    self.assertEqual((root / relative).read_text().count(anchor), 1)
+
+    def test_reference_compiler_selection_is_exact(self):
+        for unsupported in ("0.7.6", "0.7.6+commit.00000000", "0.8.35+commit.00000000"):
+            with self.subTest(unsupported=unsupported), self.assertRaisesRegex(HarnessError, "unpinned"):
+                source_compiler({"solc": unsupported})
+
+    def test_missing_reference_compiler_cannot_be_semantic_rejection(self):
+        with tempfile.TemporaryDirectory() as directory, \
+             patch("solidity_differential.engine.WORKSPACE", Path(directory)):
+            with self.assertRaisesRegex(HarnessError, "missing or checksum mismatch"):
+                source_compiler({"solc": "0.7.6+commit.7338295f"})
+
+    def test_tampered_reference_compiler_is_not_executed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binary = root / ".lake/solidity-import/solc-0.7.6"
+            binary.parent.mkdir(parents=True)
+            binary.write_text("not the pinned compiler")
+            with patch("solidity_differential.engine.WORKSPACE", root), \
+                 patch("solidity_differential.engine.command") as execute_compiler:
+                with self.assertRaisesRegex(HarnessError, "checksum mismatch"):
+                    source_compiler({"solc": "0.7.6+commit.7338295f"})
+                execute_compiler.assert_not_called()
+
     def test_mutant_build_is_private_with_a_sticky_cache(self):
         for sticky in (False, True):
             with self.subTest(sticky=sticky), tempfile.TemporaryDirectory() as temporary:
@@ -264,8 +305,9 @@ class SolidityDifferentialTests(unittest.TestCase):
                 "scalar-array-abi",
             ],
         )
-        self.assertEqual(len(captured), 61)
-        self.assertEqual(len(set(captured)), 61)
+        self.assertEqual(len(captured), 62)
+        self.assertEqual(len(set(captured)), 62)
+        self.assertIn("signed-mapping-keys", captured)
 
 if __name__ == "__main__":
     unittest.main()

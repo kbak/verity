@@ -74,6 +74,8 @@ lean_lib «SolidityImportSmoke» where
     .one `Contracts.SolidityImportSmoke.PhysicalMemoryFrameChecks,
     .one `Contracts.SolidityImportSmoke.AbiCoverageChecks,
     .one `Contracts.SolidityImportSmoke.ExplicitAbiChecks,
+    .one `Contracts.SolidityImportSmoke.YulFeeContextChecks,
+    .one `Contracts.SolidityImportSmoke.SignedMappingKeysSequenceModel,
     .one `Contracts.SolidityImportSmoke.SelectorIdentityChecks,
     .one `Contracts.SolidityImportSmoke.ScalarArrayAbiModel,
     .one `Contracts.SolidityImportSmoke.NestedDynamicStructAbiModel,
