@@ -1315,6 +1315,60 @@ def executeByteStaticCall (oracle : DenoteOracle) (fields : List Field)
   }
   return (.continue next, observed.touched)
 
+/-- Execute the legacy transports against an explicit byte-call environment.
+Missing instrumentation is an error, never an invented Solidity revert. -/
+def executeLegacySignatureCall (oracle : DenoteOracle) (fields : List Field)
+    (state : DenoteState) (mod : Compiler.ECM.ExternalCallModule)
+    (resultVar : String) (selector : Option Nat) (args : List Expr) :
+    Except String (StmtOutcome × List Verity.StorageKey) := do
+  let expected := match selector with
+    | none => Compiler.ECM.LegacySignatureCall.recoverModule resultVar
+    | some sel => Compiler.ECM.LegacySignatureCall.bytes4Module resultVar sel
+  unless mod == expected do throw "closed legacy signature transport metadata differs"
+  let some adversary := state.byteCallAdversary | throw "legacy call adversary missing"
+  let some gas := state.byteCallGas | throw "legacy call gas environment missing"
+  let some values := evalExprList oracle fields state args
+    | throw "legacy call argument evaluation unsupported"
+  let [a, b, c, d] := values | throw "legacy call requires four arguments"
+  let pointer := (state.world.memory 64).val
+  let write := fun (w : Verity.ContractState) p n =>
+    w.writePhysicalMemoryValue p (Verity.Core.Uint256.ofNat n)
+  let (target, size, prepared) := match selector with
+    | none =>
+      let w := write (write state.world pointer 0) 64 (pointer + 32)
+      let w := values.zipIdx.foldl (fun w (n, i) => write w (pointer + 32 + i * 32) n) w
+      (1, 128, w)
+    | some sel =>
+      let w := write (write (write (write state.world pointer (sel * 2^224))
+        (pointer + 4) b) (pointer + 36) 64) (pointer + 68) d
+      let rounded := ((d + 31) / 32) * 32
+      let w := (List.range ((d + 31) / 32)).foldl (fun w i =>
+        write w (pointer + 100 + i * 32) (w.memory (c + i * 32)).val) w
+      let tail := pointer + 100 + rounded - 32
+      let w := if d % 32 == 0 then w else
+        write w tail (Nat.land (w.memory tail).val (2^256 - 2^(8 * (rounded - d))))
+      (a % 2^160, 100 + rounded, w)
+  if selector.isSome && DenoteExternalCode.extCodeSize prepared
+      (Verity.Core.Address.ofNat target) == 0 then
+    return (.revertWithData [], [])
+  let input := if selector.isSome then pointer else pointer + 32
+  let request : ByteExternalCall.Request := {
+    kind := .staticcall, caller := prepared.thisAddress.val, target, value := 0, gas,
+    calldata := (List.range size).map fun i => UInt8.ofNat (prepared.physicalByte (input + i)).val }
+  let response ← ByteExternalCall.executeChecked adversary request prepared
+  if !response.success then return (.revertWithData response.returndata, response.touched)
+  if selector.isSome && response.returndata.length < 32 then
+    return (.revertWithData [], response.touched)
+  let world := response.world.copyPhysicalMemory (rawPhysicalByte response.returndata)
+    pointer 0 (min 32 response.returndata.length)
+  let mask := if selector.isSome then (2^32 - 1) * 2^224 else 2^160 - 1
+  let value := Nat.land (world.memory pointer).val mask
+  return (.continue { state with
+    world := world
+    bindings := bindValue state.bindings resultVar value
+    rawReturndata := some response.returndata
+    byteCallAccesses := state.byteCallAccesses ++ response.touched }, response.touched)
+
 /-- CREATE2 byte hash through the model Keccak oracle, as for error selectors. -/
 def oracleByteHash (oracle : DenoteOracle) : DenoteCreate2.ByteHash := fun bytes =>
   let raw := bytes.map fun byte => UInt8.ofNat byte.val
@@ -2136,6 +2190,15 @@ mutual
         | none => .revert
     | state, .ecm mod args =>
         match mod.byteTransport with
+        | some (.legacyRecover resultVar) =>
+            match executeLegacySignatureCall oracle fields state mod resultVar none args with
+            | .ok (outcome, _) => outcome
+            | .error _ => .revert
+        | some (.legacyBytes4 resultVar selector) =>
+            match executeLegacySignatureCall oracle fields state mod resultVar
+                (some selector) args with
+            | .ok (outcome, _) => outcome
+            | .error _ => .revert
         | some (.staticUint256 resultVar selector numStaticArgs) =>
             match executeByteStaticCall oracle fields state mod resultVar selector numStaticArgs args with
             | .ok (outcome, _) => outcome

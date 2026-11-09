@@ -92,6 +92,15 @@ def statementAccesses (oracle : DenoteOracle) (fields : List Field)
       return addressReads ++ valueReads ++ [.transient (wordNormalize slot)]
   | .ecm mod args => do
       match mod.byteTransport with
+      | some (.legacyRecover resultVar) =>
+          let reads ← args.mapM (expressionAccesses oracle fields state)
+          let (_, touched) ← executeLegacySignatureCall oracle fields state mod resultVar none args
+          return reads.flatten ++ touched
+      | some (.legacyBytes4 resultVar selector) =>
+          let reads ← args.mapM (expressionAccesses oracle fields state)
+          let (_, touched) ← executeLegacySignatureCall oracle fields state mod resultVar
+            (some selector) args
+          return reads.flatten ++ touched
       | some (.create2 _) | some (.log _ _) | some (.extCodeSize _) | some (.extCodeCopy _)
       | some .returnMemory | some .revertMemory =>
           -- CREATE2, LOG, EXTCODESIZE, EXTCODECOPY, RETURN and REVERT touch no persistent

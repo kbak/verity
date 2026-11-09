@@ -89,6 +89,17 @@ partial def quoteStmt : Stmt → m Term
   | .ecm module args => do
       let quotedArgs ← list (← args.mapM quoteExpr)
       match module.byteTransport with
+      | some (.legacyRecover resultVar) =>
+          unless module == Compiler.ECM.LegacySignatureCall.recoverModule resultVar do
+            throwError "internal: closed legacy recovery metadata differs"
+          `(Compiler.CompilationModel.Stmt.ecm
+            (Compiler.ECM.LegacySignatureCall.recoverModule $(quote resultVar)) $quotedArgs)
+      | some (.legacyBytes4 resultVar selector) =>
+          unless module == Compiler.ECM.LegacySignatureCall.bytes4Module resultVar selector do
+            throwError "internal: closed legacy bytes4 metadata differs"
+          `(Compiler.CompilationModel.Stmt.ecm
+            (Compiler.ECM.LegacySignatureCall.bytes4Module $(quote resultVar) $(quote selector))
+            $quotedArgs)
       | some (.staticUint256 resultVar selector numStaticArgs) =>
           let expected :=
             Compiler.ECM.SolidityStaticCall.uint256Module resultVar selector numStaticArgs

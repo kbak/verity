@@ -162,6 +162,12 @@ low-level `call`, `<address>.code.length`, `<address>.code` and the memory
 canonical module. -/
 def closedTransportCovered (mod : Compiler.ECM.ExternalCallModule) (args : List Expr) : Bool :=
   match mod.byteTransport with
+  | some (.legacyRecover resultVar) =>
+      mod == Compiler.ECM.LegacySignatureCall.recoverModule resultVar &&
+        args.length == 4 && exprListCovered args
+  | some (.legacyBytes4 resultVar selector) =>
+      mod == Compiler.ECM.LegacySignatureCall.bytes4Module resultVar selector &&
+        decide (selector < 2^32) && args.length == 4 && exprListCovered args
   | some (.staticUint256 ..) => staticUint256Covered mod args
   | some (.staticBool ..) => staticBoolCovered mod args
   | some (.staticBytesUint256 ..) => staticBytesUint256Covered mod args
@@ -392,6 +398,28 @@ theorem execStmt_ecm_staticBytesBool_arm (oracle : DenoteOracle) (fields : List 
       (match executeByteStaticBytesBoolCall oracle fields state
           (Compiler.ECM.SolidityStaticCall.bytesBoolModule resultVar selector)
           resultVar selector args with
+       | .ok (outcome, _) => outcome
+       | .error _ => .revert) := rfl
+
+/-- Pin the closed legacy call dispatch to its executable byte semantics. -/
+theorem execStmt_ecm_legacy_recover_arm (oracle : DenoteOracle) (fields : List Field)
+    (state : DenoteState) (resultVar : String) (args : List Expr) :
+    execStmt oracle fields state
+        (.ecm (Compiler.ECM.LegacySignatureCall.recoverModule resultVar) args) =
+      (match executeLegacySignatureCall oracle fields state
+          (Compiler.ECM.LegacySignatureCall.recoverModule resultVar)
+          resultVar none args with
+       | .ok (outcome, _) => outcome
+       | .error _ => .revert) := rfl
+
+/-- Pin the closed legacy call dispatch to its executable byte semantics. -/
+theorem execStmt_ecm_legacy_bytes4_arm (oracle : DenoteOracle) (fields : List Field)
+    (state : DenoteState) (resultVar : String) (selector : Nat) (args : List Expr) :
+    execStmt oracle fields state
+        (.ecm (Compiler.ECM.LegacySignatureCall.bytes4Module resultVar selector) args) =
+      (match executeLegacySignatureCall oracle fields state
+          (Compiler.ECM.LegacySignatureCall.bytes4Module resultVar selector)
+          resultVar (some selector) args with
        | .ok (outcome, _) => outcome
        | .error _ => .revert) := rfl
 
