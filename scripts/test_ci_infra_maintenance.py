@@ -345,7 +345,7 @@ class CiInfraMaintenanceTests(unittest.TestCase):
                                            VERITY_CI_ARTIFACT_ROOT=str(tmp / "store")))
             self.assertEqual(r.returncode, 2)
 
-    def test_parallel_build_jobs_use_four_lean_threads(self) -> None:
+    def test_parallel_build_jobs_keep_upstream_threads_and_bound_fork_threads(self) -> None:
         text = VERIFY_WORKFLOW.read_text(encoding="utf-8")
         for job in (
             "build-compiler-binaries",
@@ -354,7 +354,11 @@ class CiInfraMaintenanceTests(unittest.TestCase):
             match = re.search(rf"^  {job}:\n(?P<body>.*?)(?=^  [a-zA-Z0-9_-]+:|\Z)", text, re.S | re.M)
             self.assertIsNotNone(match, job)
             body = match.group("body")
-            self.assertIn("LEAN_NUM_THREADS: 4", body, job)
+            self.assertIn(
+                "LEAN_NUM_THREADS: ${{ github.repository == 'kbak/verity' && '2' || '4' }}",
+                body,
+                job,
+            )
             self.assertNotIn("LEAN_NUM_THREADS: 8", body, job)
 
 
