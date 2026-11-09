@@ -1,4 +1,4 @@
-import Compiler.SolidityImport.ExprHelpers
+import Compiler.SolidityImport.LegacyControlFlow
 
 /-! Conservative admission for the initial Solidity 0.7.6 scalar slice.
 The existing lowering remains responsible for admitting individual constructs.
@@ -97,9 +97,11 @@ partial def validateLegacyDeclaration (node : Json) : M Unit := do
           "BinaryOperation", "UnaryOperation", "Assignment", "Identifier", "Literal",
           "ElementaryTypeName", "ElementaryTypeNameExpression", "FunctionCall",
           "MemberAccess", "IndexAccess", "Mapping", "TupleExpression",
-          "UserDefinedTypeName", "OverrideSpecifier", "StructuredDocumentation"].contains kind do
+          "UserDefinedTypeName", "OverrideSpecifier", "StructuredDocumentation",
+          "ForStatement", "WhileStatement"].contains kind do
         failAt node s!"Solidity 0.7.6 scalar slice does not support {kind}"
       if kind == "FunctionDefinition" then
+        validateLegacyControlFlow node
         unless #[some "pure", some "view"].contains (optStr node "stateMutability") do
           failAt node "Solidity 0.7.6 scalar slice requires a read-only function"
       if let some ty := (field? node "typeDescriptions").bind (optStr · "typeString") then
@@ -139,10 +141,6 @@ partial def validateLegacyDeclaration (node : Json) : M Unit := do
           failAt node "Solidity 0.7.6 bytes indexing may execute INVALID"
         if (fixedBytesWidth? (← mType base)).isSome then
           failAt node "Solidity 0.7.6 fixed-bytes indexing may execute INVALID"
-      if kind == "BinaryOperation" || kind == "Assignment" then
-        if #[some "/", some "%", some "/=", some "%="].contains (optStr node "operator") then
-          failAt node ("Solidity 0.7.6 division/modulo may execute INVALID; " ++
-            "legacy exceptional halt is not modeled")
       if kind == "FunctionCall" && optStr node "kind" == some "typeConversion" then
         let target := (field? node "typeDescriptions").bind (optStr · "typeString") |>.getD ""
         unless target.startsWith "uint" || target.startsWith "address" ||

@@ -8,6 +8,9 @@ import sys
 from .engine import ROOT, WORKSPACE, MUTANT_BUILD_TIMEOUT, HarnessError, command, write_json
 
 MUTANTS = {
+    'import-legacy-loop-final-counter': ('Compiler/SolidityImport/Import.lean', '#[.assignVar binding (.localVar limit)]', '#[.assignVar binding (.literal 0)]'),
+    'import-legacy-division-operands': ('Compiler/SolidityImport/Import.lean', 'return { pre := a.pre ++ b.pre, expr := .div a.expr b.expr }', 'return { pre := a.pre ++ b.pre, expr := .div b.expr a.expr }'),
+    'import-legacy-guard-stability': ('Compiler/SolidityImport/LegacyControlFlow.lean', 'if writes.contains id then s else s.insert id', 'if writes.contains id && false then s else s.insert id'),
     'import-legacy-bytes-header': ('Compiler/SolidityImport/Import.lean', 'expr := .mload (.add (.sub buf.pointer (.literal 32)) off.expr)', 'expr := .mload (.add buf.pointer off.expr)'),
     'import-legacy-bytes-padding': ('Compiler/SolidityImport/AbiLowering.lean', '  , .mstore (.add data length) (.literal 0) ]', '  ]'),
     'import-legacy-bytes-byte-lane': ('Compiler/SolidityImport/Import.lean', '| "byte", #[a, b] => pure { pre, expr := .byte a b }', '| "byte", #[a, b] => pure { pre, expr := .byte (.add a (.literal 1)) b }'),
@@ -158,6 +161,14 @@ def mutation_campaign(output, selected=None):
                         "from solidity_differential.check_legacy_bytes import main; sys.exit(main())",
                         "--context", "zero", "--output", str(directory / ".lake/campaign"),
                         "--cases", "8", "--jobs", "1"]
+            if name in ("import-legacy-loop-final-counter", "import-legacy-division-operands",
+                        "import-legacy-guard-stability"):
+                function = "counted" if name == "import-legacy-loop-final-counter" else "arithmetic"
+                argv = [sys.executable, "-c",
+                        "import sys; sys.path.insert(0, 'scripts'); "
+                        "from solidity_differential.check_legacy_control_flow import main; sys.exit(main())",
+                        "--context", "zero", "--function", function, "--guard-probe",
+                        "--output", str(directory / ".lake/campaign"), "--cases", "0", "--jobs", "1"]
             # A pre-existing fixture divergence is not evidence that a mutation was
             # detected. Run the identical inputs in the private snapshot first.
             baseline_argv = [str(directory / ".lake/baseline") if arg == str(directory / ".lake/campaign")
