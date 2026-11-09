@@ -1,4 +1,5 @@
 import Compiler.SolidityImport.LegacyControlFlow
+import Compiler.SolidityImport.LegacyPacked
 
 /-! Conservative admission for the initial Solidity 0.7.6 scalar slice.
 The existing lowering remains responsible for admitting individual constructs.
@@ -76,10 +77,11 @@ def validateLegacyYulAssignment (node : Json) (ty : ParamType) (rhs : Expr) : M 
     failAt node "Solidity 0.7.6 Yul assignment to narrow local requires a bounded value"
 
 /-- Check every reached declaration, including helper bodies. Rejected constructs
-need separate legacy semantics and differential evidence before admission. -/
-partial def validateLegacyDeclaration (node : Json) : M Unit := do
+need separate legacy semantics and differential evidence before admission.
+`packedInput` admits construction only as the direct input to the hash builtin. -/
+partial def validateLegacyDeclaration (node : Json) (packedInput : Bool := false) : M Unit := do
   match node with
-  | .arr children => children.forM validateLegacyDeclaration
+  | .arr children => children.forM (validateLegacyDeclaration · packedInput)
   | .obj fields =>
     if optStr node "nodeType" == some "InlineAssembly" then
       let ast ← mField node "AST"
@@ -128,7 +130,7 @@ partial def validateLegacyDeclaration (node : Json) : M Unit := do
                 (← mType init) == "bytes memory" do
               failAt node "Solidity 0.7.6 bytes locals require an existing memory buffer"
       if kind == "FunctionCall" then
-        if (← mType node) == "bytes memory" then
+        if (← mType node) == "bytes memory" && !(packedInput && LegacyPacked.isEncoding node) then
           failAt node "Solidity 0.7.6 byte construction is outside the decoding slice"
       if kind == "Assignment" then
         if (← mType (← mField node "leftHandSide")) == "bytes memory" then
@@ -164,12 +166,17 @@ partial def validateLegacyDeclaration (node : Json) : M Unit := do
           -- Legacy builtins retain duplicate negative overloadedDeclarations.
           -- Ordinary reference/overload resolution is checked by the lowering.
           if let some id := (field? callee "referencedDeclaration").bind (·.getInt?.toOption) then
-            let allowed := #[some "require", some "revert", some "ecrecover"]
+            let allowed := #[some "require", some "revert", some "ecrecover", some "keccak256"]
             if id < 0 && !allowed.contains (optStr callee "name") then
               failAt node ("Solidity 0.7.6 builtin call is outside the scalar slice " ++
                 "(assert/INVALID is not modeled)")
-    for (_, child) in fields do
-      validateLegacyDeclaration child
+    let callee := field? node "expression" |>.getD Json.null
+    let isHash := optStr node "nodeType" == some "FunctionCall" &&
+      optStr callee "nodeType" == some "Identifier" &&
+      optStr callee "name" == some "keccak256" &&
+      ((field? callee "referencedDeclaration").bind (·.getInt?.toOption)) == some (-8)
+    for (key, child) in fields do
+      validateLegacyDeclaration child (isHash && key == "arguments")
   | _ => pure ()
 
 /-- Solidity 0.7.6 defaults to ABI coder v1. External decoding uses the

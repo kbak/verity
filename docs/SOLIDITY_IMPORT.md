@@ -1347,7 +1347,7 @@ python3 scripts/solidity_import_mutations.py --jobs 2 \
 ```
 
 This slice alone does not import a complete multisignature authorization path.
-Dynamic byte construction, packed-message hashing, general external signatures,
+Dynamic byte construction beyond static packed hashing, general external signatures,
 and ABI-v2 byte decoding remain outside the legacy boundary. Full downstream integration,
 authorization proofs and duplicate-signature mutation checks remain separate work.
 
@@ -1396,3 +1396,33 @@ assignment itself is tested even for huge addresses because it does not read
 memory. General continuing memory writes, byte allocation, byte indexing,
 dynamic byte returns, ABI-v2 byte decoding and assembly control flow remain
 rejected. The transports retain `assumed` proof status; no new axiom is introduced.
+
+
+## Legacy static packed hashing
+
+The explicit 0.7.6 profile admits `keccak256(abi.encodePacked(...))` at ABI-coder-v1
+sites, with literal strings/hex bytes, unsigned integers, addresses, booleans and
+fixed bytes. Arguments may be scalar identifiers, member reads or conversions;
+helper calls, nested hashes, arithmetic and assignments inside the packed argument
+list remain rejected. Compute such values in prior statements. The source unit
+containing the encoding determines the ABI-coder restriction, including helpers.
+
+This path writes the payload directly at `mload(64) + 32`. It then writes its
+length header and advances the free-memory pointer to the exact end, without
+word rounding. Literal chunks and cleaned scalar values use overlapping 32-byte
+stores, retaining their trailing writes and pre-existing memory beyond them.
+Empty encodings allocate a length word. Hashes in subsequent statements and loops
+observe the resulting, possibly unaligned, pointer. The modern encoder is unchanged.
+
+`check_legacy_packed_hash` compares source EVM, Denote and generated EVM with
+independent packed-byte hashes, physical-memory expectations and recovery vectors.
+It covers scalar widths, empty/multibyte/long literals, decoder allocations,
+unaligned memory observation, repeated hashing, loops and precompile scratch
+memory. `check_legacy_packed_rejections` checks the located rejection boundary.
+The `import-legacy-packed-*` mutations target allocation rounding, length headers
+and scalar alignment. These are finite functional checks, not a proof of source
+correspondence or cryptographic correctness; gas/resource exhaustion is excluded.
+
+Dynamic packed arguments, direct hashing of arbitrary buffers, packed buffers as
+helper arguments or local initializers/returns and ABI-v2 packed encoding need separate semantics and
+evidence. This extension does not establish application authorization properties.

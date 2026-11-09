@@ -5757,6 +5757,7 @@ private partial def lowerEncodedBytes (j : Json) : M EncodedBytes := do
       | failAt j "abi.decode byte buffer expression requires a bytes or string target type"
     return { pre := decodePre ++ buf.pre, pointer := buf.pointer, size := buf.size }
   if optStr callee "memberName" == some "encodePacked" then
+    if (← get).legacyWrapping then return ← LegacyPacked.lower j lowerExpr
     return ← lowerPacked args
   if optStr callee "memberName" == some "encodeWithSelector" then
     unless args.size ≥ 1 do
@@ -6882,6 +6883,9 @@ private partial def lowerCall (j : Json) : M Val := do
       if calleeId == -8 then
         let args ← mArr (← mField j "arguments")
         unless args.size == 1 do failAt j "keccak256 requires one byte buffer"
+        if (← get).legacyWrapping then
+          unless LegacyPacked.isEncoding args[0]! do
+            failAt args[0]! "legacy hashing requires abi.encodePacked with static arguments"
         let bytes ← lowerEncodedBytes args[0]!
         return { pre := bytes.pre, expr := .keccak256 bytes.pointer bytes.size }
       if calleeId == -2 || calleeId == -16 then
@@ -15547,6 +15551,7 @@ private def importSlice
   let abiLoweringSrc ← moduleText sourceRoot "Compiler/SolidityImport/AbiLowering.lean"
   let exprHelpersSrc ← moduleText sourceRoot "Compiler/SolidityImport/ExprHelpers.lean"
   let bytePointersSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyBytePointers.lean"
+  let packedSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyPacked.lean"
   let signatureSrc ← moduleText sourceRoot "Verity/Core/Model/LegacySignatureCalls.lean"
   let ecmSrc ← moduleText sourceRoot "Verity/Core/Model/ECM.lean"
   let denoteSrc ← moduleText sourceRoot "Verity/Core/Model/Denote.lean"
@@ -15564,6 +15569,7 @@ private def importSlice
       ("Profile.lean", Json.str profileSrc), ("Legacy.lean", Json.str legacySrc),
       ("LegacyControlFlow.lean", Json.str legacyFlowSrc),
       ("LegacyBytePointers.lean", Json.str bytePointersSrc),
+      ("LegacyPacked.lean", Json.str packedSrc),
       ("AbiLowering.lean", Json.str abiLoweringSrc),
       ("ExprHelpers.lean", Json.str exprHelpersSrc),
       ("LegacySignatureCalls.lean", Json.str signatureSrc),
