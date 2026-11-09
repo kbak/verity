@@ -56,10 +56,10 @@ env:
 jobs:
   turbo-lean-verify:
     name: Turbo-Lean Two-Level CAS & Theorem Shard Check
-    runs-on: [self-hosted, linux, x64, verity, build, build-heavy]
+    runs-on: ${{ fromJSON(github.repository == 'kbak/verity' && '["ubuntu-24.04"]' || '["self-hosted","linux","x64","verity","build","build-heavy"]') }}
     timeout-minutes: 60
     env:
-      LEAN_NUM_THREADS: 8
+      LEAN_NUM_THREADS: ${{ github.repository == 'kbak/verity' && '2' || '8' }}
       # CI only needs verdicts; keep turbo-lean from spooling telemetry under ~/.cache.
       TURBO_LEAN_TELEMETRY: "off"
     steps:
@@ -78,15 +78,15 @@ jobs:
         uses: ./.github/actions/setup-lean
         with:
           cache-key-prefix: turbo-lean
-          use-sticky-disks: true
+          use-sticky-disks: ${{ github.repository != 'kbak/verity' }}
           sticky-disk-key-prefix: turbo-lean
           # Same packages tree as verify.yml's proof jobs (no LEAN_CC): share one host copy.
           lake-packages-sticky-key: lake-packages-verify-${{ env.VERIFY_CACHE_BUCKET }}-${{ runner.os }}-${{ hashFiles('lean-toolchain') }}-${{ hashFiles('lakefile.lean') }}-${{ hashFiles('lake-manifest.json') }}
           lake-packages-main-fallback-sticky-key: ${{ github.event_name == 'pull_request' && format('lake-packages-verify-{0}-{1}-{2}-{3}-{4}', env.VERIFY_MAIN_CACHE_BUCKET, runner.os, hashFiles('lean-toolchain'), hashFiles('lakefile.lean'), hashFiles('lake-manifest.json')) || '' }}
-          use-build-sticky-disk: true
+          use-build-sticky-disk: ${{ github.repository != 'kbak/verity' }}
           build-sticky-disk-key: turbo-lean-build-${{ env.VERIFY_CACHE_BUCKET }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('lean-toolchain') }}-${{ hashFiles('lakefile.lean') }}-${{ hashFiles('lake-manifest.json') }}
           build-main-fallback-sticky-key: ${{ github.event_name == 'pull_request' && format('turbo-lean-build-{0}-{1}-{2}-{3}-{4}-{5}', env.VERIFY_MAIN_CACHE_BUCKET, runner.os, runner.arch, hashFiles('lean-toolchain'), hashFiles('lakefile.lean'), hashFiles('lake-manifest.json')) || '' }}
-          disable-lake-cache-restore: "true"
+          disable-lake-cache-restore: ${{ github.repository != 'kbak/verity' }}
 
       - name: Run turbo-lean CAS Import, Shard Check & GDSF GC
         uses: Th0rgal/turbo-lean@1949eaac9d790d1dd13e357d45aad010fa0be644 # v0.1.0 (Season 14 / audit-spec v2.1)
