@@ -8,6 +8,12 @@ import sys
 from .engine import ROOT, WORKSPACE, MUTANT_BUILD_TIMEOUT, HarnessError, command, write_json
 
 MUTANTS = {
+    'ecm-legacy-code-existence': ('Verity/Core/Model/LegacySignatureCalls.lean',
+        '.if_ (.call "iszero" [.call "extcodesize" [target]])', '.if_ (.lit 0)'),
+    'ecm-legacy-recovery-stale': ('Verity/Core/Model/LegacySignatureCalls.lean',
+        'store ptr (.lit 0),', ''),
+    'ecm-legacy-validator-selector': ('Verity/Core/Model/LegacySignatureCalls.lean',
+        'store ptr (.lit (selector * 2^224))', 'store ptr (.lit ((selector + 1) * 2^224))'),
     'import-legacy-loop-final-counter': ('Compiler/SolidityImport/Import.lean', '#[.assignVar binding (.localVar limit)]', '#[.assignVar binding (.literal 0)]'),
     'import-legacy-division-operands': ('Compiler/SolidityImport/Import.lean', 'return { pre := a.pre ++ b.pre, expr := .div a.expr b.expr }', 'return { pre := a.pre ++ b.pre, expr := .div b.expr a.expr }'),
     'import-legacy-guard-stability': ('Compiler/SolidityImport/LegacyControlFlow.lean', 'if writes.contains id then s else s.insert id', 'if writes.contains id && false then s else s.insert id'),
@@ -169,6 +175,12 @@ def mutation_campaign(output, selected=None):
                         "from solidity_differential.check_legacy_control_flow import main; sys.exit(main())",
                         "--context", "zero", "--function", function, "--guard-probe",
                         "--output", str(directory / ".lake/campaign"), "--cases", "0", "--jobs", "1"]
+            if name in ("ecm-legacy-recovery-stale", "ecm-legacy-validator-selector",
+                        "ecm-legacy-code-existence"):
+                argv = [sys.executable, "-c",
+                        "import sys; sys.path.insert(0, 'scripts'); "
+                        "from solidity_differential.check_legacy_signature_calls import main; sys.exit(main())",
+                        "--output", str(directory / ".lake/campaign"), "--random-cases", "0"]
             # A pre-existing fixture divergence is not evidence that a mutation was
             # detected. Run the identical inputs in the private snapshot first.
             baseline_argv = [str(directory / ".lake/baseline") if arg == str(directory / ".lake/campaign")

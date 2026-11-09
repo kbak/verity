@@ -6506,6 +6506,36 @@ private partial def lowerInterfaceStaticCall (j : Json) : M Val := do
     let rs ← mArr (← mField (← mField decl "returnParameters") "parameters")
     pure (ps, ← rs.mapM mType)
   let rawParamTypes ← params.mapM mType
+  if env.legacyWrapping then
+    if env.legacyAbiV2Files.contains env.currentFile then
+      failAt j "legacy bytes4 external calls require ABI coder v1 at the call site"
+    unless mutability == some "view" && rawParamTypes == #["bytes32", "bytes"] &&
+        rawReturnTypes == #["bytes4"] do
+      failAt j "Solidity 0.7.6 external calls require (bytes32, bytes) view returns (bytes4)"
+    let args ← mArr (← mField j "arguments")
+    unless args.size == 2 && (← mType args[1]!) == "bytes memory" do
+      failAt j "legacy bytes4 call requires an existing bytes memory buffer"
+    let base ← mField callee "expression"
+    unless optStr base "kind" == some "typeConversion" do
+      failAt base "legacy bytes4 receiver requires an explicit contract conversion"
+    let receiver ← mArr (← mField base "arguments")
+    unless receiver.size == 1 && (← mType receiver[0]!) == "address" do
+      failAt base "legacy bytes4 receiver requires an address"
+    for arg in receiver ++ args do
+      if statefulCallIn arg env || assignmentIn arg then
+        failAt arg "legacy call arguments require explicit evaluation-order support"
+    let some hex := optStr decl "functionSelector"
+      | failAt callee "legacy bytes4 call has no selector"
+    let some selector := Compiler.Hex.parseHexNat? ("0x" ++ hex)
+      | failAt callee "legacy bytes4 selector is invalid"
+    unless hex.length == 8 do failAt callee "legacy bytes4 selector length is invalid"
+    let target ← atom (← lowerExpr receiver[0]!)
+    let hash ← atom (← convert "bytes32" (← mType args[0]!) (← lowerExpr args[0]!) args[0]!)
+    let data ← lowerEncodedBytes args[1]!
+    let result ← fresh
+    let call := Stmt.ecm (Compiler.ECM.LegacySignatureCall.bytes4Module result selector)
+      [target.expr, hash.expr, data.pointer, data.size]
+    return { pre := (target.pre ++ hash.pre ++ data.pre).push call, expr := .localVar result }
   let paramTypes := rawParamTypes.map fun ty =>
     if env.stateVars.size > 1 && ty.startsWith "contract " then "address" else ty
   let args ← mArr (← mField j "arguments")
@@ -6823,6 +6853,23 @@ private partial def lowerCall (j : Json) : M Val := do
     let callee ← mField j "expression"
     if (← mKind callee) == "Identifier" then
       let calleeId ← refInt callee
+      if calleeId < 0 && optStr callee "name" == some "ecrecover" then
+        unless (← get).legacyWrapping &&
+            (← mType callee) == "function (bytes32,uint8,bytes32,bytes32) pure returns (address)" do
+          failAt callee "ecrecover currently requires the explicit Solidity 0.7.6 profile"
+        let args ← mArr (← mField j "arguments")
+        unless args.size == 4 do failAt j "ecrecover requires four arguments"
+        let mut pre : Array Stmt := #[]
+        let mut values : List Expr := []
+        for (arg, ty) in args.zip #["bytes32", "uint8", "bytes32", "bytes32"] do
+          if statefulCallIn arg (← get) || assignmentIn arg then
+            failAt arg "ecrecover arguments require explicit evaluation-order support"
+          let value ← atom (← convert ty (← mType arg) (← lowerExpr arg) arg)
+          pre := pre ++ value.pre
+          values := values ++ [value.expr]
+        let result ← fresh
+        let call := Stmt.ecm (Compiler.ECM.LegacySignatureCall.recoverModule result) values
+        return { pre := pre.push call, expr := .localVar result }
       if calleeId == -8 then
         let args ← mArr (← mField j "arguments")
         unless args.size == 1 do failAt j "keccak256 requires one byte buffer"
@@ -15109,6 +15156,8 @@ private def importSlice
     let unit ← field sourcesOut logical
     let ast ← field unit "ast"
     ((), env) ← (index logical none ast).run env
+    if legacy && legacyAbiV2 ast then
+      env := { env with legacyAbiV2Files := logical :: env.legacyAbiV2Files }
   let targetContractIds := env.contractNames.toList.filterMap fun (cid, cname) =>
     if env.nodeFile.find? cid == some entry && cname == contract then some cid else none
   let [targetContractId] := targetContractIds
@@ -15467,6 +15516,9 @@ private def importSlice
   let legacyFlowSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyControlFlow.lean"
   let abiLoweringSrc ← moduleText sourceRoot "Compiler/SolidityImport/AbiLowering.lean"
   let exprHelpersSrc ← moduleText sourceRoot "Compiler/SolidityImport/ExprHelpers.lean"
+  let signatureSrc ← moduleText sourceRoot "Verity/Core/Model/LegacySignatureCalls.lean"
+  let ecmSrc ← moduleText sourceRoot "Verity/Core/Model/ECM.lean"
+  let denoteSrc ← moduleText sourceRoot "Verity/Core/Model/Denote.lean"
   -- JSON framing prevents distinct file/signature lists from sharing a
   -- concatenation merely because their text contains separator newlines.
   let digestInput := Json.mkObj [
@@ -15481,7 +15533,9 @@ private def importSlice
       ("Profile.lean", Json.str profileSrc), ("Legacy.lean", Json.str legacySrc),
       ("LegacyControlFlow.lean", Json.str legacyFlowSrc),
       ("AbiLowering.lean", Json.str abiLoweringSrc),
-      ("ExprHelpers.lean", Json.str exprHelpersSrc)])]
+      ("ExprHelpers.lean", Json.str exprHelpersSrc),
+      ("LegacySignatureCalls.lean", Json.str signatureSrc),
+      ("ECM.lean", Json.str ecmSrc), ("Denote.lean", Json.str denoteSrc)])]
   let digest := sha256Hex digestInput.compress.toUTF8
   let report : ImportReport :=
     { importerVersion, solcLongVersion := release.longVersion, solcSha256 := solcSha, settingsJson := settings.compress,

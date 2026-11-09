@@ -493,6 +493,7 @@ DIFFERENTIAL_MUTANTS = (
     'import-legacy-loop-final-counter',
     'import-legacy-division-operands',
     'import-legacy-guard-stability',
+    'ecm-legacy-recovery-stale', 'ecm-legacy-validator-selector', 'ecm-legacy-code-existence',
     'import-legacy-bytes-header',
     'import-legacy-bytes-padding',
     'import-legacy-bytes-byte-lane',

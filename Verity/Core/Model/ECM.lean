@@ -14,6 +14,7 @@
 import Verity.Core.Model.Constants
 import Verity.Core.Model.ProofStatus
 import Verity.Core.Model.Yul.Ast
+import Verity.Core.Model.LegacySignatureCalls
 
 namespace Compiler.ECM
 
@@ -118,6 +119,10 @@ structure CompilationContext where
 /-- Data-only external transport that has canonical compilation/denotation.
 Tagged modules do not execute an arbitrary compilation closure. -/
 inductive ByteTransport where
+  /-- Solidity 0.7.6 ECDSA precompile call, with explicit byte-world semantics. -/
+  | legacyRecover (resultVar : String)
+  /-- ABI v1 view call `(bytes32, bytes) returns (bytes4)`. -/
+  | legacyBytes4 (resultVar : String) (selector : Nat)
   | staticUint256 (resultVar : String) (selector numStaticArgs : Nat)
   | staticBool (resultVar : String) (selector numStaticArgs : Nat)
   | staticBytesUint256 (resultVar : String) (selector : Nat)
@@ -920,6 +925,37 @@ def module : ExternalCallModule where
 
 end SolidityRevertMemory
 
+namespace LegacySignatureCall
+
+/-- Closed legacy recovery transport. The external byte world supplies the
+precompile response; neither cryptography nor Yul equivalence is proved here. -/
+def recoverModule (resultVar : String) : ExternalCallModule where
+  name := "solidityLegacyRecover"
+  numArgs := 4
+  resultVars := [resultVar]
+  writesState := false
+  readsState := true
+  compile := fun _ args => LegacySignatureCalls.recover resultVar args
+  byteTransport := some (.legacyRecover resultVar)
+  proofStatus := .assumed
+  summaryName := "legacy_recovery_byte_response"
+
+/-- Closed generic ABI v1 bytes4 validator transport; the selector is not fixed
+to any particular standard or contract. -/
+def bytes4Module (resultVar : String) (selector : Nat) : ExternalCallModule where
+  name := "solidityLegacyBytes4"
+  numArgs := 4
+  resultVars := [resultVar]
+  writesState := false
+  readsState := true
+  compile := fun _ args => LegacySignatureCalls.validate resultVar selector args
+  byteTransport := some (.legacyBytes4 resultVar selector)
+  proofStatus := .assumed
+  summaryName := "legacy_bytes4_byte_response"
+  summarySelector := some selector
+
+end LegacySignatureCall
+
 namespace ExternalCallModule
 
 /-- Compile closed byte transports from their data descriptor. Their metadata
@@ -929,6 +965,14 @@ def compileCanonical (module : ExternalCallModule) (context : CompilationContext
     (args : List YulExpr) : Except String (List YulStmt) := do
   match module.byteTransport with
   | none => module.compile context args
+  | some (.legacyRecover resultVar) =>
+      unless module == LegacySignatureCall.recoverModule resultVar do
+        throw "closed legacy recovery metadata differs"
+      LegacySignatureCalls.recover resultVar args
+  | some (.legacyBytes4 resultVar selector) =>
+      unless module == LegacySignatureCall.bytes4Module resultVar selector do
+        throw "closed legacy bytes4 metadata differs"
+      LegacySignatureCalls.validate resultVar selector args
   | some (.staticUint256 resultVar selector numStaticArgs) =>
       let expected := SolidityStaticCall.uint256Module resultVar selector numStaticArgs
       unless module == expected do

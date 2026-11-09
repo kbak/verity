@@ -144,7 +144,7 @@ partial def validateLegacyDeclaration (node : Json) : M Unit := do
       if kind == "FunctionCall" && optStr node "kind" == some "typeConversion" then
         let target := (field? node "typeDescriptions").bind (optStr · "typeString") |>.getD ""
         unless target.startsWith "uint" || target.startsWith "address" ||
-            (fixedBytesWidth? target).isSome do
+            (fixedBytesWidth? target).isSome || target.startsWith "contract " do
           failAt node "Solidity 0.7.6 scalar slice admits only unsigned/address conversions"
         for arg in (← mArr (← mField node "arguments")) do
           let source := (field? arg "typeDescriptions").bind (optStr · "typeString") |>.getD ""
@@ -156,12 +156,16 @@ partial def validateLegacyDeclaration (node : Json) : M Unit := do
         let callee ← mField node "expression"
         let ty := (field? callee "typeDescriptions").bind (optStr · "typeString") |>.getD ""
         if (ty.splitOn " external").length > 1 then
-          failAt node "Solidity 0.7.6 external calls are outside the scalar slice"
+          -- The lowering independently resolves and validates the declaration,
+          -- receiver, argument types and ABI-v1 bytes4 return transport.
+          unless ty == "function (bytes32,bytes memory) view external returns (bytes4)" do
+            failAt node "Solidity 0.7.6 external calls require the ABI-v1 bytes4 view slice"
         if optStr callee "nodeType" == some "Identifier" then
           -- Legacy builtins retain duplicate negative overloadedDeclarations.
           -- Ordinary reference/overload resolution is checked by the lowering.
           if let some id := (field? callee "referencedDeclaration").bind (·.getInt?.toOption) then
-            if id < 0 && !#[some "require", some "revert"].contains (optStr callee "name") then
+            let allowed := #[some "require", some "revert", some "ecrecover"]
+            if id < 0 && !allowed.contains (optStr callee "name") then
               failAt node ("Solidity 0.7.6 builtin call is outside the scalar slice " ++
                 "(assert/INVALID is not modeled)")
     for (_, child) in fields do

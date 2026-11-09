@@ -1,5 +1,6 @@
 import Verity.Core.Model.DenoteByteExternalCalls
 import Lean.Data.Json
+import Compiler.Keccak.Sponge
 
 /-! Explicit configurable raw-oracle program for differential validation.
 Its three storage slots are value, boolean failure, and response length. The
@@ -105,6 +106,28 @@ def wordEnvironment (accounts : List Nat) (gas : Nat) (emptyAccounts : List Nat 
           request.target != world.thisAddress.val && !reservedPrecompile request.target &&
           (accounts.contains request.target || emptyAccounts.contains request.target) } }
 
+/-- `SignatureCallOracle`: hash all calldata at scratch offset 128 before
+writing the response at zero. Unlike a linear word fold, selector changes remain
+observable even when a caller retains only the high four response bytes. -/
+def hashEnvironment (accounts : List Nat) (gas : Nat) (emptyAccounts : List Nat := []) :
+    ByteCallEnvironment :=
+  { gas := some gas
+    adversary := some { (staticAdversary fun request world =>
+      if accounts.contains request.target then
+        let slot := fun index => (world.storageWords (.contractSlot request.target index)).val
+        let digest := (KeccakEngine.keccak256 (ByteArray.mk request.calldata.toArray)).data.foldl
+          (fun n b => n * 256 + b.toNat) 0
+        let word := Nat.xor (slot 0) (Nat.land digest (slot 3))
+        let bytes := responseBytes word (min (slot 2) 128) ++
+          (List.range (slot 2 - 128)).map (fun i => request.calldata.getD i 0)
+        (slot 1 % 256 == 0, bytes,
+          (List.range 4).map (Verity.StorageKey.contractSlot request.target))
+      else (true, [], [])) with
+        accepts := fun request world =>
+          request.kind == .staticcall && request.value == 0 &&
+          request.target != world.thisAddress.val && !reservedPrecompile request.target &&
+          (accounts.contains request.target || emptyAccounts.contains request.target) } }
+
 private def decimal (value : Lean.Json) : Except String Nat := do
   let text ← value.getStr?
   let some n := text.toNat? | throw "oracle mock expects decimal words"
@@ -116,8 +139,8 @@ The account list is a code deployment model, not inferred from requested slots. 
 def configure (input : Lean.Json) : Except String ByteCallEnvironment := do
   let config ← input.getObjVal? "byteCallEnvironment"
   let program ← config.getObjValAs? String "program"
-  unless ["raw-static-oracle-v1", "checked-static-oracle-v1", "word-static-oracle-v1"].contains
-      program do
+  unless ["raw-static-oracle-v1", "checked-static-oracle-v1", "word-static-oracle-v1",
+      "hash-static-oracle-v1"].contains program do
     throw "unsupported byte-call mock program"
   let caller ← decimal (← input.getObjVal? "account")
   let accounts ← (← (← config.getObjVal? "accounts").getArr?).toList.mapM fun entry => do
@@ -136,7 +159,8 @@ def configure (input : Lean.Json) : Except String ByteCallEnvironment := do
     return address
   unless emptyAccounts.eraseDups.length == emptyAccounts.length do throw "duplicate empty mock account"
   let gas ← decimal (← config.getObjVal? "gas")
-  return if program == "checked-static-oracle-v1" then checkedEnvironment accounts gas emptyAccounts
+  return if program == "hash-static-oracle-v1" then hashEnvironment accounts gas emptyAccounts
+    else if program == "checked-static-oracle-v1" then checkedEnvironment accounts gas emptyAccounts
     else if program == "word-static-oracle-v1" then wordEnvironment accounts gas emptyAccounts
     else environment accounts gas emptyAccounts
 

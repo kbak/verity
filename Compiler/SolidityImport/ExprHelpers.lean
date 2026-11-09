@@ -79,6 +79,8 @@ def sha256Hex (bytes : ByteArray) : String :=
 
 structure Env where
   sourceNames : List String
+  /-- Source units whose internal external-call sites use legacy ABI coder v2. -/
+  legacyAbiV2Files : List String := []
   nodeFile : RBMap Nat String compare
   files : RBMap String ByteArray compare
   funs : RBMap Nat Json compare

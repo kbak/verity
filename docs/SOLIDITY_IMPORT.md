@@ -101,8 +101,9 @@ select validation in the target contract's source unit. Inherited functions
 use the target contract's decoder, even when their defining file selects the
 other coder. Except for ABI coder v1 memory bytes described below, dynamic and
 aggregate ABI, signed arithmetic, enum conversions,
-narrow fixed-bytes root ABI, modifiers, general assembly, external calls,
-and builtins other than `require`/`revert` remain outside the legacy slice.
+narrow fixed-bytes root ABI, modifiers, general assembly, and general external calls
+remain outside the legacy slice. Builtins are limited to `require`, `revert`, and
+the `ecrecover` extension described below.
 The fixed-byte and terminal memory-revert extension below admits additional
 local/helper conversions and a bounded assembly form.
 Division and modulo require the path evidence described below: 0.7.6 can
@@ -231,8 +232,8 @@ python3 scripts/solidity_import_mutations.py --jobs 3 \
 
 This remains an experimental import/Denote execution slice. Finite differential
 checks do not establish universal source/compiler correspondence or authorization
-properties for a signature-checking application. Recovery, external validation,
-and the surrounding iteration/bounds logic require their own extensions.
+properties for a signature-checking application. Recovery and external validation have the bounded extension below; full
+application authorization still requires downstream integration and proofs.
 
 
 
@@ -1291,3 +1292,56 @@ metamorphic source variants (`check_storage --fixture unchecked-blocks` /
 the right of tuple assignments are supported when their components satisfy the evaluation-order checks.
 
 Whole-contract frame proofs can use `Transactions.AdversarialEntryPointSequence` and `invariant_of_adversarial_entry_points` to vary both the transaction context and permitted oracle at each public call. Every permitted oracle must satisfy the actual per-entry-point execution obligation. The rule includes observed reverting frames through rollback; ABI decoding, dispatch and value transfers remain separate obligations. `adversarial_sequence_append` composes observed prefixes.
+
+
+## Legacy recovery and byte-signature validation
+
+The explicit 0.7.6 profile admits the resolved global
+`ecrecover(bytes32,uint8,bytes32,bytes32)` builtin. Conversion to `uint8` takes
+place before encoding. A closed byte transport calls precompile address 1,
+reserves a zeroed output word and uses the legacy compiler's scratch layout.
+Invalid signatures can return no bytes, leaving the zero address. This does not
+impose a low-`s` policy: valid high-`s` signatures remain valid for the precompile.
+See the [versioned Solidity documentation](https://docs.soliditylang.org/en/v0.7.6/units-and-global-variables.html#mathematical-and-cryptographic-functions).
+
+A resolved `view` interface or abstract virtual function with signature
+`(bytes32, bytes memory) returns (bytes4)` is admitted through an explicit
+contract conversion of an address. The selector is derived from the declaration;
+no method name, magic value or benchmark contract is hard-coded. This includes
+the [ERC-1271 method](https://eips.ethereum.org/EIPS/eip-1271).
+The transport ABI-encodes the complete buffer, checks code existence, uses
+`STATICCALL`, forwards a failed child's exact bytes, rejects successful responses
+shorter than one ABI word, and cleans the trailing 28 bytes of the returned word
+as ABI coder v1 does. Extra return bytes are ignored. The source chooses how to
+compare the result and what error to raise. Argument assignments and nested
+stateful calls remain rejected because their evaluation order needs separate
+support. Empty-code and precompile targets fail the legacy code-existence check.
+
+Both transports use an explicitly supplied byte-call environment in Denote.
+Absent instrumentation or requests outside that environment's domain are errors,
+not evidence of a Solidity revert. The model does not prove secp256k1 recovery or
+assume that an arbitrary validator authorizes correctly. Compilation transport
+proof status remains `assumed`; dispatch equations and coverage are checked, but
+they are not a proof of Yul or Solidity equivalence. Gas equivalence is excluded.
+
+`check_legacy_signature_calls` compares source EVM, Denote, and compiled-model EVM
+with independent `eth-keys` recovery calculations. Cases include valid low/high-s
+signatures, zero/out-of-range scalars, invalid v, uint8 truncation, repeated
+recovery with an invalid second signature, memory-layout observation, calldata
+hashing, dirty/short/long bytes4 responses, exact reverts and short-circuiting.
+Run each storage-declaration context in its own source compilation:
+
+```sh
+PYTHONPATH=scripts python3 -m solidity_differential.check_legacy_signature_calls \
+  --context 0 --output .lake/legacy-signature-calls
+# Also run --context 1, --context 2 and --optimized in fresh output directories.
+python3 scripts/solidity_import_mutations.py --jobs 2 \
+  --task ecm-legacy-recovery-stale --task ecm-legacy-validator-selector \
+  --task ecm-legacy-code-existence
+```
+
+This slice alone does not import a complete multisignature authorization path.
+Assembly reassignment of a bytes-memory pointer, dynamic byte construction,
+packed-message hashing, general external signatures, and ABI-v2 byte decoding
+remain outside the legacy boundary. Integration of unchanged downstream helpers,
+authorization proofs and duplicate-signature mutation checks remain separate work.
