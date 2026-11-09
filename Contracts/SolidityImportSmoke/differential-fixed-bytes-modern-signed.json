@@ -1,0 +1,29 @@
+{
+  "project": ".",
+  "entry": "FixedBytesMemoryRevert.sol",
+  "contract": "FixedBytesMemoryRevert",
+  "function": "signedRoundTrip",
+  "solc": "0.8.34+commit.80d5c536",
+  "settings": {
+    "evmVersion": "osaka",
+    "viaIR": true,
+    "optimizer": {
+      "enabled": true,
+      "runs": 200
+    },
+    "metadata": {
+      "bytecodeHash": "ipfs"
+    }
+  },
+  "param_types": [
+    "uint256"
+  ],
+  "variables": {
+    "x": 256
+  },
+  "arguments": {
+    "x": "x"
+  },
+  "storage": [],
+  "corpus": "fixed-bytes-signed-corpus.json"
+}

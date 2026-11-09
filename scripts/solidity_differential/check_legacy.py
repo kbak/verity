@@ -15,7 +15,7 @@ import sys
 from .engine import ROOT, HarnessError, campaign, execute, write_json
 
 FIXTURES = ("arithmetic", "helper", "wrapThenCheck", "abi-v1", "abi-v2", "abi-v2-directive",
-            "abi-v1-inherits-v2", "abi-v2-inherits-v1")
+            "abi-v1-inherits-v2", "abi-v2-inherits-v1", "fixedBytesConversion")
 
 
 def rejection_controls(output):
@@ -25,8 +25,7 @@ def rejection_controls(output):
                          ("helperDivision", "legacy exceptional halt is not modeled"),
                          ("modulo", "legacy exceptional halt is not modeled"),
                          ("assertion", "assert/INVALID is not modeled"),
-                         ("mutation", "requires a read-only function"),
-                         ("fixedBytesConversion", "admits only unsigned/address conversions")):
+                         ("mutation", "requires a read-only function")):
         path = output / f"reject-{name}.lean"
         path.write_text('import Compiler.SolidityImport.Import\n'
             'solidity_import rejected from "Contracts/SolidityImportSmoke" entry "LegacyArithmetic.sol"\n'

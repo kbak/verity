@@ -183,6 +183,8 @@ def closedTransportCovered (mod : Compiler.ECM.ExternalCallModule) (args : List 
   | some (.extCodeCopy resultVar) =>
       mod == Compiler.ECM.SolidityExtCodeCopy.module resultVar && args.length == 1 &&
         exprListCovered args
+  | some .revertMemory =>
+      mod == Compiler.ECM.SolidityRevertMemory.module && args.length == 2 && exprListCovered args
   | some .returnMemory =>
       mod == Compiler.ECM.SolidityReturnMemory.module && args.length == 2 && exprListCovered args
   | none => false

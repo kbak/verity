@@ -1185,6 +1185,14 @@ private def yulByteBufferLoad? (addrNode : Json) (lowerYulFn : Json → M Val) :
     expr := .mload (.add buf.pointer (.literal (off - 32)))
   }
 
+private def yulNatLit? (node : Json) : M (Option Nat) := do
+  if (← mKind node) != "YulLiteral" then return none
+  unless optStr node "kind" == some "number" && optStr node "type" == some "" do return none
+  let raw ← mStr (← mField node "value")
+  let some value := Compiler.Hex.parseHexNat? raw <|> raw.toNat? | return none
+  unless value < 2^256 do return none
+  return some value
+
 private partial def lowerYul (j : Json) : M Val := do
   match ← mKind j with
   | "YulLiteral" =>
@@ -1218,6 +1226,8 @@ private partial def lowerYul (j : Json) : M Val := do
       let args ← mArr (← mField j "arguments")
       if fname == "mload" then
         if args.size == 1 then
+          if (← yulNatLit? args[0]!) == some 64 then
+            return { pre := #[], expr := .mload (.literal 64) }
           if let some v ← yulMemoryArrayElementLoad? args[0]! lowerYul then
             return v
           if let some v ← yulByteBufferLoad? args[0]! lowerYul then
@@ -1470,14 +1480,6 @@ private def cleanHelperResultExpr (ty : String) (v : Val) : Expr :=
             match bitsOf ty with
             | some width => if width < 256 then Expr.bitAnd v.expr (.literal (2^width-1)) else v.expr
             | none => v.expr
-
-private def yulNatLit? (node : Json) : M (Option Nat) := do
-  if (← mKind node) != "YulLiteral" then return none
-  unless optStr node "kind" == some "number" && optStr node "type" == some "" do return none
-  let raw ← mStr (← mField node "value")
-  let some value := Compiler.Hex.parseHexNat? raw <|> raw.toNat? | return none
-  unless value < 2^256 do return none
-  return some value
 
 private def yulStringPrefixLit? (node : Json) : M (Option (Nat × Nat)) := do
   if (← mKind node) != "YulLiteral" then return none
@@ -1821,6 +1823,28 @@ private def lowerYulPrefixKeccakBlock? (j : Json) (stmts refs : Array Json) (ret
   return none
 
 private partial def lowerYulStmtSlice (j : Json) (stmts refs : Array Json) (retName : String) : M (Array Stmt) := do
+  -- Arbitrary memory writes are admitted only in a block that terminates
+  -- unconditionally with REVERT, so they cannot corrupt a Solidity continuation.
+  let memoryRevert := stmts.back?.any fun stmt =>
+    ((field? stmt "expression").bind (field? · "functionName")).bind
+      (optStr · "name") == some "revert"
+  let hasRevert := stmts.any fun stmt =>
+    (((field? stmt "expression").bind (field? · "functionName")).bind
+      (optStr · "name")) == some "revert"
+  if hasRevert then
+    for ref in refs do
+      let id ← mNat (← mField ref "declaration")
+      let env ← get
+      let narrow := env.enumBounds.contains id || (env.scalarTy.find? id).any fun
+        | .bytesN width => width < 32
+        | .uint8 | .uint16 | .address | .bool => true
+        | .uintN bits | .intN bits => bits < 256
+        | _ => false
+      if narrow then
+        -- Solidity may retain dirty bits outside a narrow value's width.
+        -- Only a literal binding has an exact word in this slice.
+        unless (env.values.find? id).any (fun | .literal _ => true | _ => false) do
+          failAt j "memory-revert assembly requires literal-bound narrow scalars"
   let mut yulLocals : RBMap String String compare := RBMap.empty
   let mut out : Array Stmt := #[]
   for stmt in stmts do
@@ -1877,6 +1901,9 @@ private partial def lowerYulStmtSlice (j : Json) (stmts refs : Array Json) (retN
           unless args.size == 2 do failAt expr "mstore requires two arguments"
           let offVal ← lowerYul args[0]!
           let valVal ← lowerYul args[1]!
+          if memoryRevert then
+            out := out ++ offVal.pre ++ valVal.pre |>.push (.mstore offVal.expr valVal.expr)
+            continue
           let .literal off := offVal.expr
             | failAt expr "only scratch-space mstore at 0x00 or 0x20 is supported"
           unless offVal.pre.isEmpty && (off == 0 || off == 32) do
@@ -1896,11 +1923,12 @@ private partial def lowerYulStmtSlice (j : Json) (stmts refs : Array Json) (retN
           let cleared := Expr.bitAnd (.mload wordAddr) (.bitNot byteMask)
           let newByte := Expr.shl shift (.bitAnd valVal.expr (.literal 0xff))
           out := out ++ addrVal.pre ++ valVal.pre |>.push (.mstore wordAddr (.bitOr cleared newByte))
-        else if fname == "revert" && (← get).stateVars.size > 1 then
+        else if fname == "revert" then
           unless args.size == 2 do failAt expr "revert requires two arguments"
           let offVal ← lowerYul args[0]!
           let szVal ← lowerYul args[1]!
-          out := out ++ offVal.pre ++ szVal.pre |>.push .revertEmpty
+          out := out ++ offVal.pre ++ szVal.pre |>.push
+            (.ecm Compiler.ECM.SolidityRevertMemory.module [offVal.expr, szVal.expr])
         else
           failAt stmt s!"unsupported Yul expression statement {fname} (unsupported statement InlineAssembly)"
     | "YulIf" =>
@@ -1996,9 +2024,40 @@ private def argumentAt (call : Json) (i : Nat) : M Json := do
   else
     pure args[i]!
 
+/-- Strip redundant parentheses (single-component, non-inline tuples). -/
+private partial def unparenJson (j : Json) : Json :=
+  if optStr j "nodeType" == some "TupleExpression" &&
+      (field? j "isInlineArray").bind (·.getBool?.toOption) == some false then
+    match field? j "components" with
+    | some (.arr #[only]) => if only.isNull then j else unparenJson only
+    | _ => j
+  else j
+
+/-- Literal bytes are left aligned; padding is on the right, including UTF-8
+and hex literals. Use the source bytes, never the displayed Unicode length. -/
+private def fixedBytesLiteral (node : Json) (width : Nat) : M Val := do
+  let node := unparenJson node
+  unless optStr node "nodeType" == some "Literal" &&
+      #[some "string", some "unicodeString", some "hexString"].contains (optStr node "kind") do
+    failAt node "fixed-bytes conversion requires a byte literal"
+  let hex ← mStr (← mField node "hexValue")
+  unless hex.length % 2 == 0 && hex.length / 2 ≤ width do
+    failAt node s!"fixed-bytes literal exceeds bytes{width}"
+  let word ← if hex.isEmpty then pure 0 else
+    match Compiler.Hex.parseHexNat? ("0x" ++ hex) with
+    | some n => pure n
+    | none => failAt node "invalid fixed-bytes literal hexValue"
+  return { pre := #[], expr := .literal (word * 16 ^ (64 - hex.length)) }
+
 private def convert (paramTy argTy : String) (v : Val) (at_ : Json) : M Val := do
   let argTy := if argTy.endsWith " storage ref" then (argTy.dropEnd 12).toString else argTy
   if argTy == paramTy then return v
+  if let some width := fixedBytesWidth? paramTy then
+    if argTy.startsWith "literal_string " then
+      return ← fixedBytesLiteral at_ width
+    if let some sourceWidth := fixedBytesWidth? argTy then
+      if sourceWidth ≤ width then return v
+      failAt at_ s!"implicit narrowing from {argTy} to {paramTy}"
   if let some pb := signedBitsOf paramTy then
     if argTy.startsWith "int_const" then
       return v
@@ -2279,15 +2338,6 @@ private def lowLevelCallPlacement : String :=
   "low-level call must be a (bool success, bytes memory returndata) declaration followed by " ++
     "returndata forwarding and optional-bool validation"
 
-/-- Strip redundant parentheses (single-component, non-inline tuples). -/
-private partial def unparenJson (j : Json) : Json :=
-  if optStr j "nodeType" == some "TupleExpression" &&
-      (field? j "isInlineArray").bind (·.getBool?.toOption) == some false then
-    match field? j "components" with
-    | some (.arr #[only]) => if only.isNull then j else unparenJson only
-    | _ => j
-  else j
-
 /-- The `call` member of `target.call(...)` or `target.call{...}(...)` on an
 address-typed receiver. -/
 private def lowLevelCallMember? (call : Json) : M (Option Json) := do
@@ -2473,6 +2523,8 @@ private partial def lowerExpr (j : Json) : M Val := do
           | "false" => pure 0
           | _ => failAt j "invalid boolean literal"
         return { pre := #[], expr := .literal value }
+      if #[some "string", some "unicodeString", some "hexString"].contains (optStr j "kind") then
+        return ← fixedBytesLiteral j 32
       unless optStr j "kind" == some "number" do failAt j "unsupported non-numeric literal"
       let multiplier ← match optStr j "subdenomination" with
         | none => pure 1
@@ -4044,18 +4096,8 @@ private partial def lowerCast (j : Json) : M Val := do
     if src == "bytes" || src == "bytes memory" || src == "bytes calldata" ||
        src == "bytes calldata slice" || src == "bytes storage ref" || src == "bytes storage pointer" then
       return ← lowerBytesToFixedBytes args[0]! byteW j
-    let innerArg ← stripParens args[0]!
-    if byteW < 32 && (← mKind innerArg) == "Literal" then
-      let kind ← mStr (← mField innerArg "kind")
-      if kind == "string" || kind == "unicodeString" || kind == "hexString" then
-        let hex ← mStr (← mField innerArg "hexValue")
-        unless hex.length % 2 == 0 && hex.length / 2 ≤ byteW do
-          failAt j s!"{tname} string literal cast requires at most {byteW} bytes, found {hex.length / 2}"
-        let word ← if hex.isEmpty then pure 0 else
-          match Compiler.Hex.parseHexNat? ("0x" ++ hex) with
-          | some n => pure n
-          | none => failAt j s!"invalid {tname} literal hexValue"
-        return { pre := #[], expr := .literal (word * 16 ^ (64 - hex.length)) }
+    if src.startsWith "literal_string " then
+      return ← fixedBytesLiteral args[0]! byteW
   let v ← lowerExpr args[0]!
   if src.startsWith "int" && !src.startsWith "int_const" && (signedBitsOf src).isNone then
     failAt j s!"unsupported cast source {src}"
@@ -4073,126 +4115,32 @@ private partial def lowerCast (j : Json) : M Val := do
     let dest ← fresh
     let ext := Stmt.letVar dest (.signextend (.literal (pb / 8 - 1)) a.expr)
     return { pre := a.pre.push ext, expr := .localVar dest }
-  if tname == "bytes1" then
-    if src == "bytes1" then
-      return v
-    else if src == "uint8" then
-      let a ← atom v
-      let dest ← fresh
-      let shifted := Stmt.letVar dest (.shl (.literal 248) (.bitAnd a.expr (.literal 0xff)))
-      return { pre := a.pre.push shifted, expr := .localVar dest }
-    else if src == "bytes32" || src == "bytes4" then
-      let a ← atom v
-      let dest ← fresh
-      let bound := Stmt.letVar dest (.bitAnd a.expr (.literal (0xff * 2 ^ 248)))
-      return { pre := a.pre.push bound, expr := .localVar dest }
-    else if src.startsWith "int_const" && !src.startsWith "int_const -" then
-      let .literal n := v.expr
-        | failAt j s!"unsupported cast source {src} for bytes1"
-      let innerArg ← stripParens args[0]!
-      let raw := optStr innerArg "value" |>.getD ""
-      let hexDigits := ((raw.drop 2).toString.splitOn "_").foldl (· ++ ·) ""
-      unless v.pre.isEmpty && n < 256 &&
-          (n == 0 || (raw.startsWith "0x" && hexDigits.length == 2)) do
-        failAt j s!"unsupported cast source {src} for bytes1"
-      return { pre := #[], expr := .literal (n * 2 ^ 248) }
-    else
-      failAt j s!"unsupported cast source {src} for bytes1"
-  if src == "bytes1" then
-    if tname == "bytes32" || tname == "bytes4" then
-      return v
-    else if tname == "uint8" then
-      let a ← atom v
-      let dest ← fresh
-      let shifted := Stmt.letVar dest (.shr (.literal 248) a.expr)
-      return { pre := a.pre.push shifted, expr := .localVar dest }
-    else
-      failAt j s!"unsupported cast target {tname} from bytes1"
-  if tname == "bytes4" then
-    if src == "bytes4" then
-      return v
-    else if src == "bytes32" then
-      let a ← atom v
-      let dest ← fresh
-      let bound := Stmt.letVar dest (.bitAnd a.expr (.literal ((2 ^ 32 - 1) * 16 ^ 56)))
-      return { pre := a.pre.push bound, expr := .localVar dest }
-    else if src == "uint32" then
-      let a ← atom v
-      let dest ← fresh
-      let shifted := Stmt.letVar dest (.shl (.literal 224) (.bitAnd a.expr (.literal (2 ^ 32 - 1))))
-      return { pre := a.pre.push shifted, expr := .localVar dest }
-    else if src.startsWith "int_const" && !src.startsWith "int_const -" then
-      let .literal n := v.expr
-        | failAt j s!"unsupported cast source {src} for bytes4"
-      let innerArg ← stripParens args[0]!
-      let raw := optStr innerArg "value" |>.getD ""
-      let hexDigits := ((raw.drop 2).toString.splitOn "_").foldl (· ++ ·) ""
-      unless v.pre.isEmpty && n < 2 ^ 32 &&
-          (n == 0 || (raw.startsWith "0x" && hexDigits.length == 8)) do
-        failAt j s!"unsupported cast source {src} for bytes4"
-      return { pre := #[], expr := .literal (n * 16 ^ 56) }
-    else
-      failAt j s!"unsupported cast source {src} for bytes4"
-  if src == "bytes4" then
-    if tname == "bytes32" then
-      return v
-    else if tname == "uint32" then
-      let a ← atom v
-      let dest ← fresh
-      let shifted := Stmt.letVar dest (.shr (.literal 224) a.expr)
-      return { pre := a.pre.push shifted, expr := .localVar dest }
-    else
-      failAt j s!"unsupported cast target {tname} from bytes4"
-  if tname == "bytes12" then
-    if src == "bytes12" then
-      return v
-    else if src == "bytes32" then
-      let a ← atom v
-      let dest ← fresh
-      let bound := Stmt.letVar dest (.bitAnd a.expr (.literal ((2 ^ 96 - 1) * 2 ^ 160)))
-      return { pre := a.pre.push bound, expr := .localVar dest }
-    else if src == "uint96" then
-      let a ← atom v
-      let dest ← fresh
-      let shifted := Stmt.letVar dest (.shl (.literal 160) (.bitAnd a.expr (.literal (2 ^ 96 - 1))))
-      return { pre := a.pre.push shifted, expr := .localVar dest }
-    else
-      failAt j s!"unsupported cast source {src} for bytes12"
-  if src == "bytes12" then
-    if tname == "bytes32" then
-      return v
-    else if tname == "uint96" then
-      let a ← atom v
-      let dest ← fresh
-      let shifted := Stmt.letVar dest (.shr (.literal 160) a.expr)
-      return { pre := a.pre.push shifted, expr := .localVar dest }
-    else
-      failAt j s!"unsupported cast target {tname} from bytes12"
-  if tname == "bytes20" then
-    if src == "bytes20" then
-      return v
-    else if src == "bytes32" then
-      let a ← atom v
-      let dest ← fresh
-      let bound := Stmt.letVar dest (.bitAnd a.expr (.literal ((2 ^ 160 - 1) * 2 ^ 96)))
-      return { pre := a.pre.push bound, expr := .localVar dest }
-    else if src == "uint160" || src == "address" || src == "address payable" then
-      let a ← atom v
-      let dest ← fresh
-      let shifted := Stmt.letVar dest (.shl (.literal 96) (.bitAnd a.expr (.literal (2 ^ 160 - 1))))
-      return { pre := a.pre.push shifted, expr := .localVar dest }
-    else
-      failAt j s!"unsupported cast source {src} for bytes20"
-  if src == "bytes20" then
-    if tname == "bytes32" then
-      return v
-    else if tname == "uint160" || tname == "address" || tname == "address payable" then
-      let a ← atom v
-      let dest ← fresh
-      let shifted := Stmt.letVar dest (.shr (.literal 96) a.expr)
-      return { pre := a.pre.push shifted, expr := .localVar dest }
-    else
-      failAt j s!"unsupported cast target {tname} from bytes20"
+  if let some width := fixedBytesWidth? tname then
+    let shift := 256 - 8 * width
+    if let some sourceWidth := fixedBytesWidth? src then
+      if sourceWidth ≤ width then return v
+      return { v with expr := .bitAnd v.expr (.literal ((2 ^ (8 * width) - 1) * 2 ^ shift)) }
+    if src.startsWith "uint" && bitsOf src == some (8 * width) then
+      return { v with expr := .shl (.literal shift) v.expr }
+    if src.startsWith "int_const" && !src.startsWith "int_const -" then
+      let .literal n := v.expr | failAt j "fixed-bytes integer cast requires a literal"
+      let raw := optStr (unparenJson args[0]!) "value" |>.getD ""
+      let digits := ((raw.drop 2).toString.splitOn "_").foldl (· ++ ·) ""
+      unless v.pre.isEmpty && n < 2 ^ (8 * width) &&
+          (n == 0 || (raw.startsWith "0x" && digits.length == 2 * width)) do
+        failAt j s!"unsupported cast source {src} for {tname}"
+      return { pre := #[], expr := .literal (n * 2 ^ shift) }
+  if let some width := fixedBytesWidth? src then
+    if tname.startsWith "uint" && bitsOf tname == some (8 * width) then
+      return { v with expr := .shr (.literal (256 - 8 * width)) v.expr }
+  if tname == "bytes20" && #["address", "address payable"].contains src then
+    return { v with expr := .shl (.literal 96) v.expr }
+  if src == "bytes20" && #["address", "address payable"].contains tname then
+    return { v with expr := .shr (.literal 96) v.expr }
+  if tname == "bytes32" && (src == "int256" || src == "int") then
+    return v
+  if (fixedBytesWidth? tname).isSome || (fixedBytesWidth? src).isSome then
+    failAt j s!"unsupported fixed-bytes cast from {src} to {tname}"
   let some bits := bitsOf tname | failAt j s!"unsupported cast target {tname}"
   let narrow : Bool :=
     match bitsOf src with
@@ -6963,14 +6911,20 @@ private partial def bindHelperParams (params : Array Json) (args : Array CallArg
     discard (validateEnumTypeIfNeeded p pty)
     let argNode ← argumentAt at_ i
     let argTy ← mType argNode
-    let some arg := args[i]? | failAt at_ s!"missing argument {i}"
+    let some rawArg := args[i]? | failAt at_ s!"missing argument {i}"
+    let arg ← match rawArg with
+      | .stringBuffer _ =>
+          if let some width := fixedBytesWidth? pty then
+            pure (.scalar (← fixedBytesLiteral argNode width))
+          else pure rawArg
+      | _ => pure rawArg
     if pname != "" then
       modify fun e =>
         { e with yulMemoryArrays := e.yulMemoryArrays.erase pname,
                  yulMemoryStructs := e.yulMemoryStructs.erase pname }
     match arg with
     | .scalar value =>
-        let converted ← convert pty argTy value at_
+        let converted ← convert pty argTy value argNode
         if (bodyCompoundAssignedIds body).contains pid || (bodyDirectAssignedIds body).contains pid then
           let some scalar := paramType pty
             | failAt p s!"unsupported writable helper parameter type {pty}"
@@ -6987,6 +6941,8 @@ private partial def bindHelperParams (params : Array Json) (args : Array CallArg
           let bound ← atom converted
           pre := pre ++ bound.pre
           modify fun e => { e with values := e.values.insert pid bound.expr }
+          if let some scalar := localParamType pty then
+            modify fun e => { e with scalarTy := e.scalarTy.insert pid scalar }
           if pname != "" then
             yul := yul.insert pname bound.expr
     | .memory descriptor effects =>
@@ -14009,6 +13965,8 @@ private partial def lowerRootStatements (stmts : Array Json) (isTail : Bool := f
           let asmStmts ← lowerAssemblyStmts s asmRetName
           modify fun e => { e with helperResult := savedHelperResult, helperReturnId := savedHelperReturnId, yulNames := savedAsmYul }
           out := out ++ extPre ++ asmStmts
+          if ← stmtAlwaysReverts [] s then
+            returned := true
     | "ForStatement" =>
         out := out ++ (← lowerFor s fun body => do
           let statements ← if (← mKind body) == "Block" then mArr (← mField body "statements") else pure #[body]
@@ -14530,6 +14488,12 @@ private def lowerRoot (fn : Json) : M (Array Stmt × Array SrcParam) := do
   modify fun e => { e with stack := [rootId] }
   if optStr fn "stateMutability" == some "payable" && (← get).stateVars.isEmpty then
     failAt fn "payable entry points require value-transfer semantics and are unsupported"
+  if (← get).legacyWrapping then
+    for key in ["parameters", "returnParameters"] do
+      for parameter in (← mArr (← mField (← mField fn key) "parameters")) do
+        if let some width := fixedBytesWidth? (← mType parameter) then
+          if width < 32 then
+            failAt parameter "Solidity 0.7.6 narrow fixed-bytes root ABI is outside this slice"
   let srcParams ← bindRoot fn
   let implemented := (field? fn "implemented").bind (fun v => v.getBool?.toOption) |>.getD true
   let some body := (field? fn "body").filter (!·.isNull)

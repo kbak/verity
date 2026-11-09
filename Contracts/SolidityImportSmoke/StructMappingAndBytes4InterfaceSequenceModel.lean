@@ -14,6 +14,7 @@ solidity_import imported from "Contracts/SolidityImportSmoke" entry "StructMappi
   function fail()
   function read()
   function checkInterface(bytes4,uint256)
+  function supportsInterface(bytes4)
 def model : CompilationModel := imported.model
 -- Mapping slots use the actual Keccak oracle shared with differential execution.
 def oracle : Denote.DenoteOracle := SolidityImport.Differential.oracle

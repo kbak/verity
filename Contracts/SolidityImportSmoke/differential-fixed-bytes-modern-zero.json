@@ -1,0 +1,32 @@
+{
+  "project": ".",
+  "entry": "FixedBytesMemoryRevert.sol",
+  "contract": "FixedBytesMemoryRevert",
+  "function": "exercise",
+  "solc": "0.8.34+commit.80d5c536",
+  "settings": {
+    "evmVersion": "osaka",
+    "viaIR": true,
+    "optimizer": {
+      "enabled": true,
+      "runs": 200
+    },
+    "metadata": {
+      "bytecodeHash": "ipfs"
+    }
+  },
+  "param_types": [
+    "uint256",
+    "uint256"
+  ],
+  "variables": {
+    "x": 256,
+    "mode": 8
+  },
+  "arguments": {
+    "x": "x",
+    "mode": "mode"
+  },
+  "storage": [],
+  "corpus": "fixed-bytes-memory-revert-corpus.json"
+}

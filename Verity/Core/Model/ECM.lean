@@ -138,6 +138,8 @@ inductive ByteTransport where
   | extCodeCopy (resultVar : String)
   /-- `return(offset, size)` of an ABI-encoded memory buffer, ending the frame. -/
   | returnMemory
+  /-- `revert(offset, size)` with the exact physical-memory bytes. -/
+  | revertMemory
   deriving DecidableEq, Repr
 
 /-- An External Call Module packages a reusable external call pattern.
@@ -894,6 +896,30 @@ def module : ExternalCallModule where
 
 end SolidityReturnMemory
 
+namespace SolidityRevertMemory
+
+/-- Revert with the exact memory slice, including non-word-aligned payloads. -/
+def compile (args : List YulExpr) : Except String (List YulStmt) :=
+  match args with
+  | [offset, size] => pure [.exprStmt (.call "revert" [offset, size])]
+  | _ => throw "Solidity memory revert expects an offset and a size"
+
+/-- Closed, non-interacting frame termination with an exact byte payload. -/
+def module : ExternalCallModule where
+  name := "solidityRevertMemory"
+  numArgs := 2
+  resultVars := []
+  writesState := false
+  readsState := false
+  compile := fun _ args => compile args
+  byteTransport := some .revertMemory
+  axioms := []
+  proofStatus := .assumed
+  summaryName := "solidity_revert_memory"
+  summaryMutability := .staticcall
+
+end SolidityRevertMemory
+
 namespace ExternalCallModule
 
 /-- Compile closed byte transports from their data descriptor. Their metadata
@@ -955,6 +981,10 @@ def compileCanonical (module : ExternalCallModule) (context : CompilationContext
       unless module == SolidityReturnMemory.module do
         throw "closed Solidity memory return transport metadata differs"
       SolidityReturnMemory.compile args
+  | some .revertMemory =>
+      unless module == SolidityRevertMemory.module do
+        throw "closed Solidity memory revert transport metadata differs"
+      SolidityRevertMemory.compile args
 
 end ExternalCallModule
 
