@@ -8,6 +8,9 @@ import sys
 from .engine import ROOT, WORKSPACE, MUTANT_BUILD_TIMEOUT, HarnessError, command, write_json
 
 MUTANTS = {
+    'import-legacy-bytes-header': ('Compiler/SolidityImport/Import.lean', 'expr := .mload (.add (.sub buf.pointer (.literal 32)) off.expr)', 'expr := .mload (.add buf.pointer off.expr)'),
+    'import-legacy-bytes-padding': ('Compiler/SolidityImport/AbiLowering.lean', '  , .mstore (.add data length) (.literal 0) ]', '  ]'),
+    'import-legacy-bytes-byte-lane': ('Compiler/SolidityImport/Import.lean', '| "byte", #[a, b] => pure { pre, expr := .byte a b }', '| "byte", #[a, b] => pure { pre, expr := .byte (.add a (.literal 1)) b }'),
     'import-fixed-bytes-literal-alignment': ('Compiler/SolidityImport/Import.lean', '  return { pre := #[], expr := .literal (word * 16 ^ (64 - hex.length)) }', '  return { pre := #[], expr := .literal word }'),
     'import-fixed-bytes-truncation': ('Compiler/SolidityImport/Import.lean', '      return { v with expr := .bitAnd v.expr (.literal ((2 ^ (8 * width) - 1) * 2 ^ shift)) }', '      return v'),
     'denote-memory-revert-empty': ('Verity/Core/Model/Denote.lean', '  return .revertWithData ((List.range size).map fun i =>\n    UInt8.ofNat (state.world.byteMemory.readByte (offset + i)).val)', '  let _ := (offset, size)\n  return .revertWithData []'),
@@ -149,6 +152,12 @@ def mutation_campaign(output, selected=None):
             argv = [sys.executable, str(directory / "scripts/solidity_import_differential.py"),
                     "--config", str(directory / "Contracts/SolidityImportSmoke" / config),
                     "--output", str(directory / ".lake/campaign"), "--cases", "8"]
+            if name.startswith("import-legacy-bytes-"):
+                argv = [sys.executable, "-c",
+                        "import sys; sys.path.insert(0, 'scripts'); "
+                        "from solidity_differential.check_legacy_bytes import main; sys.exit(main())",
+                        "--context", "zero", "--output", str(directory / ".lake/campaign"),
+                        "--cases", "8", "--jobs", "1"]
             # A pre-existing fixture divergence is not evidence that a mutation was
             # detected. Run the identical inputs in the private snapshot first.
             baseline_argv = [str(directory / ".lake/baseline") if arg == str(directory / ".lake/campaign")

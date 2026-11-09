@@ -99,7 +99,8 @@ type rather than rejected for noncanonical upper bits; boolean words normalize
 to zero or one. `pragma experimental ABIEncoderV2` and `pragma abicoder v2`
 select validation in the target contract's source unit. Inherited functions
 use the target contract's decoder, even when their defining file selects the
-other coder. Dynamic and aggregate ABI, signed arithmetic, enum conversions,
+other coder. Except for ABI coder v1 memory bytes described below, dynamic and
+aggregate ABI, signed arithmetic, enum conversions,
 narrow fixed-bytes root ABI, loops, modifiers, general assembly, external calls,
 and builtins other than `require`/`revert` remain outside the legacy slice.
 The fixed-byte and terminal memory-revert extension below admits additional
@@ -182,8 +183,63 @@ python3 scripts/solidity_import_mutations.py --jobs 4 \
 shape. The closed module rejects metadata mismatches and adds no Lean axioms.
 Its ECM proof status remains `assumed`: these local facts and finite execution
 checks are not an end-to-end Solidity/EVM correspondence proof. The existing gas,
-fork and source/deployed-bytecode limits above still apply. This extension does
-not admit dynamic signature buffers, signature recovery or external validators.
+fork and source/deployed-bytecode limits above still apply. This extension
+does not establish signature recovery or external validator support. Memory-byte
+decoding is a separate extension described below.
+
+### Legacy memory-byte decoding (development)
+
+Under the explicit 0.7.6 profile, ABI coder v1 `bytes memory` parameters are
+materialized in parameter order at the free pointer. The decoder checks the
+complete root head, the inclusive `2^32` offset/length limits and the tail bounds.
+Decode failures use empty `REVERT`. Each object contains a length word followed
+by the bytes; allocation rounds the payload up to 32 bytes. A zero word is
+written immediately after the actual payload, matching solc's `calldatacopy`
+followed by `mstore(end, 0)`, including when calldata padding is dirty. These are
+legacy-specific checks; the modern decoder is unchanged.
+
+Existing buffers can pass through memory aliases and internal helpers with
+scalar or multiple scalar returns. Straight-line assembly can declare scalar
+locals, assign scalar outputs, and use `add`, `sub`, `mul`, `byte` and supported
+`mload` forms. `mload(add(buffer, offset))` and its reversed operand order admit
+dynamic word offsets. Offsets refer to the length header, and arithmetic wraps
+modulo `2^256`. Reads use physical memory, preserving unaligned words, padding,
+and adjacent allocated objects. Assembly adds no logical buffer bounds check;
+callers must supply bounds when their application requires them. Reading a narrow
+Solidity scalar from this assembly remains rejected unless it has a literal
+binding, because the high-level value alone does not determine dirty bits.
+
+This slice rejects ABI coder v2 byte parameters (allocation failures may execute
+`INVALID`), calldata/storage byte sources, byte allocation/encoding, dynamic-byte
+returns, high-level byte indexing, pointer assignment, memory writes in a
+continuing assembly block, and assembly control flow. General EVM gas/memory
+expansion and exceptional halts remain outside the execution model. Tests use
+small final addresses, including wrapped arithmetic that returns to ordinary
+memory; enormous reads are not supported evidence. The existing read-only
+adapter represents complete calldata words, so partial-word calldata truncation
+is not covered by this campaign.
+
+`LegacyByteMemory.sol` exercises packed record decoding and alias/neighbor reads
+with zero, one and two state declarations. The independent byte-array oracle in
+`check_legacy_bytes.py` checks all three execution routes, malformed ABI heads and
+tails, dirty padding, unaligned offsets, and modular pointer arithmetic. Negative
+fixtures enforce the remaining admission boundary. Mutation controls change the
+header adjustment, padding clear and byte lane; compilation failures do not count
+as detected semantic mutations.
+
+```sh
+PYTHONPATH=scripts python3 -m solidity_differential.check_legacy_bytes \
+  --jobs 2 --rejections --output .lake/legacy-byte-decoding
+python3 scripts/solidity_import_mutations.py --jobs 3 \
+  --task import-legacy-bytes-header --task import-legacy-bytes-padding \
+  --task import-legacy-bytes-byte-lane
+```
+
+This remains an experimental import/Denote execution slice. Finite differential
+checks do not establish universal source/compiler correspondence or authorization
+properties for a signature-checking application. Recovery, external validation,
+and the surrounding iteration/bounds logic require their own extensions.
+
 
 ## Proving properties of an imported function
 
@@ -441,6 +497,8 @@ Solidity source locations. These remain unsupported, but now fail at the
 `VariableDeclarationStatement` with a precise diagnostic instead of a missing
 JSON-field error. This diagnostic correction does not change successful models
 or the smoke golden; the importer source digest changes as designed.
+
+
 
 ### Imported transaction-context sequences
 

@@ -1179,6 +1179,21 @@ private def yulByteBufferLoad? (addrNode : Json) (lowerYulFn : Json → M Val) :
         pure none
     else
       pure none
+  if (← get).legacyWrapping then
+    -- Legacy bytes buffers originate in ABI materialization and retain their
+    -- length header through aliases/helpers. Read physical memory, including
+    -- unaligned offsets and bytes beyond the logical length; Yul adds no bounds check.
+    let dynamic? ← do
+      if let some buf ← yulByteBufferByName? outerArgs[0]! then
+        pure (some (buf, outerArgs[1]!))
+      else if let some buf ← yulByteBufferByName? outerArgs[1]! then
+        pure (some (buf, outerArgs[0]!))
+      else pure none
+    if let some (buf, offset) := dynamic? then
+      let off ← lowerYulFn offset
+      return some {
+        pre := buf.pre ++ off.pre
+        expr := .mload (.add (.sub buf.pointer (.literal 32)) off.expr) }
   let some (buf, off) := matched? | return none
   return some {
     pre := buf.pre,
@@ -1447,6 +1462,7 @@ private def lowerYulValue (node : Json) : M Val := do
   lowerYul node
 
 private def lowerAssembly (j : Json) (retName : String) : M Val := do
+  if (← get).legacyWrapping then validateLegacyAssemblyReads j
   let assignedInAsm := bodyAssignedIds j
   if !assignedInAsm.isEmpty then
     modify fun e => { e with zeroInitLocals := e.zeroInitLocals.filter (!assignedInAsm.contains ·) }
@@ -1462,7 +1478,12 @@ private def lowerAssembly (j : Json) (retName : String) : M Val := do
   unless retName != "" && vname == retName do
     failAt asg s!"Yul assigns {vname}, not the return name {retName}"
   checkYulReturnTarget j asg vars[0]! vname retName
-  lowerYulValue (← mField asg "value")
+  let value ← lowerYulValue (← mField asg "value")
+  if (← get).legacyWrapping then
+    if let some (_, ty) := (← get).helperResult then
+      let some scalar := localParamType ty | failAt j "unsupported legacy Yul result type"
+      validateLegacyYulAssignment asg scalar value.expr
+  return value
 
 private def cleanHelperResultExpr (ty : String) (v : Val) : Expr :=
   if ty == "bool" then Expr.logicalNot (.logicalNot v.expr)
@@ -1512,6 +1533,9 @@ private def lowerYulDirectAssignmentTarget (j stmt varNode : Json) (refs : Array
       | failAt stmt s!"Yul assigns {vname}, not the return declaration {retName}"
     if ty.startsWith "enum " then
       failAt j "Yul assignment to an enum result is unsupported"
+    if (← get).legacyWrapping then
+      let some scalar := localParamType ty | failAt j "unsupported legacy Yul result type"
+      validateLegacyYulAssignment stmt scalar rhsVal.expr
     let cleaned := cleanHelperResultExpr ty rhsVal
     return .assignVar binding cleaned
   else
@@ -1540,13 +1564,14 @@ private def lowerYulDirectAssignmentTarget (j stmt varNode : Json) (refs : Array
       else failAt stmt s!"Yul assignment target {vname} is shadowed"
     let some scalarType := env.scalarTy.find? targetId
       | failAt stmt s!"unknown scalar type for Yul assignment target {vname}"
+    if env.legacyWrapping then validateLegacyYulAssignment stmt scalarType rhsVal.expr
     if isProvablyBoundedYulExpr scalarType rhsVal.expr then
       return .assignVar binding rhsVal.expr
     if let .bytesN byteW := scalarType then
       if 1 ≤ byteW && byteW < 32 then
         let mask := (2 ^ (8 * byteW) - 1) * 2 ^ (256 - 8 * byteW)
         return .assignVar binding (.bitAnd rhsVal.expr (.literal mask))
-    if env.stateVars.size > 1 then
+    if env.stateVars.size > 1 && !env.legacyWrapping then
       return .assignVar binding rhsVal.expr
     unless isFullWordYulScalar scalarType do
       failAt stmt s!"Yul assignment to narrow local {vname} is unsupported"
@@ -1944,6 +1969,7 @@ private partial def lowerYulStmtSlice (j : Json) (stmts refs : Array Json) (retN
   pure out
 
 private partial def lowerAssemblyStmts (j : Json) (retName : String) : M (Array Stmt) := do
+  if (← get).legacyWrapping then validateLegacyAssemblyReads j
   let assignedInAsm := bodyAssignedIds j
   if !assignedInAsm.isEmpty then
     modify fun e => { e with zeroInitLocals := e.zeroInitLocals.filter (!assignedInAsm.contains ·) }
@@ -7060,6 +7086,8 @@ private partial def bindHelperParams (params : Array Json) (args : Array CallArg
         let location := optStr p "storageLocation" |>.getD "default"
         unless pty == "bytes" && (location == "memory" || (location == "calldata" && argTy == "bytes calldata")) do
           failAt p "byte buffer argument requires a bytes memory parameter"
+        if (← get).legacyWrapping && argTy != "bytes memory" then
+          failAt p "Solidity 0.7.6 bytes helpers require an existing memory buffer"
         let ptrBinding ← freshFor (if pname == "" then "bytes_ptr" else pname)
         let sizeBinding ← fresh
         pre := pre ++ buffer.pre ++ #[.letVar ptrBinding buffer.pointer, .letVar sizeBinding buffer.size]
@@ -7074,6 +7102,8 @@ private partial def bindHelperParams (params : Array Json) (args : Array CallArg
     | .stringBuffer buffer =>
         let location := optStr p "storageLocation" |>.getD "default"
         if pty == "bytes" && location == "memory" && argTy.startsWith "literal_string " then
+          if (← get).legacyWrapping then
+            failAt p "Solidity 0.7.6 bytes helpers require an existing memory buffer"
           let ptrBinding ← freshFor (if pname == "" then "bytes_ptr" else pname)
           let sizeBinding ← fresh
           pre := pre ++ buffer.pre ++ #[.letVar ptrBinding buffer.pointer, .letVar sizeBinding buffer.size]
@@ -15186,11 +15216,18 @@ private def importSlice
             for (_, j) in types.zipIdx do
               abiGuards := abiGuards.push (.letVar s!"{p.name}_{j}" (Expr.calldataload (.literal (offset + 32*j))))
       if let some cb := env.calldataBytes.find? p.id then
+        if legacy && strictAbi then
+          (failAt fn ("Solidity 0.7.6 bytes memory requires ABI coder v1; " ++
+            "v2 allocation may execute INVALID")).run' env
         let some i := modelParamNames.findIdx? (· == p.name)
           | throwError "missing calldata bytes model parameter {p.name}"
         let headOffset := 4 + (modelParams.toList.take i).foldl (fun n p => n + paramHeadSize p.ty) 0
         let checks :=
-          if cb.inMemory then
+          if legacy then
+            AbiLowering.legacyBytesMemoryHead cb.memoryPointer cb.offsetBinding cb.headerBinding
+              cb.lengthBinding cb.dataBinding cb.nextFreeBinding cb.copyIndexBinding
+              rootHeadWords headOffset
+          else if cb.inMemory then
             AbiLowering.bytesMemoryHead cb.memoryPointer cb.offsetBinding cb.headerBinding cb.lengthBinding cb.dataBinding cb.nextFreeBinding cb.copyIndexBinding rootHeadWords headOffset
           else
             AbiLowering.bytesCalldataHead cb.offsetBinding cb.headerBinding cb.lengthBinding cb.dataBinding rootHeadWords headOffset
@@ -15411,6 +15448,7 @@ private def importSlice
   let quoteSrc ← moduleText sourceRoot "Compiler/SolidityImport/Quote.lean"
   let profileSrc ← moduleText sourceRoot "Compiler/SolidityImport/Profile.lean"
   let legacySrc ← moduleText sourceRoot "Compiler/SolidityImport/Legacy.lean"
+  let abiLoweringSrc ← moduleText sourceRoot "Compiler/SolidityImport/AbiLowering.lean"
   let exprHelpersSrc ← moduleText sourceRoot "Compiler/SolidityImport/ExprHelpers.lean"
   -- JSON framing prevents distinct file/signature lists from sharing a
   -- concatenation merely because their text contains separator newlines.
@@ -15424,6 +15462,7 @@ private def importSlice
       ("Import.lean", Json.str importer), ("Coverage.lean", Json.str coverage),
       ("Report.lean", Json.str reportSrc), ("Quote.lean", Json.str quoteSrc),
       ("Profile.lean", Json.str profileSrc), ("Legacy.lean", Json.str legacySrc),
+      ("AbiLowering.lean", Json.str abiLoweringSrc),
       ("ExprHelpers.lean", Json.str exprHelpersSrc)])]
   let digest := sha256Hex digestInput.compress.toUTF8
   let report : ImportReport :=

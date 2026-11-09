@@ -193,6 +193,35 @@ def bytesMemoryHead
       [.mstore (.add (.add freePointer (.literal 32)) (.mul (.localVar copyIndexBinding) (.literal 32)))
         (.calldataload (.add (.localVar dataBinding) (.mul (.localVar copyIndexBinding) (.literal 32))))] ]
 
+/-- Solidity 0.7.6 ABI coder v1 memory bytes: inclusive 32-bit offset/length
+bounds, empty-data decode failure, and exact copy followed by a zero word. The
+final unaligned store removes calldata padding and clears the next 32 bytes. -/
+def legacyBytesMemoryHead
+    (memoryPointer offsetBinding headerBinding lengthBinding dataBinding nextFreeBinding
+      copyIndexBinding : String) (rootHeadWords headOffset : Nat) : List Stmt :=
+  let pointer := Expr.localVar memoryPointer
+  let length := Expr.localVar lengthBinding
+  let data := Expr.add pointer (.literal 32)
+  let rounded := Expr.bitAnd (.add length (.literal 31)) (.bitNot (.literal 31))
+  [ guard (.ge .calldatasize (.literal (4 + 32 * rootHeadWords)))
+  , .letVar offsetBinding (.calldataload (.literal headOffset))
+  , guard (.le (.localVar offsetBinding) (.literal (2^32)))
+  , .letVar headerBinding (.add (.literal 4) (.localVar offsetBinding))
+  , guard (.le (.add (.localVar headerBinding) (.literal 32)) .calldatasize)
+  , .letVar lengthBinding (.calldataload (.localVar headerBinding))
+  , .letVar dataBinding (.add (.localVar headerBinding) (.literal 32))
+  , guard (.le length (.literal (2^32)))
+  , guard (.le (.add (.localVar dataBinding) length) .calldatasize)
+  , .letVar memoryPointer (.mload (.literal 64))
+  , .letVar nextFreeBinding (.add data rounded)
+  , .mstore (.literal 64) (.localVar nextFreeBinding)
+  , .mstore pointer length
+  , .forEach copyIndexBinding (.div (.add length (.literal 31)) (.literal 32))
+      [.mstore (.add data (.mul (.localVar copyIndexBinding) (.literal 32)))
+        (.calldataload (.add (.localVar dataBinding)
+          (.mul (.localVar copyIndexBinding) (.literal 32))))]
+  , .mstore (.add data length) (.literal 0) ]
+
 /-- Allocate and materialize a validated calldata scalar array into memory when
 passed to a `T[] memory` helper parameter. -/
 def materializeCalldataScalarArray (data length : Expr)
