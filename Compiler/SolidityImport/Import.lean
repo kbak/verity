@@ -12,6 +12,7 @@ import Compiler.SolidityImport.TypesAndRecords
 import Compiler.SolidityImport.TransportBarriers
 import Compiler.SolidityImport.LibraryCallGuard
 import Compiler.SolidityImport.Legacy
+import Compiler.SolidityImport.LegacyBytePointers
 import Compiler.SolidityImport.ExprHelpers
 import Compiler.SolidityImport.StorageLayout
 import Compiler.SolidityImport.InlineAssemblyShims
@@ -1096,7 +1097,7 @@ private def yulByteBufferByName? (node : Json) : M (Option EncodedBytes) := do
   let env ← get
   if env.yulNames.contains name then return none
   let some declId := env.yulMemoryStructs.find? name | return none
-  return env.byteBuffers.find? declId <|> env.stringBuffers.find? declId
+  return env.memoryByteBuffer? declId <|> env.stringBuffers.find? declId
 
 /-- A Yul identifier naming an unshadowed `bytes memory` local, with its declaration. -/
 private def yulBytesLocal? (node : Json) : M (Option (Nat × EncodedBytes)) := do
@@ -1209,6 +1210,7 @@ private def yulNatLit? (node : Json) : M (Option Nat) := do
   return some value
 
 private partial def lowerYul (j : Json) : M Val := do
+  if let some header ← LegacyBytePointers.header? j then return header
   match ← mKind j with
   | "YulLiteral" =>
       if optStr j "kind" == some "bool" && (← get).stateVars.size > 1 then
@@ -1245,6 +1247,9 @@ private partial def lowerYul (j : Json) : M Val := do
             return { pre := #[], expr := .mload (.literal 64) }
           if let some v ← yulMemoryArrayElementLoad? args[0]! lowerYul then
             return v
+          if (← get).legacyWrapping && (← LegacyBytePointers.rooted args[0]!) then
+            let address ← lowerYul args[0]!
+            return { pre := address.pre, expr := .mload address.expr }
           if let some v ← yulByteBufferLoad? args[0]! lowerYul then
             return v
         failAt j "unsupported Yul builtin mload"
@@ -1903,7 +1908,9 @@ private partial def lowerYulStmtSlice (j : Json) (stmts refs : Array Json) (retN
           out := out ++ v.pre |>.push (.assignVar yulBinding v.expr)
         else
           let v ← lowerYulValue (← mField stmt "value")
-          let assignStmt ← lowerYulDirectAssignmentTarget j stmt varNode refs retName v
+          let assignStmt ← match ← LegacyBytePointers.assign? varNode refs v.expr with
+            | some pointerAssignment => pure pointerAssignment
+            | none => lowerYulDirectAssignmentTarget j stmt varNode refs retName v
           out := out ++ v.pre |>.push assignStmt
     | "YulExpressionStatement" =>
         let expr ← mField stmt "expression"
@@ -2791,7 +2798,7 @@ private partial def isByteBufferIdent (j : Json) : M (Option EncodedBytes) := do
   unless (← mKind j) == "Identifier" do return none
   let id ← refInt j
   unless id ≥ 0 do return none
-  return (← get).byteBuffers.find? id.toNat
+  return (← get).memoryByteBuffer? id.toNat
 
 private partial def lowerRef (j : Json) : M Ref := do
   match ← mKind j with
@@ -5623,7 +5630,7 @@ private partial def lowerEncodedBytes (j : Json) : M EncodedBytes := do
   if (← mKind j) == "Identifier" then
     let id ← refInt j
     if id ≥ 0 then
-      if let some buffer := (← get).byteBuffers.find? id.toNat then
+      if let some buffer := (← get).memoryByteBuffer? id.toNat then
         return buffer
       if let some buffer := (← get).stringBuffers.find? id.toNat then
         return buffer
@@ -6536,7 +6543,7 @@ private partial def lowerInterfaceStaticCall (j : Json) : M Val := do
     let data ← lowerEncodedBytes args[1]!
     let result ← fresh
     let call := Stmt.ecm (Compiler.ECM.LegacySignatureCall.bytes4Module result selector)
-      [target.expr, hash.expr, data.pointer, data.size]
+      [target.expr, hash.expr, data.pointer]
     return { pre := (target.pre ++ hash.pre ++ data.pre).push call, expr := .localVar result }
   let paramTypes := rawParamTypes.map fun ty =>
     if env.stateVars.size > 1 && ty.startsWith "contract " then "address" else ty
@@ -7141,6 +7148,10 @@ private partial def bindHelperParams (params : Array Json) (args : Array CallArg
           failAt p "byte buffer argument requires a bytes memory parameter"
         if (← get).legacyWrapping && argTy != "bytes memory" then
           failAt p "Solidity 0.7.6 bytes helpers require an existing memory buffer"
+        if (← get).legacyWrapping then
+          pre := pre ++ (← LegacyBytePointers.bind pid pname buffer)
+          yul := yul.erase pname
+          continue
         let ptrBinding ← freshFor (if pname == "" then "bytes_ptr" else pname)
         let sizeBinding ← fresh
         pre := pre ++ buffer.pre ++ #[.letVar ptrBinding buffer.pointer, .letVar sizeBinding buffer.size]
@@ -11480,6 +11491,12 @@ private partial def lowerEffectCore (statement : Json) : M (Array Stmt) := do
           atom (← convert ty (← mType right) (← lowerExpr right) right)
         return value.pre.push (.assignVar binding value.expr)
       if let some buf := (← get).byteBuffers.find? id.toNat then
+        if (← get).legacyWrapping then
+          if deleting then failAt target "legacy bytes deletion is outside this slice"
+          let right ← mField expression "rightHandSide"
+          let value ← lowerEncodedBytes right
+          let assignment ← LegacyBytePointers.assignData buf value.pointer target
+          return value.pre.push assignment
         if !deleting then
           let right ← mField expression "rightHandSide"
           let isBytesConcat ← if (← mKind right) == "FunctionCall" && optStr right "kind" == some "functionCall" then do
@@ -13013,6 +13030,10 @@ private partial def lowerLocalCore (s : Json) : M (Array Stmt) := do
                  yulNames := e.yulNames.erase name }
       return pre
   if init.isNull then
+    if (← get).legacyWrapping && loc == "memory" && (← mType d) == "bytes" then
+      -- Solidity's default reference points at the zero-slot header (0x60).
+      return ← LegacyBytePointers.bind id name
+        { pre := #[], pointer := .literal 128, size := .literal 0 }
     if loc == "memory" && (← mType d) == "bytes" && (← get).bodyAssigned.contains id then
       let pointer ← freshFor name
       let size ← fresh
@@ -13062,6 +13083,8 @@ private partial def lowerLocalCore (s : Json) : M (Array Stmt) := do
     return #[.letVar binding (.literal 0)]
   if loc == "memory" && ((← mType d) == "bytes" || (← mType d) == "string") then
     let isString := (← mType d) == "string"
+    if (← get).legacyWrapping && !isString then
+      return ← LegacyBytePointers.bind id name (← lowerEncodedBytes init)
     if isString && (← get).bodyAssigned.contains id then
       failAt d "reassigned string locals are outside this slice"
     let isNewBytesInit ← if (← mKind init) == "FunctionCall" && optStr init "kind" == some "functionCall" then do
@@ -15243,7 +15266,12 @@ private def importSlice
     -- ABI cleanup is not validation: Solidity rejects noncanonical scalar
     -- words before executing the function. Inspect the original calldata word,
     -- since the model parameter loader has already masked/normalized it.
-    let mut abiGuards : Array Stmt := if env.explicitAbi || env.encodingMemory || stmtListRequiresFreePointerInit body.toList then #[.mstore (.literal 64) (.literal 128)] else #[]
+    -- Every legacy entry starts with Solidity's free-memory prologue. A raw
+    -- reconstructed pointer can observe it even without a dynamic parameter.
+    let needsPrologue := env.legacyWrapping || env.explicitAbi || env.encodingMemory ||
+      stmtListRequiresFreePointerInit body.toList
+    let mut abiGuards : Array Stmt :=
+      if needsPrologue then #[.mstore (.literal 64) (.literal 128)] else #[]
     let rootHeadWords := (modelParams.toList.foldl (fun n p => n + paramHeadSize p.ty) 0) / 32
     for p in srcParams do
       if let some mem := env.mems.find? p.id then
@@ -15518,6 +15546,7 @@ private def importSlice
   let legacyFlowSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyControlFlow.lean"
   let abiLoweringSrc ← moduleText sourceRoot "Compiler/SolidityImport/AbiLowering.lean"
   let exprHelpersSrc ← moduleText sourceRoot "Compiler/SolidityImport/ExprHelpers.lean"
+  let bytePointersSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyBytePointers.lean"
   let signatureSrc ← moduleText sourceRoot "Verity/Core/Model/LegacySignatureCalls.lean"
   let ecmSrc ← moduleText sourceRoot "Verity/Core/Model/ECM.lean"
   let denoteSrc ← moduleText sourceRoot "Verity/Core/Model/Denote.lean"
@@ -15534,6 +15563,7 @@ private def importSlice
       ("Report.lean", Json.str reportSrc), ("Quote.lean", Json.str quoteSrc),
       ("Profile.lean", Json.str profileSrc), ("Legacy.lean", Json.str legacySrc),
       ("LegacyControlFlow.lean", Json.str legacyFlowSrc),
+      ("LegacyBytePointers.lean", Json.str bytePointersSrc),
       ("AbiLowering.lean", Json.str abiLoweringSrc),
       ("ExprHelpers.lean", Json.str exprHelpersSrc),
       ("LegacySignatureCalls.lean", Json.str signatureSrc),

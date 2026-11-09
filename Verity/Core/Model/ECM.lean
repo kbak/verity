@@ -944,7 +944,7 @@ def recoverModule (resultVar : String) : ExternalCallModule where
 to any particular standard or contract. -/
 def bytes4Module (resultVar : String) (selector : Nat) : ExternalCallModule where
   name := "solidityLegacyBytes4"
-  numArgs := 4
+  numArgs := 3
   resultVars := [resultVar]
   writesState := false
   readsState := true

@@ -30,11 +30,11 @@ CASES = {
         'contract P { function run(address a, bytes32 h) public view returns(uint256) '
         '{ bytes memory s = new bytes(4); return uint256(bytes32(I(a).validate(h,s))); }}',
         'run(address,bytes32)', 'bytes locals require an existing memory buffer'),
-    'memory-pointer': (HEADER + INTERFACE +
+    'memory-write': (HEADER + INTERFACE +
         'contract P { function run(address a, bytes32 h, bytes memory s) public view returns(uint256) '
-        '{ bytes memory p; assembly { p := add(s, 32) } '
+        '{ bytes memory p; assembly { p := add(s, 32) mstore(p, 4) } '
         'return uint256(bytes32(I(a).validate(h,p))); }}', 'run(address,bytes32,bytes)',
-        'bytes locals require an existing memory buffer'),
+        'assembly requires a terminal memory revert or read-only decoding'),
     'assertion': (HEADER + 'contract P { function run(bytes32 h) public pure returns(address) '
         '{ assert(h != 0); return ecrecover(h,27,h,h); }}', 'run(bytes32)',
         'builtin call is outside the scalar slice'),
