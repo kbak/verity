@@ -52,6 +52,13 @@ def check_campaign(profile, output, count):
     for case, *observations in zip(cases, *routes):
         if profile == "modern-signed":
             status, payload = "ok", int(case["args"][0]).to_bytes(32, "big")
+        elif profile == "modern-errors":
+            x, mode = map(int, case["args"])
+            # Ethereum Keccak selectors, independent of importer/model encoding.
+            selector = "de8ee6e0" if mode == 0 else "6198cd26"
+            status, payload = "revert", bytes.fromhex(selector) + x.to_bytes(32, "big")
+            if mode > 1:
+                status, payload = "ok", x.to_bytes(32, "big")
         else:
             status, payload = expected(*map(int, case["args"]))
         for observation in observations:
@@ -104,7 +111,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
     profiles = [f"{release}-{context}" for release in ("legacy", "modern")
-                for context in ("zero", "one", "two")] + ["modern-signed"]
+                for context in ("zero", "one", "two")] + ["modern-signed", "modern-errors"]
     parser.add_argument("--profile", choices=profiles, action="append")
     parser.add_argument("--cases", type=int, default=32)
     parser.add_argument("--jobs", type=int, default=2)
