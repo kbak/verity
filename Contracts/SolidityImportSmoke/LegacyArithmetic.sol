@@ -65,7 +65,7 @@ contract LegacyArithmetic {
         return stored;
     }
 
-    function fixedBytesConversion(uint256 x, uint256) external pure returns (bytes32) {
+    function fixedBytesConversion(uint256 x, uint256 unused) external pure returns (bytes32) {
         return bytes32(x);
     }
 }

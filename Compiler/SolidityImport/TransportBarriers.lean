@@ -59,6 +59,10 @@ def isClosedReturnMemory (mod : Compiler.ECM.ExternalCallModule) : Bool :=
 
 abbrev isClosedMemoryReturn := isClosedReturnMemory
 
+/-- A memory revert calls no external account and has no continuation. -/
+def isClosedRevertMemory (mod : Compiler.ECM.ExternalCallModule) : Bool :=
+  mod.byteTransport == some .revertMemory && mod == Compiler.ECM.SolidityRevertMemory.module
+
 /-- The closed typed-interface `staticcall` transport emitted by the importer. -/
 def isClosedStaticCall (mod : Compiler.ECM.ExternalCallModule) : Bool :=
   match mod.byteTransport with
@@ -111,6 +115,7 @@ partial def eraseClosedTransports : Stmt → Stmt
         .letVar (mod.resultVars.headD "") (.literal 0)
       else if isClosedLog mod then .ite (.literal 0) [] []
       else if isClosedReturnMemory mod then .stop
+      else if isClosedRevertMemory mod then .revertEmpty
       else .ecm mod args
   | .ite cond yes no => .ite cond (yes.map eraseClosedTransports) (no.map eraseClosedTransports)
   | .forEach name count body => .forEach name count (body.map eraseClosedTransports)

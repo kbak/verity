@@ -1489,7 +1489,10 @@ def directMetadata : Stmt → StmtMetadata
   | .tryExternalCallBind successVar resultVars _ args =>
       { subexpressions := args, scopeEffects := { bindNames := successVar :: resultVars } }
   | .ecm mod args =>
-      { subexpressions := args, scopeEffects := { bindNames := mod.resultVars } }
+      if mod == Compiler.ECM.SolidityRevertMemory.module && args.length == 2 then
+        { subexpressions := args, termination := .alwaysTerminates, controlFlow := .reverts }
+      else
+        { subexpressions := args, scopeEffects := { bindNames := mod.resultVars } }
   | .unsafeBlock reason _ =>
       { unsafeReasons := [reason] }
   | .unsafeYul fragment =>
@@ -1627,6 +1630,11 @@ def controlFlow : Stmt → ControlFlowSummary
       controlFlowBranches branches
   | .unsafeYul fragment =>
       fragment.controlFlow
+  | .ecm mod args =>
+      if mod == Compiler.ECM.SolidityRevertMemory.module && args.length == 2 then
+        .reverts
+      else
+        .fallsThrough
   | _ =>
       .fallsThrough
 

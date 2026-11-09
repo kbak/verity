@@ -8,6 +8,11 @@ import sys
 from .engine import ROOT, WORKSPACE, MUTANT_BUILD_TIMEOUT, HarnessError, command, write_json
 
 MUTANTS = {
+    'import-fixed-bytes-literal-alignment': ('Compiler/SolidityImport/Import.lean', '  return { pre := #[], expr := .literal (word * 16 ^ (64 - hex.length)) }', '  return { pre := #[], expr := .literal word }'),
+    'import-fixed-bytes-truncation': ('Compiler/SolidityImport/Import.lean', '      return { v with expr := .bitAnd v.expr (.literal ((2 ^ (8 * width) - 1) * 2 ^ shift)) }', '      return v'),
+    'denote-memory-revert-empty': ('Verity/Core/Model/Denote.lean', '  return .revertWithData ((List.range size).map fun i =>\n    UInt8.ofNat (state.world.byteMemory.readByte (offset + i)).val)', '  let _ := (offset, size)\n  return .revertWithData []'),
+    'ecm-memory-revert-size': ('Verity/Core/Model/ECM.lean', '  | [offset, size] => pure [.exprStmt (.call "revert" [offset, size])]', '  | [offset, size] => pure [.exprStmt (.call "revert" [offset, .call "add" [size, .lit 1]])]'),
+
     "import-legacy-root-checked": ("Compiler/SolidityImport/Import.lean", 'legacyWrapping := legacy, unchecked := legacy', 'legacyWrapping := legacy, unchecked := false'),
     "import-legacy-helper-checked": ("Compiler/SolidityImport/Import.lean", 'legacyWrapping := legacy, unchecked := legacy', 'legacyWrapping := false, unchecked := legacy'),
     "import-require-condition": ("Compiler/SolidityImport/Import.lean", 'return condition.pre.push (.require condition.expr value)', 'return condition.pre.push (.require (.literal 1) value)'),
@@ -136,6 +141,9 @@ def mutation_campaign(output, selected=None):
                 config = "differential-legacy-arithmetic.json"
             elif name == "import-legacy-helper-checked":
                 config = "differential-legacy-helper.json"
+            if name in ("import-fixed-bytes-literal-alignment", "import-fixed-bytes-truncation",
+                        "denote-memory-revert-empty", "ecm-memory-revert-size"):
+                config = "differential-fixed-bytes-legacy-zero.json"
             if "custom-require" in name:
                 config = "differential-require-custom.json"
             argv = [sys.executable, str(directory / "scripts/solidity_import_differential.py"),

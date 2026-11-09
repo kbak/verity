@@ -1705,6 +1705,18 @@ def executeByteReturnMemory (oracle : DenoteOracle) (fields : List Field)
     (DenoteMemory.wordValue (state.world.byteMemory.readWord (offset + 32 * index))).val
   return .stop { state with observedReturnWords := some returned, observedStop := false }
 
+/-- Physical bytes are observable even when the offset or length is unaligned.
+No continuation state is committed by a reverting frame. -/
+def executeByteRevertMemory (oracle : DenoteOracle) (fields : List Field)
+    (state : DenoteState) (mod : Compiler.ECM.ExternalCallModule) (args : List Expr) :
+    Except String StmtOutcome := do
+  unless mod == Compiler.ECM.SolidityRevertMemory.module do
+    throw "closed memory revert metadata differs"
+  let some [offset, size] := evalExprList oracle fields state args
+    | throw "memory revert argument evaluation unsupported"
+  return .revertWithData ((List.range size).map fun i =>
+    UInt8.ofNat (state.world.byteMemory.readByte (offset + i)).val)
+
 /-! ## Statement denotation (mirrors event-less `SourceSemantics.execStmt`) -/
 
 def valuesAsEventArgs (values : List Nat) : List Verity.Core.Uint256 :=
@@ -2167,6 +2179,10 @@ mutual
             | .error _ => .revert
         | some (.extCodeCopy resultVar) =>
             match executeByteExtCodeCopy oracle fields state mod resultVar args with
+            | .ok outcome => outcome
+            | .error _ => .revert
+        | some .revertMemory =>
+            match executeByteRevertMemory oracle fields state mod args with
             | .ok outcome => outcome
             | .error _ => .revert
         | some .returnMemory =>
