@@ -8,6 +8,14 @@ import sys
 from .engine import ROOT, WORKSPACE, MUTANT_BUILD_TIMEOUT, HarnessError, command, write_json
 
 MUTANTS = {
+    'import-legacy-packed-rounding': ('Compiler/SolidityImport/LegacyPacked.lean',
+        '.mstore (.literal 64) (.add data (.literal size))',
+        '.mstore (.literal 64) (.add data (.literal ((size + 31) / 32 * 32)))'),
+    'import-legacy-packed-header': ('Compiler/SolidityImport/LegacyPacked.lean',
+        '.mstore header (.literal size)', '.mstore header (.literal (size + 1))'),
+    'import-legacy-packed-alignment': ('Compiler/SolidityImport/LegacyPacked.lean',
+        'let shift := 8 * (32 - width)', 'let shift := 8 * (31 - width)'),
+
     'import-legacy-pointer-encode-order': ('Verity/Core/Model/LegacySignatureCalls.lean',
         '    .let_ (p ++ "ptr") (.call "mload" [.lit 64]),\n    store ptr (.lit (selector * 2^224)), store (add ptr 4) hash,\n    store (add ptr 36) (.lit 64),\n    .let_ (p ++ "size") (.call "mload" [.call "sub" [data, .lit 32]]),',
         '    .let_ (p ++ "ptr") (.call "mload" [.lit 64]),\n    .let_ (p ++ "size") (.call "mload" [.call "sub" [data, .lit 32]]),\n    store ptr (.lit (selector * 2^224)), store (add ptr 4) hash,\n    store (add ptr 36) (.lit 64),'),
@@ -193,6 +201,11 @@ def mutation_campaign(output, selected=None):
                 argv = [sys.executable, "-c",
                         "import sys; sys.path.insert(0, 'scripts'); "
                         "from solidity_differential.check_legacy_byte_pointers import main; sys.exit(main())",
+                        "--output", str(directory / ".lake/campaign"), "--random-cases", "0"]
+            if name.startswith("import-legacy-packed-"):
+                argv = [sys.executable, "-c",
+                        "import sys; sys.path.insert(0, 'scripts'); "
+                        "from solidity_differential.check_legacy_packed_hash import main; sys.exit(main())",
                         "--output", str(directory / ".lake/campaign"), "--random-cases", "0"]
             # A pre-existing fixture divergence is not evidence that a mutation was
             # detected. Run the identical inputs in the private snapshot first.
