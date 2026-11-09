@@ -101,14 +101,14 @@ select validation in the target contract's source unit. Inherited functions
 use the target contract's decoder, even when their defining file selects the
 other coder. Except for ABI coder v1 memory bytes described below, dynamic and
 aggregate ABI, signed arithmetic, enum conversions,
-narrow fixed-bytes root ABI, loops, modifiers, general assembly, external calls,
+narrow fixed-bytes root ABI, modifiers, general assembly, external calls,
 and builtins other than `require`/`revert` remain outside the legacy slice.
 The fixed-byte and terminal memory-revert extension below admits additional
 local/helper conversions and a bounded assembly form.
-Division and modulo are rejected even with a nonzero-looking denominator:
-0.7.6 can execute `INVALID`, whereas 0.8 emits a panic payload. Legacy assertions
-are likewise rejected. Neither empty `REVERT` nor a 0.8 panic is substituted
-for an exceptional halt. These are support boundaries, not claims that the
+Division and modulo require the path evidence described below: 0.7.6 can
+execute `INVALID`, whereas 0.8 emits a panic payload. Legacy assertions and
+divisions without sufficient guard evidence remain rejected. Neither empty
+`REVERT` nor a 0.8 panic is substituted for an exceptional halt. These are support boundaries, not claims that the
 rejected source is incorrect.
 
 Run the reusable execution campaign and semantic mutations:
@@ -234,6 +234,80 @@ checks do not establish universal source/compiler correspondence or authorizatio
 properties for a signature-checking application. Recovery, external validation,
 and the surrounding iteration/bounds logic require their own extensions.
 
+
+
+## Legacy bounded loops and guarded division
+
+The 0.7.6 path admits zero-based `uint256` loops of the form
+`for (uint256 i = 0; i < bound; ++i)` and
+`for (i = 0; i < bound; ++i)` with an existing writable scalar counter.
+The bound must satisfy the existing invariant-bound lowerer, and the body must
+not assign the counter or the bound (including a byte buffer supplying `.length`).
+The existing-counter form executes its initializer even for zero iterations and
+leaves the counter equal to the bound on normal completion. Nested counted loops,
+root early returns, explicit reverts, and scalar helper calls retain their normal
+control flow. Helper-loop early returns remain unsupported.
+
+Unsigned `while (v != 0)` / `while (v > 0)` loops use the existing exact
+bit-clearing or positive constant right-shift progress checks. The lowering runs
+at most the operand's bit width, testing the source condition at each iteration.
+The legacy admission gate excludes other while forms, including modern lowering
+paths that use heuristic iteration limits. General loops, `do` loops,
+`break`/`continue`, narrow for counters, inclusive for bounds, and mutations of
+the loop counter from its body remain rejected.
+
+Unsigned `/`, `%`, `/=`, and `%=` are admitted only for a positive integer literal
+or an unsigned local/parameter whose nonzero value follows from a guard on every
+reaching path. The analysis understands `require`, zero comparisons, negation,
+short-circuit conjunction/disjunction, and early `return`/builtin `revert`.
+For example, `if (a == 0) return 0; uint256 c = a * b; require(c / a == b);`
+uses wrapped multiplication followed by the source's explicit overflow check.
+The guarded denominator must never be assigned in that reached declaration;
+the analysis includes compound assignments, loop updates, and assembly writes.
+Each reached helper establishes its own guards. Casted/computed denominators,
+state-derived guards, caller-only guards, and guards invalidated by assignment
+are conservatively rejected. This is an admission analysis, not a general
+nonzero solver or a proof of source/compiler correspondence.
+
+`LegacyControlFlow.lean` implements this boundary and contributes to the importer
+source digest. Once admitted, division/modulo lower to unsigned EVM arithmetic;
+no modern panic is inserted for the excluded zero case. Legacy `require(bool)`
+preserves empty revert bytes regardless of unrelated state declarations. Modern Solidity's
+division-by-zero panic behavior is unchanged.
+
+`check_legacy_control_flow.py` compares the actual solc 0.7.6 bytecode, executable
+model, and compiled model with independent integer/byte formulas. It exercises
+zero iterations, final counter values, nested and shrinking loops, narrow
+wrapping, multiplication overflow, guarded division/remainders, exact explicit
+revert bytes, and repeated memory decoding inside loops. It repeats the generic
+fixtures in separate source inputs with zero, one, and two storage declarations
+(including imported files); `--optimized` also checks
+the optimized source profile. Rejection controls include stale guards, partial
+paths, loop-carried writes, narrow casts, and unstable loop bounds.
+The guard-stability admission mutation must expose a successful import of a
+forbidden program (`require(b != 0); b--; return a / b`, with `b = 1`). It does
+not classify exceptional halts as ordinary execution results. Separate execution
+mutations corrupt division operands and the final loop counter; all mutations
+require passing positive controls, and build/import failures never detect them.
+A modern regression retains the exact division/modulo-by-zero panic payload.
+
+```sh
+PYTHONPATH=scripts python3 -m solidity_differential.check_legacy_control_flow \
+  --jobs 4 --rejections --guard-probe --modern --output .lake/legacy-control-flow
+python3 scripts/solidity_import_mutations.py --jobs 3 \
+  --task import-legacy-loop-final-counter --task import-legacy-division-operands \
+  --task import-legacy-guard-stability
+```
+
+The finite campaigns exercise small counted loops and word-bounded shrinking
+loops. They establish neither gas equivalence nor success for resource-exhausting
+executions. Exceptional halts remain outside the model. The admission mutant
+checks rejection without executing the exceptional halt. The calldata-word adapter and
+memory limits described above still apply. Full signature checking still needs
+cryptographic and external-contract integration, among other construct gaps.
+
+Semantic references: [Solidity 0.7.6 control structures](https://docs.soliditylang.org/en/v0.7.6/control-structures.html)
+and [integer arithmetic](https://docs.soliditylang.org/en/v0.7.6/types.html#integers).
 
 ## Proving properties of an imported function
 

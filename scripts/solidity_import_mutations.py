@@ -490,6 +490,9 @@ solidity_import both from "{WORK / "base"}" entry "Slice.sol"
 # Compile and execute actual Denote mutants: a build failure is invalid,
 # not a detected semantic mutation. These regressions compare EVM bytes.
 DIFFERENTIAL_MUTANTS = (
+    'import-legacy-loop-final-counter',
+    'import-legacy-division-operands',
+    'import-legacy-guard-stability',
     'import-legacy-bytes-header',
     'import-legacy-bytes-padding',
     'import-legacy-bytes-byte-lane',

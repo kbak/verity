@@ -1,0 +1,34 @@
+{
+  "project": ".",
+  "entry": "LegacyControlFlow.sol",
+  "contract": "LegacyControlFlow",
+  "function": "shrinking",
+  "solc": "0.7.6+commit.7338295f",
+  "settings": {
+    "evmVersion": "istanbul",
+    "viaIR": false,
+    "optimizer": {
+      "enabled": false,
+      "runs": 200
+    },
+    "metadata": {
+      "bytecodeHash": "ipfs"
+    }
+  },
+  "param_types": [
+    "uint256",
+    "uint256",
+    "uint256"
+  ],
+  "variables": {
+    "a": 256,
+    "seed": 256,
+    "mode": 256
+  },
+  "arguments": {
+    "a": "a",
+    "seed": "seed",
+    "mode": "mode"
+  },
+  "storage": []
+}

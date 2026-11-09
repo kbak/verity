@@ -1,0 +1,29 @@
+{
+  "project": ".",
+  "entry": "LegacyControlFlow.sol",
+  "contract": "LegacyControlFlow",
+  "function": "decodeLoop",
+  "solc": "0.7.6+commit.7338295f",
+  "settings": {
+    "evmVersion": "istanbul",
+    "viaIR": false,
+    "optimizer": {
+      "enabled": false,
+      "runs": 200
+    },
+    "metadata": {
+      "bytecodeHash": "ipfs"
+    }
+  },
+  "param_types": [
+    "bytes",
+    "uint256"
+  ],
+  "variables": {
+    "n": 256
+  },
+  "arguments": {
+    "n": "n"
+  },
+  "storage": []
+}

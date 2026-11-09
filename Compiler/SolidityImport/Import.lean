@@ -3976,6 +3976,9 @@ private partial def checkedSub (left right : Val) : M Val := do
 private partial def checkedDiv (left right : Val) : M Val := do
   let a ← atom left
   let b ← atom right
+  -- Legacy declaration admission establishes a nonzero divisor on every path.
+  if (← get).legacyWrapping then
+    return { pre := a.pre ++ b.pre, expr := .div a.expr b.expr }
   let dest ← fresh
   let ok := Stmt.assignVar dest (.div a.expr b.expr)
   let ite := iteStmt (.eq b.expr (.literal 0)) divPanic ok
@@ -3984,6 +3987,9 @@ private partial def checkedDiv (left right : Val) : M Val := do
 private partial def checkedModulo (left right : Val) : M Val := do
   let a ← atom left
   let b ← atom right
+  -- Legacy declaration admission establishes a nonzero divisor on every path.
+  if (← get).legacyWrapping then
+    return { pre := a.pre ++ b.pre, expr := .mod a.expr b.expr }
   let dest ← fresh
   let moduloResult := Stmt.assignVar dest (.mod a.expr b.expr)
   let moduloGuard := iteStmt (.eq b.expr (.literal 0)) divPanic moduloResult
@@ -9329,6 +9335,17 @@ private partial def stmtContainsInlineAssembly (s : Json) : M Bool := do
 
 /-- Shared exact loop checks; the caller supplies its own return semantics. -/
 private partial def lowerFor (s : Json) (lowerBody : Json → M (Array Stmt)) : M (Array Stmt) := do
+  if (← get).legacyWrapping then
+    if let some (normalized, counter) ← legacyAssignedFor? s then
+      let init ← lowerEffect (← mField s "initializationExpression")
+      let some binding := (← get).writableLocals.find? counter
+        | failAt s "missing existing loop counter binding"
+      let bound ← lowerExpr (← mField (← mField s "condition") "rightExpression")
+      let limit ← fresh
+      let loop ← lowerFor normalized lowerBody
+      -- A zero-iteration loop still assigns zero; normal completion leaves i = bound.
+      return init ++ bound.pre ++ #[.letVar limit bound.expr] ++ loop ++
+        #[.assignVar binding (.localVar limit)]
   -- Only `for (uint256 i = 0; i < n; i++)` with an invariant `n` and a
   -- counter the body never assigns: then solc's per-iteration `i < n`
   -- test is exactly `forEach i n`, and `i++` cannot overflow.
@@ -12357,9 +12374,10 @@ private partial def lowerRequireWith (statement : Json) (lowerCondition : Json �
   -- solc 0.8.34 retains all three builtin overloads (-18) even after
   -- selecting the (bool,string) signature. Do not relax user-call refInt.
   let signature ← mType callee
+  let bareRequire := (← get).legacyWrapping || (← get).stateVars.size > 1
   unless (← mField callee "referencedDeclaration").getInt?.toOption == some (-18) &&
       (signature == "function (bool,string memory) pure" || signature == "function (bool,error) pure" ||
-       ((← get).stateVars.size > 1 && signature == "function (bool) pure")) do
+       (bareRequire && signature == "function (bool) pure")) do
     failAt callee "require must resolve to a supported Solidity builtin signature"
   unless (← mArr (← mField callee "overloadedDeclarations")).all
       (fun declaration => declaration.getInt?.toOption == some (-18)) do
@@ -12369,7 +12387,7 @@ private partial def lowerRequireWith (statement : Json) (lowerCondition : Json �
   unless (← mArr (← mField call "names")).isEmpty do
     failAt call "named require arguments are unsupported"
   let args ← mArr (← mField call "arguments")
-  if signature == "function (bool) pure" && (← get).stateVars.size > 1 then
+  if signature == "function (bool) pure" && bareRequire then
     unless args.size == 1 do failAt call "require(bool) requires one argument"
     let condition ← atom (← lowerCondition args[0]!)
     return condition.pre.push (.ite condition.expr [] [.revertEmpty])
@@ -15446,6 +15464,7 @@ private def importSlice
   let quoteSrc ← moduleText sourceRoot "Compiler/SolidityImport/Quote.lean"
   let profileSrc ← moduleText sourceRoot "Compiler/SolidityImport/Profile.lean"
   let legacySrc ← moduleText sourceRoot "Compiler/SolidityImport/Legacy.lean"
+  let legacyFlowSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyControlFlow.lean"
   let abiLoweringSrc ← moduleText sourceRoot "Compiler/SolidityImport/AbiLowering.lean"
   let exprHelpersSrc ← moduleText sourceRoot "Compiler/SolidityImport/ExprHelpers.lean"
   -- JSON framing prevents distinct file/signature lists from sharing a
@@ -15460,6 +15479,7 @@ private def importSlice
       ("Import.lean", Json.str importer), ("Coverage.lean", Json.str coverage),
       ("Report.lean", Json.str reportSrc), ("Quote.lean", Json.str quoteSrc),
       ("Profile.lean", Json.str profileSrc), ("Legacy.lean", Json.str legacySrc),
+      ("LegacyControlFlow.lean", Json.str legacyFlowSrc),
       ("AbiLowering.lean", Json.str abiLoweringSrc),
       ("ExprHelpers.lean", Json.str exprHelpersSrc)])]
   let digest := sha256Hex digestInput.compress.toUTF8
