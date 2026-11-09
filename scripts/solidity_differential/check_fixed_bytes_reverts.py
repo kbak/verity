@@ -70,7 +70,7 @@ REJECTIONS = {
     "nonterminal": "assembly requires a terminal memory revert",
     "unsupportedBuiltin": "memory-revert assembly builtin is unsupported",
     "conditionalAssembly": "memory-revert assembly must be straight-line",
-    "dynamicBuffer": "scalar slice does not support type bytes memory",
+    "dynamicBuffer": "bytes locals require an existing memory buffer",
     "division": "legacy exceptional halt is not modeled",
     "arbitraryLoad": "unsupported Yul builtin mload",
 }

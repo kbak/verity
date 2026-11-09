@@ -1,0 +1,29 @@
+{
+  "project": ".",
+  "entry": "LegacyByteMemory.sol",
+  "contract": "LegacyByteMemoryOne",
+  "function": "decode",
+  "solc": "0.7.6+commit.7338295f",
+  "settings": {
+    "evmVersion": "istanbul",
+    "viaIR": false,
+    "optimizer": {
+      "enabled": false,
+      "runs": 200
+    },
+    "metadata": {
+      "bytecodeHash": "ipfs"
+    }
+  },
+  "param_types": [
+    "bytes",
+    "uint256"
+  ],
+  "variables": {
+    "index": 256
+  },
+  "arguments": {
+    "index": "index"
+  },
+  "storage": []
+}
