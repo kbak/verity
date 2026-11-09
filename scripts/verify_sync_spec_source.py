@@ -211,7 +211,7 @@ SPEC = {'check_only_paths': ['.github/workflows/**',
                            'SOLC_SHA256': '1274e5c4621ae478090c5a1f48466fd3c5f658ed9e14b15a0b213dc806215468',
                            'VERIFY_CLEAN_BUILD': "${{ (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.clean_build)) && 'true' || 'false' }}",
                            'VERIFY_FORCE_FULL_RUN': "${{ (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.force_full_run)) && 'true' || 'false' }}",
-                           'VERIFY_USE_STICKY_DISKS': "${{ (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.clean_build)) && 'false' || 'true' }}",
+                           'VERIFY_USE_STICKY_DISKS': "${{ (github.repository == 'kbak/verity' || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.clean_build)) && 'false' || 'true' }}",
                            'VERIFY_DISABLE_LAKE_CACHE_RESTORE': "${{ (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.clean_build)) && 'true' || 'false' }}",
                            'VERIFY_CACHE_BUCKET': "${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('ref-{0}', github.ref_name) }}",
                            'VERIFY_MAIN_CACHE_BUCKET': 'ref-main',
@@ -987,3 +987,6 @@ SPEC['expected_job_if_conditions']['ci-gate'] = (
 SPEC['expected_job_runs_on']['ci-gate'] = '[self-hosted, linux, verity, fastlane]'
 SPEC['expected_job_timeouts']['ci-gate'] = 5
 SPEC['expected_job_permissions']['ci-gate'] = {'contents': 'read'}
+
+# Fork-only routing. The validator still checks all upstream runner classes.
+SPEC['fork_hosted_runner'] = {'repository': 'kbak/verity', 'label': 'ubuntu-24.04'}

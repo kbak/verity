@@ -977,6 +977,15 @@ def check_job_contracts(snapshot: Snapshot, spec: dict) -> CheckResult:
                 errors.append(f"{job} runs-on spec is not a label list: {expected_job_runs_on!r}")
             else:
                 expected_job_runs_on = expected_job_runs_on[:-1] + ", build-medium]"
+        fork_runner = spec.get("fork_hosted_runner")
+        if fork_runner and expected_job_runs_on is not None:
+            labels = [label.strip() for label in expected_job_runs_on[1:-1].split(",")]
+            hosted = json.dumps([fork_runner["label"]], separators=(",", ":"))
+            upstream = json.dumps(labels, separators=(",", ":"))
+            expected_job_runs_on = (
+                "${{ fromJSON(github.repository == '" + fork_runner["repository"]
+                + "' && '" + hosted + "' || '" + upstream + "') }}"
+            )
         if actual_runs_on != expected_job_runs_on:
             errors.append(
                 f"{job} runs-on does not match spec: workflow={actual_runs_on!r}, spec={expected_job_runs_on!r}"

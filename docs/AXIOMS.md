@@ -37,6 +37,10 @@ GitHub Actions are full-SHA pinned and repository policy rejects mutable Action
 references; see `TRUST_ASSUMPTIONS.md` under “CI execution and Action supply
 chain.”
 
+The fork-only GitHub-hosted runner configuration adds no Lean axiom and changes
+no theorem statement. An OCR skip is not a successful semantic review; hosted
+CI results remain scoped to the checks that actually execute.
+
 ## Current Axioms
 
 - Active axioms: 0
