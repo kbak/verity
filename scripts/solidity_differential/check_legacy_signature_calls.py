@@ -147,7 +147,7 @@ def transactions(seed, caller, accounts, random_cases):
 
 def campaign(directory, *, optimized=False, context=0, seed=2851, random_cases=4,
              fixture=FIXTURE, driver_template=DRIVER, make_transactions=transactions,
-             extra_sources=None, storage_fields=None):
+             extra_sources=None, storage_fields=None, initial_storage=None):
     directory = Path(directory).resolve()
     directory.mkdir(parents=True, exist_ok=False)
     command(['turbo-lean', '--json', 'build', 'Compiler.SolidityImport.Import',
@@ -209,8 +209,18 @@ def campaign(directory, *, optimized=False, context=0, seed=2851, random_cases=4
                 '0x' + int(value).to_bytes(32, 'big').hex())
                for account, parameters in zip(accounts, RESPONSES, strict=True)
                for slot, value in enumerate(parameters)]
+    if initial_storage is not None:
+        # Overrides describe one explicit initial world, shared by all routes.
+        slots = {(account, slot): value for account, slot, value in initial}
+        overrides = initial_storage(caller, accounts, source_contract['storageLayout'])
+        if len({(account, slot) for account, slot, _ in overrides}) != len(overrides):
+            raise HarnessError('duplicate requested initial storage slot')
+        slots.update({(account, slot): value for account, slot, value in overrides})
+        initial = [(account, slot, value) for (account, slot), value in slots.items()]
+    write_json(directory / 'initial-storage.json', initial)
     calls, recoveries, expectations = make_transactions(seed, caller, accounts, random_cases)
     write_json(directory / 'transactions.json', calls)
+    write_json(directory / 'expectations.json', expectations)
     environment = {'program': 'hash-static-oracle-v1', 'accounts': [str(int(a, 16)) for a in accounts],
                    'emptyAccounts': [str(int(EMPTY, 16)), str(int(SENDER, 16))],
                    'gas': '1000000', 'recoveries': recoveries}
@@ -221,18 +231,21 @@ def campaign(directory, *, optimized=False, context=0, seed=2851, random_cases=4
             account_code=[(a, '0x' + mock['deployedBytecode']['object']) for a in accounts]),
         'compiled': EVM(directory / 'C', ['0x' + next(iter(model.values()))['evm']['bytecode']['object'], *deployments], initial)}
     result = replay_three_routes(calls, adapters)
-    report = {**result, 'count': len(calls), 'optimized': optimized, 'context': context, 'seed': seed,
-              'sourceSha256': hashlib.sha256(source.encode()).hexdigest()}
-    write_json(directory / 'campaign.json', report)
-    write_json(directory / 'results.json', {**report, 'cases': len(calls)})
-    if result['divergences']:
-        return 1
+    mismatches = []
     for route, observations in result['observations'].items():
         for tx, observation in zip(calls, observations, strict=True):
             if tx['id'] in expectations:
                 actual = observation['status'], observation['data']
                 if actual != expectations[tx['id']]:
-                    raise HarnessError(f'independent byte expectation differs: {route} {tx["id"]}')
+                    mismatches.append({'route': route, 'id': tx['id'],
+                        'label': tx.get('label'), 'actual': actual, 'expected': expectations[tx['id']]})
+    report = {**result, 'count': len(calls), 'optimized': optimized, 'context': context, 'seed': seed,
+              'sourceSha256': hashlib.sha256(source.encode()).hexdigest(),
+              'expectationMismatches': mismatches}
+    write_json(directory / 'campaign.json', report)
+    write_json(directory / 'results.json', {**report, 'cases': len(calls)})
+    if result['divergences'] or mismatches:
+        return 1
     write_json(directory / 'summary.json', {'passed': True, 'count': len(calls),
         'optimized': optimized, 'context': context, 'seed': seed,
         'scope': 'finite byte-exact A/B/C observations; explicit external world; gas excluded'})
