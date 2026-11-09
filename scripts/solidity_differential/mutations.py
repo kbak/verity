@@ -8,6 +8,14 @@ import sys
 from .engine import ROOT, WORKSPACE, MUTANT_BUILD_TIMEOUT, HarnessError, command, write_json
 
 MUTANTS = {
+    'import-legacy-pointer-encode-order': ('Verity/Core/Model/LegacySignatureCalls.lean',
+        '    .let_ (p ++ "ptr") (.call "mload" [.lit 64]),\n    store ptr (.lit (selector * 2^224)), store (add ptr 4) hash,\n    store (add ptr 36) (.lit 64),\n    .let_ (p ++ "size") (.call "mload" [.call "sub" [data, .lit 32]]),',
+        '    .let_ (p ++ "ptr") (.call "mload" [.lit 64]),\n    .let_ (p ++ "size") (.call "mload" [.call "sub" [data, .lit 32]]),\n    store ptr (.lit (selector * 2^224)), store (add ptr 4) hash,\n    store (add ptr 36) (.lit 64),'),
+    'import-legacy-pointer-zero-slot': ('Compiler/SolidityImport/Import.lean',
+        'pointer := .literal 128, size := .literal 0', 'pointer := .literal 96, size := .literal 0'),
+    'import-legacy-pointer-length': ('Compiler/SolidityImport/LegacyBytePointers.lean',
+        '{ buffer with size := .mload (.sub buffer.pointer (.literal 32)) }',
+        '{ buffer with size := .literal 0 }'),
     'ecm-legacy-code-existence': ('Verity/Core/Model/LegacySignatureCalls.lean',
         '.if_ (.call "iszero" [.call "extcodesize" [target]])', '.if_ (.lit 0)'),
     'ecm-legacy-recovery-stale': ('Verity/Core/Model/LegacySignatureCalls.lean',
@@ -17,7 +25,7 @@ MUTANTS = {
     'import-legacy-loop-final-counter': ('Compiler/SolidityImport/Import.lean', '#[.assignVar binding (.localVar limit)]', '#[.assignVar binding (.literal 0)]'),
     'import-legacy-division-operands': ('Compiler/SolidityImport/Import.lean', 'return { pre := a.pre ++ b.pre, expr := .div a.expr b.expr }', 'return { pre := a.pre ++ b.pre, expr := .div b.expr a.expr }'),
     'import-legacy-guard-stability': ('Compiler/SolidityImport/LegacyControlFlow.lean', 'if writes.contains id then s else s.insert id', 'if writes.contains id && false then s else s.insert id'),
-    'import-legacy-bytes-header': ('Compiler/SolidityImport/Import.lean', 'expr := .mload (.add (.sub buf.pointer (.literal 32)) off.expr)', 'expr := .mload (.add buf.pointer off.expr)'),
+    'import-legacy-bytes-header': ('Compiler/SolidityImport/LegacyBytePointers.lean', 'expr := .sub buffer.pointer (.literal 32)', 'expr := buffer.pointer'),
     'import-legacy-bytes-padding': ('Compiler/SolidityImport/AbiLowering.lean', '  , .mstore (.add data length) (.literal 0) ]', '  ]'),
     'import-legacy-bytes-byte-lane': ('Compiler/SolidityImport/Import.lean', '| "byte", #[a, b] => pure { pre, expr := .byte a b }', '| "byte", #[a, b] => pure { pre, expr := .byte (.add a (.literal 1)) b }'),
     'import-fixed-bytes-literal-alignment': ('Compiler/SolidityImport/Import.lean', '  return { pre := #[], expr := .literal (word * 16 ^ (64 - hex.length)) }', '  return { pre := #[], expr := .literal word }'),
@@ -180,6 +188,11 @@ def mutation_campaign(output, selected=None):
                 argv = [sys.executable, "-c",
                         "import sys; sys.path.insert(0, 'scripts'); "
                         "from solidity_differential.check_legacy_signature_calls import main; sys.exit(main())",
+                        "--output", str(directory / ".lake/campaign"), "--random-cases", "0"]
+            if name.startswith("import-legacy-pointer-"):
+                argv = [sys.executable, "-c",
+                        "import sys; sys.path.insert(0, 'scripts'); "
+                        "from solidity_differential.check_legacy_byte_pointers import main; sys.exit(main())",
                         "--output", str(directory / ".lake/campaign"), "--random-cases", "0"]
             # A pre-existing fixture divergence is not evidence that a mutation was
             # detected. Run the identical inputs in the private snapshot first.

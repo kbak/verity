@@ -145,33 +145,45 @@ def transactions(seed, caller, accounts, random_cases):
     return calls, rows, expectations
 
 
-def campaign(directory, *, optimized=False, context=0, seed=2851, random_cases=4):
+def campaign(directory, *, optimized=False, context=0, seed=2851, random_cases=4,
+             fixture=FIXTURE, driver_template=DRIVER, make_transactions=transactions,
+             extra_sources=None, storage_fields=None):
     directory = Path(directory).resolve()
     directory.mkdir(parents=True, exist_ok=False)
     command(['turbo-lean', '--json', 'build', 'Compiler.SolidityImport.Import',
              'Compiler.SolidityImport.Differential', 'Compiler.SolidityImport.SequenceRunner',
              'Compiler.SolidityImport.SignatureMocks', '--project-dir', '.'], timeout=1800,
             log=directory / 'build.log')
-    source = FIXTURE.read_text()
+    source = fixture.read_text()
+    contract = fixture.stem
     if context:
-        source = source.replace('contract LegacySignatureCalls {',
-            'contract LegacySignatureCalls {\n' + '\n'.join(f'uint256 private pad{i};' for i in range(context)))
+        source = source.replace(f'contract {contract} {{',
+            f'contract {contract} {{\n' + '\n'.join(f'uint256 private pad{i};' for i in range(context)))
     (directory / 'Sequence.sol').write_text(source)
-    template = DRIVER.read_text()
-    assert template.count(ANCHOR) == 1
-    template = template.replace(ANCHOR, f'from "{directory}" entry "Sequence.sol"')
+    template = driver_template.read_text()
+    anchor = f'from "Contracts/SolidityImportSmoke" entry "{fixture.name}"'
+    assert template.count(anchor) == 1
+    template = template.replace(anchor, f'from "{directory}" entry "Sequence.sol"')
     if optimized:
         template = template.replace('optimizerRuns := none', 'optimizerRuns := some 200')
     driver = directory / 'Driver.lean'
     driver.write_text(template)
     settings = {'evmVersion': 'istanbul', 'optimizer': {'enabled': optimized, 'runs': 200},
                 'metadata': {'bytecodeHash': 'none'}}
+    for name, text in (extra_sources or {}).items():
+        path = directory / name
+        if Path(name).is_absolute() or not path.resolve().is_relative_to(directory):
+            raise HarnessError('extra source must stay within the campaign directory')
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
     source_contract = solc_compile({'language': 'Solidity',
-        'sources': {'Sequence.sol': {'content': source}},
+        'sources': {'Sequence.sol': {'content': source},
+                    **{name: {'content': text} for name, text in (extra_sources or {}).items()}},
         'settings': {**settings, 'outputSelection': {'*': {'*': ['evm.bytecode.object',
             'evm.methodIdentifiers', 'storageLayout']}}}}, directory, directory / 'source-solc',
-        solc=Path.cwd() / '.lake/solidity-import/solc-0.7.6')['contracts']['Sequence.sol']['LegacySignatureCalls']
-    if len(source_contract['storageLayout']['storage']) != context:
+        solc=Path.cwd() / '.lake/solidity-import/solc-0.7.6')['contracts']['Sequence.sol'][contract]
+    expected_fields = context if storage_fields is None else storage_fields
+    if len(source_contract['storageLayout']['storage']) != expected_fields:
         raise HarnessError('source state declaration count differs from requested context')
     identifiers = source_contract['evm']['methodIdentifiers']
     write_json(directory / 'selectors.json', [int(identifiers[s], 16) for s in roots(template)])
@@ -197,7 +209,7 @@ def campaign(directory, *, optimized=False, context=0, seed=2851, random_cases=4
                 '0x' + int(value).to_bytes(32, 'big').hex())
                for account, parameters in zip(accounts, RESPONSES, strict=True)
                for slot, value in enumerate(parameters)]
-    calls, recoveries, expectations = transactions(seed, caller, accounts, random_cases)
+    calls, recoveries, expectations = make_transactions(seed, caller, accounts, random_cases)
     write_json(directory / 'transactions.json', calls)
     environment = {'program': 'hash-static-oracle-v1', 'accounts': [str(int(a, 16)) for a in accounts],
                    'emptyAccounts': [str(int(EMPTY, 16)), str(int(SENDER, 16))],
@@ -220,7 +232,7 @@ def campaign(directory, *, optimized=False, context=0, seed=2851, random_cases=4
             if tx['id'] in expectations:
                 actual = observation['status'], observation['data']
                 if actual != expectations[tx['id']]:
-                    raise HarnessError(f'independent signature expectation differs: {route} {tx["id"]}')
+                    raise HarnessError(f'independent byte expectation differs: {route} {tx["id"]}')
     write_json(directory / 'summary.json', {'passed': True, 'count': len(calls),
         'optimized': optimized, 'context': context, 'seed': seed,
         'scope': 'finite byte-exact A/B/C observations; explicit external world; gas excluded'})

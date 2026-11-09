@@ -167,7 +167,7 @@ def closedTransportCovered (mod : Compiler.ECM.ExternalCallModule) (args : List 
         args.length == 4 && exprListCovered args
   | some (.legacyBytes4 resultVar selector) =>
       mod == Compiler.ECM.LegacySignatureCall.bytes4Module resultVar selector &&
-        decide (selector < 2^32) && args.length == 4 && exprListCovered args
+        decide (selector < 2^32) && args.length == 3 && exprListCovered args
   | some (.staticUint256 ..) => staticUint256Covered mod args
   | some (.staticBool ..) => staticBoolCovered mod args
   | some (.staticBytesUint256 ..) => staticBytesUint256Covered mod args

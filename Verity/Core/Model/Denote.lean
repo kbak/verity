@@ -1329,7 +1329,11 @@ def executeLegacySignatureCall (oracle : DenoteOracle) (fields : List Field)
   let some gas := state.byteCallGas | throw "legacy call gas environment missing"
   let some values := evalExprList oracle fields state args
     | throw "legacy call argument evaluation unsupported"
-  let [a, b, c, d] := values | throw "legacy call requires four arguments"
+  unless values.length == (if selector.isSome then 3 else 4) do
+    throw "legacy call argument count differs"
+  let a := values[0]!
+  let b := values[1]!
+  let c := values[2]!
   let pointer := (state.world.memory 64).val
   let write := fun (w : Verity.ContractState) p n =>
     w.writePhysicalMemoryValue p (Verity.Core.Uint256.ofNat n)
@@ -1339,8 +1343,10 @@ def executeLegacySignatureCall (oracle : DenoteOracle) (fields : List Field)
       let w := values.zipIdx.foldl (fun w (n, i) => write w (pointer + 32 + i * 32) n) w
       (1, 128, w)
     | some sel =>
-      let w := write (write (write (write state.world pointer (sel * 2^224))
-        (pointer + 4) b) (pointer + 36) 64) (pointer + 68) d
+      let w := write (write (write state.world pointer (sel * 2^224))
+        (pointer + 4) b) (pointer + 36) 64
+      let d := (w.memory (wordNormalize (c + 2^256 - 32))).val
+      let w := write w (pointer + 68) d
       let rounded := ((d + 31) / 32) * 32
       let w := (List.range ((d + 31) / 32)).foldl (fun w i =>
         write w (pointer + 100 + i * 32) (w.memory (c + i * 32)).val) w

@@ -45,24 +45,29 @@ def recover (result : String) (args : List YulExpr) : Except String (List YulStm
      .assign result (.call "and" [.call "mload" [ptr], .lit (2^160 - 1)])])]
 
 /-- Encode `(bytes32, bytes)` at the free pointer without advancing it, check
-code existence, forward failure bytes, require a word and clean bytes4 padding. -/
+code existence, forward failure bytes, require a word and clean bytes4 padding.
+The length is loaded after the static argument stores: a reconstructed header
+can alias those stores. Payload copies also observe earlier copy writes. -/
 def validate (result : String) (selector : Nat) (args : List YulExpr) :
     Except String (List YulStmt) := do
   unless selector < 2^32 do throw "legacy selector exceeds four bytes"
   let p := scratchPrefix result args
   let (bindings, args) := bindArguments p args
-  let [target, hash, data, size] := args
-    | throw "legacy bytes4 call expects target, hash, data pointer, size"
+  let [target, hash, data] := args
+    | throw "legacy bytes4 call expects target, hash, data pointer"
   let ptr := YulExpr.ident (p ++ "ptr")
   let idx := YulExpr.ident (p ++ "idx")
+  let size := YulExpr.ident (p ++ "size")
   let rounded := YulExpr.ident (p ++ "rounded")
   let success := YulExpr.ident (p ++ "success")
   let tail := YulExpr.call "add" [add ptr 100, .call "sub" [rounded, .lit 32]]
   return bindings ++ [.let_ result (.lit 0), .block [
     .let_ (p ++ "ptr") (.call "mload" [.lit 64]),
-    .let_ (p ++ "rounded") (.call "and" [.call "add" [size, .lit 31], .call "not" [.lit 31]]),
     store ptr (.lit (selector * 2^224)), store (add ptr 4) hash,
-    store (add ptr 36) (.lit 64), store (add ptr 68) size,
+    store (add ptr 36) (.lit 64),
+    .let_ (p ++ "size") (.call "mload" [.call "sub" [data, .lit 32]]),
+    .let_ (p ++ "rounded") (.call "and" [.call "add" [size, .lit 31], .call "not" [.lit 31]]),
+    store (add ptr 68) size,
     .for_ [.let_ (p ++ "idx") (.lit 0)] (.call "lt" [idx, size])
       [.assign (p ++ "idx") (add idx 32)]
       [store (.call "add" [add ptr 100, idx]) (.call "mload" [.call "add" [data, idx]])],

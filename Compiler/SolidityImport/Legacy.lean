@@ -123,10 +123,10 @@ partial def validateLegacyDeclaration (node : Json) : M Unit := do
           if d.isNull then pure false else return (← mType d) == "bytes"
         if hasBytes then
           let init := field? node "initialValue" |>.getD Json.null
-          unless optStr init "nodeType" == some "Identifier" do
-            failAt node "Solidity 0.7.6 bytes locals require an existing memory buffer"
-          unless (← mType init) == "bytes memory" do
-            failAt node "Solidity 0.7.6 bytes locals require an existing memory buffer"
+          unless init.isNull do
+            unless optStr init "nodeType" == some "Identifier" &&
+                (← mType init) == "bytes memory" do
+              failAt node "Solidity 0.7.6 bytes locals require an existing memory buffer"
       if kind == "FunctionCall" then
         if (← mType node) == "bytes memory" then
           failAt node "Solidity 0.7.6 byte construction is outside the decoding slice"

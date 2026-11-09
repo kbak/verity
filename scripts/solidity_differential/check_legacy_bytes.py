@@ -135,10 +135,11 @@ def check_campaign(function, context, output, count, config=None):
             "independent_bytes": "failed" if result["divergences"] else "passed"}
 
 
+# Default bytes references and pointer writes are now positive controls in
+# check_legacy_byte_pointers (empty/zero), not unsupported constructs.
 REJECTIONS = [
     ("helperDirtyWrite", "bytes", "Yul assignment to narrow local requires a bounded value"),
     ("dirtyWriteTwo", "bytes", "Yul assignment to narrow local requires a bounded value"),
-    ("uninitialized", "uint256", "bytes locals require an existing memory buffer"),
     ("encodedArgument", "uint256", "byte construction is outside the decoding slice"),
     ("replacement", "bytes", "bytes assignment requires an existing memory buffer"),
     ("index", "bytes, uint256", "bytes indexing may execute INVALID"),
@@ -147,7 +148,6 @@ REJECTIONS = [
     ("calldataBuffer", "bytes", "scalar slice does not support type bytes calldata"),
     ("dirtyRead", "bytes, uint256", "assembly reads require full-word or literal scalars"),
     ("dirtyWrite", "bytes", "Yul assignment to narrow local"),
-    ("pointerWrite", "bytes", "not a writable scalar local"),
     ("memoryWrite", "bytes", "assembly requires a terminal memory revert or read-only decoding"),
     ("literalBuffer", "uint256", "bytes helpers require an existing memory buffer"),
     ("decode", "bytes, uint256", "bytes memory requires ABI coder v1"),

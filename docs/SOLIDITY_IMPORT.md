@@ -206,7 +206,7 @@ binding, because the high-level value alone does not determine dirty bits.
 
 This slice rejects ABI coder v2 byte parameters (allocation failures may execute
 `INVALID`), calldata/storage byte sources, byte allocation/encoding, dynamic-byte
-returns, high-level byte indexing, pointer assignment, memory writes in a
+returns, high-level byte indexing, memory writes in a
 continuing assembly block, and assembly control flow. General EVM gas/memory
 expansion and exceptional halts remain outside the execution model. Tests use
 small final addresses, including wrapped arithmetic that returns to ordinary
@@ -1341,7 +1341,52 @@ python3 scripts/solidity_import_mutations.py --jobs 2 \
 ```
 
 This slice alone does not import a complete multisignature authorization path.
-Assembly reassignment of a bytes-memory pointer, dynamic byte construction,
-packed-message hashing, general external signatures, and ABI-v2 byte decoding
-remain outside the legacy boundary. Integration of unchanged downstream helpers,
+Dynamic byte construction, packed-message hashing, general external signatures,
+and ABI-v2 byte decoding remain outside the legacy boundary. Full downstream integration,
 authorization proofs and duplicate-signature mutation checks remain separate work.
+
+
+## Legacy bytes-memory pointer reconstruction
+
+The explicit 0.7.6 profile admits uninitialized `bytes memory` locals (the
+zero-slot header at `0x60`), aliases, high-level pointer reassignment and resolved
+assembly assignments such as `viewData := add(add(data, offset), 32)`. Assignment
+copies an address, performs no memory access and does not allocate or copy a
+buffer. Addresses wrap modulo `2^256`. Rebinding a local or helper parameter does
+not rebind its aliases or caller parameter.
+
+Descriptors retain a data pointer; `.length` reloads the physical header at
+`pointer - 32` each time. Bytes-rooted assembly reads admit nested arithmetic,
+unaligned addresses and reads into adjacent memory. Every legacy entry includes
+the Solidity free-memory prologue, including entries without bytes parameters.
+No application bounds check is inserted: callers must validate untrusted offsets
+and lengths before consuming a reconstructed buffer.
+
+The legacy bytes4 transport takes the target, hash and data pointer. It stores
+the selector and static arguments before loading the length, then copies payload
+words in forward order. A header overlapping the call scratch area sees those
+stores; an overlapping copy sees previous copy writes. This preserves the
+legacy encoder's ordering instead of snapshotting a logical slice in advance.
+Existing aliases also observe scratch changes made by recovery calls.
+
+`LegacyBytePointers.sol` and its differential runner cover default and arbitrary
+pointers, wrapped/unaligned offsets, root and helper rebinding, branch and loop
+assignments, live alias lengths, overlapping validator encoding, checked embedded
+buffers and exact error payloads. An independent byte-array oracle checks all
+three routes. Run storage contexts 0, 1 and 2 with both optimizer profiles:
+
+```sh
+PYTHONPATH=scripts python3 -m solidity_differential.check_legacy_byte_pointers \
+  --context 0 --output .lake/legacy-byte-pointers
+python3 scripts/solidity_import_mutations.py --jobs 4 \
+  --task import-legacy-bytes-header --task import-legacy-pointer-zero-slot \
+  --task import-legacy-pointer-length --task import-legacy-pointer-encode-order
+```
+
+These are finite functional checks, not universal compiler correspondence or
+application authorization proofs. Memory reads/copies remain within a finite
+resource domain; gas, out-of-gas and huge allocations are not modeled. Pointer
+assignment itself is tested even for huge addresses because it does not read
+memory. General continuing memory writes, byte allocation, byte indexing,
+dynamic byte returns, ABI-v2 byte decoding and assembly control flow remain
+rejected. The transports retain `assumed` proof status; no new axiom is introduced.
