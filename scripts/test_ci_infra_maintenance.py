@@ -59,7 +59,8 @@ class CiInfraMaintenanceTests(unittest.TestCase):
             match = re.search(rf"^  {job}:\n(?P<body>.*?)(?=^  [a-zA-Z0-9_-]+:|\Z)", text, re.S | re.M)
             self.assertIsNotNone(match, job)
             self.assertIn(
-                "runs-on: [self-hosted, linux, verity, fastlane]",
+                "runs-on: ${{ fromJSON(github.repository == 'kbak/verity' "
+                "&& '[\"ubuntu-24.04\"]' || '[\"self-hosted\",\"linux\",\"verity\",\"fastlane\"]') }}",
                 match.group("body"),
                 job,
             )

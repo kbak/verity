@@ -71,7 +71,7 @@ env:
   # dispatches use the same path; ordinary push/PR runs retain warm caches.
   VERIFY_CLEAN_BUILD: ${{ (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.clean_build)) && 'true' || 'false' }}
   VERIFY_FORCE_FULL_RUN: ${{ (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.force_full_run)) && 'true' || 'false' }}
-  VERIFY_USE_STICKY_DISKS: ${{ (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.clean_build)) && 'false' || 'true' }}
+  VERIFY_USE_STICKY_DISKS: ${{ (github.repository == 'kbak/verity' || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.clean_build)) && 'false' || 'true' }}
   VERIFY_DISABLE_LAKE_CACHE_RESTORE: ${{ (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.clean_build)) && 'true' || 'false' }}
   VERIFY_CACHE_BUCKET: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('ref-{0}', github.ref_name) }}
   VERIFY_MAIN_CACHE_BUCKET: ref-main
@@ -80,7 +80,7 @@ env:
 jobs:
   closed-pr-cleanup:
     if: github.event_name == 'pull_request' && github.event.action == 'closed'
-    runs-on: [self-hosted, linux, verity, fastlane]
+    runs-on: ${{ fromJSON(github.repository == 'kbak/verity' && '["ubuntu-24.04"]' || '["self-hosted","linux","verity","fastlane"]') }}
     timeout-minutes: 5
     permissions:
       actions: write
@@ -162,7 +162,7 @@ jobs:
 
   changes:
     if: github.event_name != 'pull_request' || github.event.action != 'closed'
-    runs-on: [self-hosted, linux, verity, fastlane]
+    runs-on: ${{ fromJSON(github.repository == 'kbak/verity' && '["ubuntu-24.04"]' || '["self-hosted","linux","verity","fastlane"]') }}
     timeout-minutes: 5
     outputs:
       code: ${{ steps.effective.outputs.code }}
@@ -276,7 +276,7 @@ jobs:
   checks:
     needs: changes
     if: github.event_name != 'pull_request' || github.event.action != 'closed'
-    runs-on: [self-hosted, linux, verity, fastlane]
+    runs-on: ${{ fromJSON(github.repository == 'kbak/verity' && '["ubuntu-24.04"]' || '["self-hosted","linux","verity","fastlane"]') }}
     timeout-minutes: 45
     defaults:
       run:
@@ -287,7 +287,7 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           repository: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || '' }}
+          ref: ${{ github.event_name == 'pull_request' && (github.repository == 'kbak/verity' && github.event.pull_request.head.sha || github.event.pull_request.head.ref) || '' }}
           token: ${{ github.token }}
           path: checks-${{ github.run_id }}-${{ github.run_attempt }}
 
@@ -295,6 +295,7 @@ jobs:
         run: git reset --hard HEAD
 
       - name: Regenerate derived artifacts
+        if: github.repository != 'kbak/verity'
         run: |
           python3 scripts/generate_verification_status.py
           python3 scripts/generate_layer2_boundary_catalog.py
@@ -306,7 +307,7 @@ jobs:
           python3 scripts/sync_verification_status_doc.py
 
       - name: Auto-commit refreshed artifacts
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        if: github.repository != 'kbak/verity' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
         run: |
           git diff --quiet || {
             git config user.name  "github-actions[bot]"
@@ -320,7 +321,7 @@ jobs:
         run: make check
 
   timeout-watchdog:
-    runs-on: [self-hosted, linux, verity, fastlane]
+    runs-on: ${{ fromJSON(github.repository == 'kbak/verity' && '["ubuntu-24.04"]' || '["self-hosted","linux","verity","fastlane"]') }}
     timeout-minutes: 5
     needs: checks
     if: needs.checks.result == 'success' && !(github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.clean_build))
@@ -345,7 +346,7 @@ jobs:
             --branch ${{ github.event.pull_request.base.ref || github.ref_name }}
 
   build:
-    runs-on: [self-hosted, linux, x64, verity, build, build-heavy]
+    runs-on: ${{ fromJSON(github.repository == 'kbak/verity' && '["ubuntu-24.04"]' || '["self-hosted","linux","x64","verity","build","build-heavy"]') }}
     # Proof build + audit prebuilds + smoke imports (~30-45 min). The importer
     # mutation campaigns (~180 isolated snapshots, each recompiling
     # Compiler.SolidityImport.Import) moved to the sharded `import-mutations` job:
@@ -354,7 +355,7 @@ jobs:
     needs: [changes, checks]
     if: needs.checks.result == 'success' && needs.changes.outputs.build == 'true'
     env:
-      LEAN_NUM_THREADS: 8
+      LEAN_NUM_THREADS: ${{ github.repository == 'kbak/verity' && '2' || '8' }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -364,6 +365,7 @@ jobs:
         run: git reset --hard HEAD
 
       - name: Cleanup stale local artifacts
+        if: github.repository != 'kbak/verity'
         run: |
           cleanup_script="${RUNNER_TEMP}/ci-local-persistence-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.sh"
           git show HEAD:scripts/ci_local_persistence.sh > "${cleanup_script}"
@@ -425,6 +427,7 @@ jobs:
         run: tar -h -I 'zstd -T0 -3' -cf lean-workspace-build.tar.zst .lake/build .lake/solidity-import
 
       - name: Publish Lean workspace build locally
+        if: github.repository != 'kbak/verity'
         id: publish-lean-workspace
         run: |
           scripts/ci_local_persistence.sh publish \
@@ -457,12 +460,12 @@ jobs:
 
   build-audits:
     # Audit/package checks stay below the 50 GiB medium-runner cgroup cap.
-    runs-on: [self-hosted, linux, x64, verity, build, build-medium]
+    runs-on: ${{ fromJSON(github.repository == 'kbak/verity' && '["ubuntu-24.04"]' || '["self-hosted","linux","x64","verity","build","build-medium"]') }}
     timeout-minutes: 20
     needs: [changes, checks, build]
     if: needs.checks.result == 'success' && needs.build.result == 'success' && needs.changes.outputs.build == 'true'
     env:
-      LEAN_NUM_THREADS: 4
+      LEAN_NUM_THREADS: ${{ github.repository == 'kbak/verity' && '2' || '4' }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -480,6 +483,7 @@ jobs:
           cache-primary-key: lake-${{ runner.os }}-${{ hashFiles('lean-toolchain') }}-${{ hashFiles('lakefile.lean') }}-${{ hashFiles('lake-manifest.json') }}-${{ github.run_id }}
 
       - name: Restore prepared Lean workspace build (local)
+        if: github.repository != 'kbak/verity'
         id: local-restore-lean-workspace
         continue-on-error: true
         run: |
@@ -536,7 +540,7 @@ jobs:
     # campaign is dominated by a single-threaded rebuild of
     # Compiler.SolidityImport.Import (~2.7 GiB peak), so `--jobs auto` runs one
     # worker per core, capped by available memory (build-medium hosts differ).
-    runs-on: [self-hosted, linux, x64, verity, build, build-medium]
+    runs-on: ${{ fromJSON(github.repository == 'kbak/verity' && '["ubuntu-24.04"]' || '["self-hosted","linux","x64","verity","build","build-medium"]') }}
     # A shard measured 100-122 minutes on idle hosts and over 150 on nippur
     # (6 workers) while other runs shared the pool; more shards would only queue
     # behind the same three build-medium runners.
@@ -572,6 +576,7 @@ jobs:
           cache-primary-key: lake-${{ runner.os }}-${{ hashFiles('lean-toolchain') }}-${{ hashFiles('lakefile.lean') }}-${{ hashFiles('lake-manifest.json') }}-${{ github.run_id }}
 
       - name: Restore prepared Lean workspace build (local)
+        if: github.repository != 'kbak/verity'
         id: local-restore-lean-workspace
         continue-on-error: true
         run: |
@@ -624,12 +629,12 @@ jobs:
   build-compiler-binaries:
     # Secondary compiler binaries fit the medium class; compiler-regressions
     # remains build-heavy because its pathological cases can approach 60 GiB.
-    runs-on: [self-hosted, linux, x64, verity, build, build-medium]
+    runs-on: ${{ fromJSON(github.repository == 'kbak/verity' && '["ubuntu-24.04"]' || '["self-hosted","linux","x64","verity","build","build-medium"]') }}
     timeout-minutes: 360
     needs: [changes, checks, build]
     if: needs.checks.result == 'success' && needs.build.result == 'success' && needs.changes.outputs.compiler == 'true'
     env:
-      LEAN_NUM_THREADS: 4
+      LEAN_NUM_THREADS: ${{ github.repository == 'kbak/verity' && '2' || '4' }}
       CCACHE_DIR: ${{ github.workspace }}/.cache/ccache
       CCACHE_BASEDIR: ${{ github.workspace }}
       CCACHE_NOHASHDIR: "true"
@@ -718,6 +723,7 @@ jobs:
           touch "$CCACHE_DIR"
 
       - name: Restore prepared Lean workspace build (local)
+        if: github.repository != 'kbak/verity'
         id: local-restore-lean-workspace
         continue-on-error: true
         run: |
@@ -914,6 +920,7 @@ jobs:
         run: tar -h -I 'zstd -T0 -3' -cf lean-workspace-compiler-build.tar.zst .lake/build
 
       - name: Publish compiler workspace build locally
+        if: github.repository != 'kbak/verity'
         id: publish-compiler-workspace
         run: |
           scripts/ci_local_persistence.sh publish \
@@ -922,6 +929,7 @@ jobs:
             --path lean-workspace-compiler-build.tar.zst
 
       - name: Publish compiler binaries locally
+        if: github.repository != 'kbak/verity'
         run: |
           scripts/ci_local_persistence.sh publish \
             --run-id "${{ github.run_id }}" \
@@ -929,6 +937,7 @@ jobs:
             --path compiler/bin
 
       - name: Publish difftest interpreter locally
+        if: github.repository != 'kbak/verity'
         run: |
           staging="${RUNNER_TEMP}/difftest-interpreter-artifact-${{ github.run_id }}"
           mkdir -p "$staging"
@@ -939,6 +948,7 @@ jobs:
             --path "$staging"
 
       - name: Publish generated Yul locally
+        if: github.repository != 'kbak/verity'
         run: |
           scripts/ci_local_persistence.sh publish \
             --run-id "${{ github.run_id }}" \
@@ -946,6 +956,7 @@ jobs:
             --path compiler/yul
 
       - name: Publish patched Yul locally
+        if: github.repository != 'kbak/verity'
         run: |
           scripts/ci_local_persistence.sh publish \
             --run-id "${{ github.run_id }}" \
@@ -953,6 +964,7 @@ jobs:
             --path compiler/yul-patched
 
       - name: Publish smoke Yul locally
+        if: github.repository != 'kbak/verity'
         run: |
           scripts/ci_local_persistence.sh publish \
             --run-id "${{ github.run_id }}" \
@@ -960,6 +972,7 @@ jobs:
             --path compiler/yul-smoke
 
       - name: Publish patched smoke Yul locally
+        if: github.repository != 'kbak/verity'
         run: |
           scripts/ci_local_persistence.sh publish \
             --run-id "${{ github.run_id }}" \
@@ -967,6 +980,7 @@ jobs:
             --path compiler/yul-patched-smoke
 
       - name: Publish gas reports locally
+        if: github.repository != 'kbak/verity'
         run: |
           staging="${RUNNER_TEMP}/gas-reports-${{ github.run_id }}"
           mkdir -p "$staging"
@@ -1059,7 +1073,7 @@ jobs:
           path: gas-report-static-patched.tsv
 
   compiler-audits:
-    runs-on: [self-hosted, linux, x64, verity, build, build-medium]
+    runs-on: ${{ fromJSON(github.repository == 'kbak/verity' && '["ubuntu-24.04"]' || '["self-hosted","linux","x64","verity","build","build-medium"]') }}
     timeout-minutes: 45
     needs: [changes, checks, build, build-compiler-binaries]
     if: needs.checks.result == 'success' && needs.build.result == 'success' && needs.build-compiler-binaries.result == 'success' && needs.changes.outputs.compiler == 'true'
@@ -1082,6 +1096,7 @@ jobs:
             lake-${{ runner.os }}-${{ hashFiles('lean-toolchain') }}-${{ hashFiles('lakefile.lean') }}-${{ hashFiles('lake-manifest.json') }}-${{ github.run_id }}
 
       - name: Restore prepared Lean workspace build (local)
+        if: github.repository != 'kbak/verity'
         id: local-restore-lean-workspace
         continue-on-error: true
         run: |
@@ -1101,6 +1116,7 @@ jobs:
         run: tar -I zstd -xf lean-workspace-build.tar.zst
 
       - name: Restore compiler workspace build (local)
+        if: github.repository != 'kbak/verity'
         id: local-restore-compiler-workspace
         continue-on-error: true
         run: |
@@ -1120,6 +1136,7 @@ jobs:
         run: tar -I zstd -xf lean-workspace-compiler-build.tar.zst
 
       - name: Restore generated Yul (local)
+        if: github.repository != 'kbak/verity'
         id: local-restore-yul
         continue-on-error: true
         run: |
@@ -1140,6 +1157,7 @@ jobs:
           path: compiler/yul
 
       - name: Restore patched Yul (local)
+        if: github.repository != 'kbak/verity'
         id: local-restore-yul-patched
         continue-on-error: true
         run: |
@@ -1176,6 +1194,7 @@ jobs:
           path: compiler
 
       - name: Restore compiler binaries (local)
+        if: github.repository != 'kbak/verity'
         id: local-restore-compiler-binaries
         continue-on-error: true
         run: |
@@ -1266,13 +1285,13 @@ jobs:
       # Parity-pack identity report upload removed (see above).
 
   compiler-regressions:
-    runs-on: [self-hosted, linux, x64, verity, build, build-heavy]
+    runs-on: ${{ fromJSON(github.repository == 'kbak/verity' && '["ubuntu-24.04"]' || '["self-hosted","linux","x64","verity","build","build-heavy"]') }}
     timeout-minutes: 200
     needs: [changes, checks, build, build-compiler-binaries]
     # ~2 runner-hours: main pushes, nightly, dispatch, or PRs labelled ci:full.
     if: needs.checks.result == 'success' && needs.build.result == 'success' && needs.build-compiler-binaries.result == 'success' && needs.changes.outputs.compiler == 'true' && (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci:full'))
     env:
-      LEAN_NUM_THREADS: 4
+      LEAN_NUM_THREADS: ${{ github.repository == 'kbak/verity' && '2' || '4' }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -1292,6 +1311,7 @@ jobs:
             lake-${{ runner.os }}-${{ hashFiles('lean-toolchain') }}-${{ hashFiles('lakefile.lean') }}-${{ hashFiles('lake-manifest.json') }}-${{ github.run_id }}
 
       - name: Restore prepared Lean workspace build (local)
+        if: github.repository != 'kbak/verity'
         id: local-restore-lean-workspace
         continue-on-error: true
         run: |
@@ -1311,6 +1331,7 @@ jobs:
         run: tar -I zstd -xf lean-workspace-build.tar.zst
 
       - name: Restore compiler workspace build (local)
+        if: github.repository != 'kbak/verity'
         id: local-restore-compiler-workspace
         continue-on-error: true
         run: |
@@ -1434,7 +1455,7 @@ jobs:
         run: stdbuf -oL -eL lake build Compiler.PanicCodeRegressionTest
 
   lean-profile:
-    runs-on: [self-hosted, linux, x64, verity, build, build-heavy]
+    runs-on: ${{ fromJSON(github.repository == 'kbak/verity' && '["ubuntu-24.04"]' || '["self-hosted","linux","x64","verity","build","build-heavy"]') }}
     timeout-minutes: 45
     needs: [changes, build]
     # Profiling is diagnostic telemetry. Keep it behind the proof build and
@@ -1466,7 +1487,7 @@ jobs:
           path: lean-perf-queue.md
 
   foundry-gas-calibration:
-    runs-on: [self-hosted, linux, x64, verity, build, build-medium]
+    runs-on: ${{ fromJSON(github.repository == 'kbak/verity' && '["ubuntu-24.04"]' || '["self-hosted","linux","x64","verity","build","build-medium"]') }}
     timeout-minutes: 15
     needs: [changes, build-compiler-binaries]
     if: needs.changes.outputs.compiler == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
@@ -1494,7 +1515,7 @@ jobs:
       - name: Setup Foundry environment
         uses: ./.github/actions/setup-foundry
         with:
-          local-artifact-run-id: ${{ github.run_id }}
+          local-artifact-run-id: ${{ github.repository != 'kbak/verity' && github.run_id || '' }}
 
       - name: Verify solc can compile Yul artifacts
         run: |
@@ -1523,7 +1544,7 @@ jobs:
           --allow-missing-contract Vault
 
   foundry:
-    runs-on: [self-hosted, linux, x64, verity, build, build-medium]
+    runs-on: ${{ fromJSON(github.repository == 'kbak/verity' && '["ubuntu-24.04"]' || '["self-hosted","linux","x64","verity","build","build-medium"]') }}
     timeout-minutes: 45
     needs: [changes, build-compiler-binaries]
     if: needs.changes.outputs.compiler == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
@@ -1538,6 +1559,7 @@ jobs:
           submodules: recursive
 
       - name: Restore compiler binaries (local)
+        if: github.repository != 'kbak/verity'
         id: local-restore-compiler-binaries
         continue-on-error: true
         run: |
@@ -1561,6 +1583,7 @@ jobs:
         run: chmod +x compiler/bin/verity-compiler compiler/bin/difftest-interpreter
 
       - name: Restore smoke Yul (local)
+        if: github.repository != 'kbak/verity'
         id: local-restore-yul-smoke
         continue-on-error: true
         run: |
@@ -1621,7 +1644,7 @@ jobs:
       - name: Setup Foundry environment
         uses: ./.github/actions/setup-foundry
         with:
-          local-artifact-run-id: ${{ github.run_id }}
+          local-artifact-run-id: ${{ github.repository != 'kbak/verity' && github.run_id || '' }}
 
       - name: Run Foundry tests with seed 42
         env:
@@ -1637,7 +1660,7 @@ jobs:
           forge test
 
   foundry-patched:
-    runs-on: [self-hosted, linux, x64, verity, build, build-medium]
+    runs-on: ${{ fromJSON(github.repository == 'kbak/verity' && '["ubuntu-24.04"]' || '["self-hosted","linux","x64","verity","build","build-medium"]') }}
     timeout-minutes: 60
     needs: [changes, build-compiler-binaries]
     if: needs.changes.outputs.compiler == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
@@ -1647,6 +1670,7 @@ jobs:
           submodules: recursive
 
       - name: Restore prepared Lean workspace build (local)
+        if: github.repository != 'kbak/verity'
         id: local-restore-lean-workspace
         continue-on-error: true
         run: |
@@ -1666,6 +1690,7 @@ jobs:
         run: tar -I zstd -xf lean-workspace-build.tar.zst
 
       - name: Restore compiler workspace build (local)
+        if: github.repository != 'kbak/verity'
         id: local-restore-compiler-workspace
         continue-on-error: true
         run: |
@@ -1685,6 +1710,7 @@ jobs:
         run: tar -I zstd -xf lean-workspace-compiler-build.tar.zst
 
       - name: Restore patched smoke Yul (local)
+        if: github.repository != 'kbak/verity'
         id: local-restore-yul-patched-smoke
         continue-on-error: true
         run: |
@@ -1747,7 +1773,7 @@ jobs:
         with:
           yul-artifact-name: generated-yul-patched
           yul-artifact-path: compiler/yul-patched
-          local-artifact-run-id: ${{ github.run_id }}
+          local-artifact-run-id: ${{ github.repository != 'kbak/verity' && github.run_id || '' }}
 
       - name: Run Foundry patched-Yul smoke tests
         env:
@@ -1763,7 +1789,7 @@ jobs:
           forge test --no-match-test "Random10000"
 
   foundry-multi-seed:
-    runs-on: [self-hosted, linux, x64, verity, build, build-medium]
+    runs-on: ${{ fromJSON(github.repository == 'kbak/verity' && '["ubuntu-24.04"]' || '["self-hosted","linux","x64","verity","build","build-medium"]') }}
     timeout-minutes: 75
     needs: [changes, build-compiler-binaries]
     if: needs.changes.outputs.compiler == 'true' && github.event_name != 'pull_request'
@@ -1778,6 +1804,7 @@ jobs:
           submodules: recursive
 
       - name: Restore compiler binaries (local)
+        if: github.repository != 'kbak/verity'
         id: local-restore-compiler-binaries
         continue-on-error: true
         run: |
@@ -1801,6 +1828,7 @@ jobs:
         run: chmod +x compiler/bin/verity-compiler compiler/bin/difftest-interpreter
 
       - name: Restore smoke Yul (local)
+        if: github.repository != 'kbak/verity'
         id: local-restore-yul-smoke
         continue-on-error: true
         run: |
@@ -1861,7 +1889,7 @@ jobs:
       - name: Setup Foundry environment
         uses: ./.github/actions/setup-foundry
         with:
-          local-artifact-run-id: ${{ github.run_id }}
+          local-artifact-run-id: ${{ github.repository != 'kbak/verity' && github.run_id || '' }}
 
       - name: Run tests with seed ${{ matrix.seed }}
         env:
@@ -1886,7 +1914,7 @@ jobs:
           echo "::notice::Reproduce locally: FOUNDRY_PROFILE=difftest DIFFTEST_RANDOM_SEED=${{ matrix.seed }} forge test -vv"
 
   failure-hints:
-    runs-on: [self-hosted, linux, verity, fastlane]
+    runs-on: ${{ fromJSON(github.repository == 'kbak/verity' && '["ubuntu-24.04"]' || '["self-hosted","linux","verity","fastlane"]') }}
     needs: [checks, build, build-audits, import-mutations, build-compiler-binaries, compiler-audits, compiler-regressions, foundry-gas-calibration, foundry, foundry-patched, foundry-multi-seed]
     if: always() && github.event_name == 'pull_request' && contains(join(needs.*.result, ','), 'failure')
     permissions:
@@ -1954,7 +1982,7 @@ jobs:
   ci-gate:
     # Single required status check: every needed job succeeded or was skipped
     # by design (change filters, tiering). A failed or cancelled job fails it.
-    runs-on: [self-hosted, linux, verity, fastlane]
+    runs-on: ${{ fromJSON(github.repository == 'kbak/verity' && '["ubuntu-24.04"]' || '["self-hosted","linux","verity","fastlane"]') }}
     timeout-minutes: 5
     needs: [changes, checks, build, build-audits, import-mutations, build-compiler-binaries, compiler-audits, compiler-regressions, foundry-gas-calibration, foundry, foundry-patched, foundry-multi-seed]
     if: always() && !(github.event_name == 'pull_request' && github.event.action == 'closed')

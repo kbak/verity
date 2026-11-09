@@ -42,6 +42,15 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Prepare fork GitHub-hosted runner
+      if: github.repository == 'kbak/verity' && runner.environment == 'github-hosted'
+      shell: bash
+      run: |
+        # These preinstalled SDKs are unused by Verity. Keep the Lean toolchain,
+        # project files, and caches intact; only reclaim disposable image space.
+        sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc
+        df -h "$GITHUB_WORKSPACE"
+
     - name: Resolve Lean persistence mode
       id: persistence
       shell: bash

@@ -28,14 +28,17 @@ jobs:
     name: OCR first-pass review
     runs-on: [self-hosted, linux, x64, paloma-ocr]
     timeout-minutes: 45
+    # This fork has no OCR model endpoint or credentials. A skip is not a review.
     if: |
-      github.event_name == 'pull_request_target' ||
-      github.event_name == 'workflow_dispatch' ||
-      (
-        github.event_name == 'issue_comment' &&
-        github.event.issue.pull_request &&
-        startsWith(github.event.comment.body, '/ocr review') &&
-        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+      github.repository != 'kbak/verity' && (
+        github.event_name == 'pull_request_target' ||
+        github.event_name == 'workflow_dispatch' ||
+        (
+          github.event_name == 'issue_comment' &&
+          github.event.issue.pull_request &&
+          startsWith(github.event.comment.body, '/ocr review') &&
+          contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+        )
       )
 
     steps:
