@@ -166,6 +166,12 @@ slices. The same source runs with zero, one and two storage fields under 0.7.6 a
 then checks a separate byte-oriented expectation. Negative fixtures retain the
 legacy admission boundary and the dirty-padding counterexample.
 
+Full-word `bytes32`/`uint256` casts preserve the original value expression,
+including its evaluation prelude. `FixedBytesCustomError.sol` checks both cast
+directions in custom-error arguments under 0.8.34, with exact selector and word
+payload comparisons. Narrow casts still shift or mask as required; custom-error
+argument admission is unchanged.
+
 ```sh
 PYTHONPATH=scripts python3 -m solidity_differential.check_fixed_bytes_reverts \
   --jobs 3 --output .lake/fixed-bytes-reverts
