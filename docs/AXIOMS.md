@@ -40,6 +40,8 @@ chain.”
 The fork-only GitHub-hosted runner configuration adds no Lean axiom and changes
 no theorem statement. An OCR skip is not a successful semantic review; hosted
 CI results remain scoped to the checks that actually execute.
+Checking restored Foundry binaries is an operational dependency check and adds
+no proof assumption or substitute for executing the differential tests.
 
 ## Current Axioms
 
