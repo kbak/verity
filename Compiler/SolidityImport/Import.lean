@@ -4153,6 +4153,7 @@ private partial def lowerCast (j : Json) : M Val := do
       if sourceWidth ≤ width then return v
       return { v with expr := .bitAnd v.expr (.literal ((2 ^ (8 * width) - 1) * 2 ^ shift)) }
     if src.startsWith "uint" && bitsOf src == some (8 * width) then
+      if width == 32 then return v
       return { v with expr := .shl (.literal shift) v.expr }
     if src.startsWith "int_const" && !src.startsWith "int_const -" then
       let .literal n := v.expr | failAt j "fixed-bytes integer cast requires a literal"
@@ -4164,6 +4165,7 @@ private partial def lowerCast (j : Json) : M Val := do
       return { pre := #[], expr := .literal (n * 2 ^ shift) }
   if let some width := fixedBytesWidth? src then
     if tname.startsWith "uint" && bitsOf tname == some (8 * width) then
+      if width == 32 then return v
       return { v with expr := .shr (.literal (256 - 8 * width)) v.expr }
   if tname == "bytes20" && #["address", "address payable"].contains src then
     return { v with expr := .shl (.literal 96) v.expr }
