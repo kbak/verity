@@ -321,6 +321,14 @@ network reachability with production services. These controls reduce Action
 supply-chain drift and accidental execution; they do not make a persistent
 self-hosted runner a security boundary.
 
+The `kbak/verity` fork routes proof verification and Turbo-Lean jobs to disposable
+GitHub-hosted Ubuntu 24.04 machines. It uses GitHub caches/artifacts instead of
+the upstream shared disks and artifact hub. These caches remain operational
+inputs, not independent proof evidence. Validation commands, failure handling,
+and the final CI gate remain enabled. The fork does not provision the upstream
+OCR model service: OCR is explicitly skipped and supplies no semantic-review
+evidence. See [fork CI operations](FORK_CI.md) for rollout and limitations.
+
 ## Compilation Pipeline
 
 ```
