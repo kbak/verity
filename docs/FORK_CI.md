@@ -10,6 +10,9 @@ The upstream workflows require a private self-hosted runner fleet. Only
   attempts are skipped. Existing GitHub cache and artifact paths provide the
   cross-job transfer. Setup reclaims unused Android, .NET, and GHC SDK space
   only on the fork's disposable GitHub-hosted images.
+- Foundry caches include the version directories targeted by foundryup's binary
+  symlinks. A cache hit is revalidated by executing all three required tools at
+  the pinned version; incomplete or broken restores trigger installation.
 - `checks` checks out the PR head SHA, runs `make check` on committed inputs,
   and neither regenerates nor auto-commits derived files. A stale fixture or
   report fails validation and must be regenerated in the development checkout.
