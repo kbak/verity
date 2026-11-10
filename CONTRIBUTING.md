@@ -7,9 +7,15 @@ Title with a category prefix (`[Layer 3]`, `[Trust Reduction]`,
 has a **Summary**, a **Test Plan** (what you ran), and **Related Issues**.
 Issues use the templates in `.github/ISSUE_TEMPLATE/`.
 
-Before opening a PR:
+Before opening a PR, install the pinned Python test dependencies in an isolated
+environment, as the CI checks job does. This is required by the ABI/state oracle
+unit tests; it does not build Lean or install Solidity compilers.
 
 ```sh
+python3 -m venv .lake/checks-venv
+.lake/checks-venv/bin/python -m pip install -r scripts/solidity_differential/requirements.txt
+export PATH="$PWD/.lake/checks-venv/bin:$PATH"
+
 lake build        # every proof must check
 make check        # repository checks, as in CI
 make test-foundry # property and differential tests (uses vm.ffi)

@@ -165,7 +165,10 @@ Value-transfer transactions remain outside the sequence runner. Explicit local c
 sender impersonation is a call-frame experiment, not transaction authorization
 or reachability evidence. Arbitrary-world frames and configuration invariants
 remain downstream proof obligations; source-defect controls are not a proof of
-frontend correctness.
+frontend correctness. The Python oracle unit tests run with the pinned codec and
+hashing packages in `scripts/solidity_differential/requirements.txt`; CI installs
+these in an isolated environment before `make check`. Package availability is a
+test prerequisite, not an additional theorem or proof guarantee.
 
 The frontend is in the trust base. A covered model is not a proof that the
 model matches the Solidity source or solc's bytecode. `storageLayout` slots and

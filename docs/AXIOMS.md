@@ -32,7 +32,9 @@ interpreter operation. Its static bounds admission and ABI-v1 decoding remain
 frontend trust assumptions, tested against pinned source bytecode and independent
 byte/list requirements. Finite tests and source mutation witnesses are not a
 universal equivalence proof. Array allocation, unguarded reads, sentinel traversal,
-and exceptional-halt semantics remain excluded.
+and exceptional-halt semantics remain excluded. The Python oracle tests require
+the pinned external ABI/hash packages installed by CI; this test environment adds
+no project axiom and does not alter the kernel-checked proof boundary.
 
 ## Policy
 
