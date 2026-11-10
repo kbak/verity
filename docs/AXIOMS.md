@@ -27,6 +27,13 @@ or universal correctness theorem. Its scalar/mapping writes, modifiers, logs and
 nested rollback checks use the existing executable model. Local self-sender
 impersonation supplies a call frame and does not establish authorization.
 
+The guarded legacy address-array input extension adds no project axiom or
+interpreter operation. Its static bounds admission and ABI-v1 decoding remain
+frontend trust assumptions, tested against pinned source bytecode and independent
+byte/list requirements. Finite tests and source mutation witnesses are not a
+universal equivalence proof. Array allocation, unguarded reads, sentinel traversal,
+and exceptional-halt semantics remain excluded.
+
 ## Policy
 
 Axioms are exceptional. When an axiom exists, it must have:

@@ -180,6 +180,16 @@ every key in `parsed["sources"]` was explicitly collected into the hashed
 standard-JSON input. `mappingSlot` in the denotation oracle is not Keccak. Numeric
 claims are about the values `structMember` reads back.
 
+Legacy ABI-v1 `address[] memory` inputs use a separate decoder with raw-word
+copying and cleanup at high-level reads. Array indexing is admitted only inside
+an exact counted loop over the same array's length (or a dominating immutable
+length alias), checked independently in each reached declaration. This syntactic
+admission and its source correspondence are trusted frontend logic. Differential
+checks and independent ABI/list oracles supply finite evidence; they do not prove
+gas behavior, arbitrary list reachability, or contract initialization. General
+allocation, array writes/returns, ABI coder v2 arrays, and unguarded reads remain
+rejected; no `INVALID` execution is mapped to a modern panic or empty revert.
+
 Checked `uint256` and narrower unsigned arithmetic is lowered to `Stmt.ite` plus
 `Stmt.panic`, not to a second interpreter. Explicit `uint128(x)` is truncation
 (`bitAnd` with `2^128-1`). Ternaries are `Stmt.ite`, so the untaken branch is

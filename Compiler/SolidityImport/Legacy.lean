@@ -1,5 +1,6 @@
 import Compiler.SolidityImport.LegacyControlFlow
 import Compiler.SolidityImport.LegacyPacked
+import Compiler.SolidityImport.LegacyArrays
 
 /-! Conservative admission for the initial Solidity 0.7.6 scalar slice.
 The existing lowering remains responsible for admitting individual constructs.
@@ -65,6 +66,8 @@ def validateLegacyAssemblyReads (node : Json) : M Unit := do
   for ref in (← mArr (← mField node "externalReferences")) do
     if reads.contains (← mStr (← mField ref "src")) then
       let id ← mNat (← mField ref "declaration")
+      if env.scalarArrays.contains id then
+        failAt node "Solidity 0.7.6 assembly array references are outside the guarded-read slice"
       if let some ty := env.scalarTy.find? id then
         unless isFullWordYulScalar ty do
           unless (env.values.find? id).any (fun | .literal _ => true | _ => false) do
@@ -101,24 +104,33 @@ partial def validateLegacyDeclaration (node : Json) (packedInput : Bool := false
           "MemberAccess", "IndexAccess", "Mapping", "TupleExpression",
           "UserDefinedTypeName", "OverrideSpecifier", "StructuredDocumentation",
           "ForStatement", "WhileStatement", "ModifierDefinition", "ModifierInvocation",
-          "PlaceholderStatement", "EmitStatement"].contains kind do
+          "PlaceholderStatement", "EmitStatement", "ArrayTypeName"].contains kind do
         failAt node s!"Solidity 0.7.6 scalar slice does not support {kind}"
       if kind == "FunctionDefinition" || kind == "ModifierDefinition" then
         validateLegacyControlFlow node
+        LegacyArrays.validateDeclaration node
       if kind == "FunctionDefinition" then
         unless #[some "pure", some "view", some "nonpayable"].contains
             (optStr node "stateMutability") do
           failAt node "Solidity 0.7.6 payable functions are outside the state-transition slice"
       if let some ty := (field? node "typeDescriptions").bind (optStr · "typeString") then
-        if ty.contains '[' || ty.startsWith "struct " || ty.startsWith "enum " ||
+        let supportedArray := ty == "address[]" || ty == "address[] memory" ||
+          (ty.startsWith "function (" && !(ty.replace "address[] memory" "address").contains '[')
+        if (ty.contains '[' && !supportedArray) ||
+            ty.startsWith "struct " || ty.startsWith "enum " ||
             (ty.startsWith "int" && !ty.startsWith "int_const") ||
             (ty.startsWith "bytes " && ty != "bytes memory") || ty.startsWith "string " then
           failAt node s!"Solidity 0.7.6 scalar slice does not support type {ty}"
       if kind == "FunctionDefinition" then
         for ret in (← mArr (← mField (← mField node "returnParameters") "parameters")) do
+          if (← mType ret).contains '[' then
+            failAt ret "Solidity 0.7.6 array returns are outside the guarded-read slice"
           if (← mType ret) == "bytes" then
             failAt ret "Solidity 0.7.6 dynamic bytes returns are outside the decoding slice"
       if kind == "VariableDeclaration" then
+        if (← mType node) == "address[]" then
+          unless optStr node "storageLocation" == some "memory" do
+            failAt node "Solidity 0.7.6 address arrays require memory location"
         if (← mType node) == "bytes" then
           unless optStr node "storageLocation" == some "memory" do
             failAt node "Solidity 0.7.6 byte decoding requires bytes memory"
