@@ -5881,6 +5881,7 @@ private partial def lowerEncodedBytes (j : Json) : M EncodedBytes := do
     return ← encodeSelectorAndWords selBuffer pre words
   unless optStr callee "memberName" == some "encode" do
     failAt callee "unsupported ABI encoding builtin"
+  if (← get).legacyWrapping then return ← LegacyAbi.lower j lowerExpr
   lowerAbiEncodeArgs args
 
 /-- `abi.encode(args...)` into a fresh aligned memory buffer. -/
@@ -6889,8 +6890,8 @@ private partial def lowerCall (j : Json) : M Val := do
         let args ← mArr (← mField j "arguments")
         unless args.size == 1 do failAt j "keccak256 requires one byte buffer"
         if (← get).legacyWrapping then
-          unless LegacyPacked.isEncoding args[0]! do
-            failAt args[0]! "legacy hashing requires abi.encodePacked with static arguments"
+          unless LegacyPacked.isEncoding args[0]! || LegacyAbi.isEncoding args[0]! do
+            failAt args[0]! "legacy hashing requires abi.encodePacked or abi.encode with static arguments"
         let bytes ← lowerEncodedBytes args[0]!
         return { pre := bytes.pre, expr := .keccak256 bytes.pointer bytes.size }
       if calleeId == -2 || calleeId == -16 then
@@ -15589,6 +15590,7 @@ private def importSlice
   let exprHelpersSrc ← moduleText sourceRoot "Compiler/SolidityImport/ExprHelpers.lean"
   let bytePointersSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyBytePointers.lean"
   let packedSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyPacked.lean"
+  let legacyAbiSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyAbi.lean"
   let signatureSrc ← moduleText sourceRoot "Verity/Core/Model/LegacySignatureCalls.lean"
   let ecmSrc ← moduleText sourceRoot "Verity/Core/Model/ECM.lean"
   let denoteSrc ← moduleText sourceRoot "Verity/Core/Model/Denote.lean"
@@ -15609,6 +15611,7 @@ private def importSlice
       ("LegacyArrayLoops.lean", Json.str legacyArrayLoopsSrc),
       ("LegacyBytePointers.lean", Json.str bytePointersSrc),
       ("LegacyPacked.lean", Json.str packedSrc),
+      ("LegacyAbi.lean", Json.str legacyAbiSrc),
       ("AbiLowering.lean", Json.str abiLoweringSrc),
       ("ExprHelpers.lean", Json.str exprHelpersSrc),
       ("LegacySignatureCalls.lean", Json.str signatureSrc),

@@ -1453,6 +1453,20 @@ must first admit the unsupported source, then fail the located rejection suite.
 A compiler or harness error never counts as mutation detection.
 
 
+### Legacy static ABI hashing (experimental)
+
+The 0.7.6 `LegacyAbi.lower` extension uses the existing byte-addressed physical
+memory and Keccak oracle. It emits one cleaned 32-byte word per admitted scalar,
+then the length header and exact end pointer, including unaligned starts after
+packed encoding. The legacy admission guard remains responsible for restricting
+this to direct hash inputs, pure scalar argument trees and ABI-v1 source units.
+`chainid()` reads the existing explicit environment field. The differential
+campaign uses chain ID 31337 and checks outputs, unchanged watched storage and
+empty logs; it is finite execution evidence, not universal source correspondence.
+No new cryptographic assumption or project axiom is introduced. General
+transaction-hash assembly, dynamic encoding and dirty narrow assembly values
+remain separate support obligations.
+
 ### ABI encoding and packed Keccak buffers (experimental)
 
 The new encoding lowering consumes complete admitted schemas; it does not

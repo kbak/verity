@@ -1,5 +1,5 @@
 import Compiler.SolidityImport.LegacyControlFlow
-import Compiler.SolidityImport.LegacyPacked
+import Compiler.SolidityImport.LegacyAbi
 import Compiler.SolidityImport.LegacyArrays
 
 /-! Conservative admission for the initial Solidity 0.7.6 scalar slice.
@@ -28,7 +28,7 @@ private partial def validateLegacyYul (memoryRevert : Bool) (node : Json) : M Un
           let name := (field? node "functionName").bind (optStr · "name")
           let builtins := if memoryRevert then
             #[some "mload", some "mstore", some "add", some "revert"]
-            else #[some "mload", some "add", some "sub", some "mul", some "byte"]
+            else #[some "mload", some "add", some "sub", some "mul", some "byte", some "chainid"]
           unless builtins.contains name do
             failAt node (if memoryRevert then
               "Solidity 0.7.6 memory-revert assembly builtin is unsupported"
@@ -81,10 +81,10 @@ def validateLegacyYulAssignment (node : Json) (ty : ParamType) (rhs : Expr) : M 
 
 /-- Check every reached declaration, including helper bodies. Rejected constructs
 need separate legacy semantics and differential evidence before admission.
-`packedInput` admits construction only as the direct input to the hash builtin. -/
-partial def validateLegacyDeclaration (node : Json) (packedInput : Bool := false) : M Unit := do
+`encodingInput` admits construction only as the direct input to the hash builtin. -/
+partial def validateLegacyDeclaration (node : Json) (encodingInput : Bool := false) : M Unit := do
   match node with
-  | .arr children => children.forM (validateLegacyDeclaration · packedInput)
+  | .arr children => children.forM (validateLegacyDeclaration · encodingInput)
   | .obj fields =>
     if optStr node "nodeType" == some "InlineAssembly" then
       let ast ← mField node "AST"
@@ -143,7 +143,8 @@ partial def validateLegacyDeclaration (node : Json) (packedInput : Bool := false
                 (← mType init) == "bytes memory" do
               failAt node "Solidity 0.7.6 bytes locals require an existing memory buffer"
       if kind == "FunctionCall" then
-        if (← mType node) == "bytes memory" && !(packedInput && LegacyPacked.isEncoding node) then
+        if (← mType node) == "bytes memory" && !(encodingInput &&
+            (LegacyPacked.isEncoding node || LegacyAbi.isEncoding node)) then
           failAt node "Solidity 0.7.6 byte construction is outside the decoding slice"
       if kind == "Assignment" then
         if (← mType (← mField node "leftHandSide")) == "bytes memory" then

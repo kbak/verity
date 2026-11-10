@@ -39,6 +39,11 @@ equivalence or list reachability. The Python oracle tests require the pinned
 external ABI/hash packages installed by CI; those are test prerequisites, not
 proof guarantees.
 
+The legacy static ABI hashing extension adds no project axiom or source-equivalence
+theorem. Its generated coverage certificates and existing Keccak/environment
+semantics are unchanged; scalar encoding and allocation remain frontend trust
+assumptions, checked by finite differential and compiler-mutation campaigns.
+
 ## Policy
 
 Axioms are exceptional. When an axiom exists, it must have:

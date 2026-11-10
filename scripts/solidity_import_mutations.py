@@ -494,6 +494,8 @@ DIFFERENTIAL_MUTANTS = (
     'import-legacy-division-operands',
     'import-legacy-guard-stability',
     'ecm-legacy-recovery-stale', 'ecm-legacy-validator-selector', 'ecm-legacy-code-existence',
+    'import-legacy-static-header', 'import-legacy-static-stride',
+    'import-legacy-static-rounding', 'import-legacy-static-chainid',
     'import-legacy-packed-rounding', 'import-legacy-packed-header',
     'import-legacy-packed-alignment',
     'import-legacy-pointer-encode-order',

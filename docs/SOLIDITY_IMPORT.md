@@ -1463,7 +1463,7 @@ python3 scripts/solidity_import_mutations.py --jobs 2 \
 ```
 
 This slice alone does not import a complete multisignature authorization path.
-Dynamic byte construction beyond static packed hashing, general external signatures,
+Dynamic byte construction beyond static scalar hashing, general external signatures,
 and ABI-v2 byte decoding remain outside the legacy boundary. Full downstream integration,
 authorization proofs and duplicate-signature mutation checks remain separate work.
 
@@ -1513,6 +1513,40 @@ memory. General continuing memory writes, byte allocation, byte indexing,
 dynamic byte returns, ABI-v2 byte decoding and assembly control flow remain
 rejected. The transports retain `assumed` proof status; no new axiom is introduced.
 
+
+## Legacy static ABI hashing
+
+The explicit 0.7.6 profile admits `keccak256(abi.encode(...))` at ABI-coder-v1
+call sites. Arguments are unsigned integers, addresses/contracts, booleans and
+fixed bytes, including typed conversions and nonnegative integer literals.
+The resolved `this` builtin supplies the current contract address directly.
+Scalar identifiers/member reads are allowed; nested calls, arithmetic and
+assignments in argument trees remain rejected. The read-only assembly slice
+also admits zero-argument `chainid()` through the existing environment expression.
+
+`LegacyAbi.lower` writes one 32-byte word per argument, cleans narrow words,
+stores a byte-length header and advances the free pointer by header plus payload.
+Fixed bytes are left-aligned; other admitted scalars are right-aligned. The
+allocation starts at the current free pointer even when an earlier packed
+encoding left it unaligned. Empty tuples allocate only their 32-byte header.
+This follows the [pinned 0.7.6 encoder](https://github.com/ethereum/solidity/blob/v0.7.6/libsolidity/codegen/ExpressionCompiler.cpp)
+and [ABI encoding rules](https://docs.soliditylang.org/en/v0.7.6/abi-spec.html#formal-specification-of-the-encoding).
+
+`check_legacy_static_abi` compares source EVM, Denote and generated EVM against
+independent `eth_abi`/Keccak bytes and physical-memory observations. Cases cover
+dirty calldata scalars, truncated/trailing heads, constants, contract identity,
+chain ID, inlined helpers, loops and packed-to-standard allocation composition.
+`check_legacy_packed_rejections` retains the formerly rejected standard encoding
+as a mandatory positive import control and checks both encoding families'
+unsupported boundaries. The `import-legacy-static-*` compiler mutations target
+header size, word stride, allocation alignment and chain ID; tool failures do
+not count as detections.
+
+This does not admit dynamic ABI encoding, allocated local/returned byte buffers,
+enums, calldata-copying assembly, raw narrow assembly reads or general memory
+hashing. ABI-v2 encoding sites still reject, including reached helpers. Finite
+execution evidence does not prove frontend equivalence or cryptographic security;
+gas/resource exhaustion remains outside the model.
 
 ## Legacy static packed hashing
 
