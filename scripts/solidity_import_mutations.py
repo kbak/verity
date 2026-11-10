@@ -861,6 +861,16 @@ def legacy_state_rejections() -> None:
     print("pass legacy state-transition located rejections", flush=True)
 
 
+def legacy_array_mutations() -> None:
+    module_campaign_output("check_legacy_array_mutations", "legacy-address-arrays", 2 * MUTANT_TIMEOUT)
+    print("pass legacy address-array independent source-defect controls", flush=True)
+
+
+def legacy_array_rejections() -> None:
+    module_campaign_output("check_legacy_array_rejections", "legacy-array-rejections", MUTANT_TIMEOUT)
+    print("pass legacy array located rejections", flush=True)
+
+
 def tasks(update_golden: bool) -> list:
     """Independent work items, most expensive first (each runs in its own snapshot).
 
@@ -881,6 +891,8 @@ def tasks(update_golden: bool) -> list:
              ("ordered-signature-duplicate", 1, ordered_signature_mutation),
              ("legacy-state-transitions", 1, legacy_state_mutations),
              ("legacy-state-rejections", 1, legacy_state_rejections),
+             ("legacy-address-arrays", 1, legacy_array_mutations),
+             ("legacy-array-rejections", 1, legacy_array_rejections),
              ("deployment-world", 1, deployment_world_mutations),
              ("create2-opcode", 1, create2_opcode_mutations),
              ("account-storage", 1, account_storage_mutations),

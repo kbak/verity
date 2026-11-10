@@ -165,7 +165,10 @@ Value-transfer transactions remain outside the sequence runner. Explicit local c
 sender impersonation is a call-frame experiment, not transaction authorization
 or reachability evidence. Arbitrary-world frames and configuration invariants
 remain downstream proof obligations; source-defect controls are not a proof of
-frontend correctness.
+frontend correctness. The Python oracle unit tests run with the pinned codec and
+hashing packages in `scripts/solidity_differential/requirements.txt`; CI installs
+these in an isolated environment before `make check`. Package availability is a
+test prerequisite, not an additional theorem or proof guarantee.
 
 The frontend is in the trust base. A covered model is not a proof that the
 model matches the Solidity source or solc's bytecode. `storageLayout` slots and
@@ -179,6 +182,16 @@ restricts `evmVersion` to pre-Paris releases up to `"london"`, and verifies that
 every key in `parsed["sources"]` was explicitly collected into the hashed
 standard-JSON input. `mappingSlot` in the denotation oracle is not Keccak. Numeric
 claims are about the values `structMember` reads back.
+
+Legacy ABI-v1 `address[] memory` inputs use a separate decoder with raw-word
+copying and cleanup at high-level reads. Array indexing is admitted only inside
+an exact counted loop over the same array's length (or a dominating immutable
+length alias), checked independently in each reached declaration. This syntactic
+admission and its source correspondence are trusted frontend logic. Differential
+checks and independent ABI/list oracles supply finite evidence; they do not prove
+gas behavior, arbitrary list reachability, or contract initialization. General
+allocation, array writes/returns, ABI coder v2 arrays, and unguarded reads remain
+rejected; no `INVALID` execution is mapped to a modern panic or empty revert.
 
 Checked `uint256` and narrower unsigned arithmetic is lowered to `Stmt.ite` plus
 `Stmt.panic`, not to a second interpreter. Explicit `uint128(x)` is truncation

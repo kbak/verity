@@ -173,7 +173,8 @@ def scenario(kind, caller, layout, *, initial_count=3, random_cases=8, seed=7611
 
 def campaign(output, *, kind='links', context=0, optimized=False, initial_count=3,
              fixture=FIXTURE, contract=None, functions=None, extra_sources=None,
-             fields=None, errors=None, events=None, dirty_mappings=False, prepared=False):
+             fields=None, errors=None, events=None, dirty_mappings=False, prepared=False,
+             scenario_builder=scenario):
     output = Path(output).resolve()
     output.mkdir(parents=True, exist_ok=False)
     # Parallel execution must share fixed artifacts: build once before workers.
@@ -200,7 +201,7 @@ def campaign(output, *, kind='links', context=0, optimized=False, initial_count=
                                         f'from "{output}" entry "Sequence.sol"')
     template = template.replace('  contract LegacyStateTransitions', '  contract ' + contract)
     template = template.replace('  function setLimit(uint256)\n  function insert(address,uint256)',
-                                '\n'.join('  function ' + f for f in functions))
+                                '\n'.join('  function ' + f.replace('address[]', '«address[]»') for f in functions))
     if optimized:
         template = template.replace('optimizerRuns := none', 'optimizerRuns := some 200')
     driver = output / 'Driver.lean'
@@ -210,7 +211,8 @@ def campaign(output, *, kind='links', context=0, optimized=False, initial_count=
         'metadata': {'bytecodeHash': 'none'}, 'outputSelection': {'*': {'*': [
             'evm.bytecode.object', 'evm.methodIdentifiers', 'storageLayout']}}}},
         output, output / 'source-solc', solc=Path.cwd() / '.lake/solidity-import/solc-0.7.6')['contracts']['Sequence.sol'][contract]
-    write_json(output / 'selectors.json', [int(original['evm']['methodIdentifiers'][f], 16) for f in roots(template)])
+    write_json(output / 'selectors.json', [int(original['evm']['methodIdentifiers'][f.replace('«', '').replace('»', '')], 16)
+                                           for f in roots(template)])
     command(['lake', 'env', 'lean', '--run', driver, 'compile', output / 'selectors.json', output / 'model.yul'],
             timeout=900, log=output / 'compile.log')
     generated = solc_compile({'language': 'Yul', 'sources': {'Model.yul': {'content': (output / 'model.yul').read_text()}},
@@ -219,7 +221,7 @@ def campaign(output, *, kind='links', context=0, optimized=False, initial_count=
     if len(generated) != 1:
         raise HarnessError('expected one generated model')
     caller = address(0)
-    initial, calls, expected = scenario(kind, caller, original['storageLayout'], initial_count=initial_count,
+    initial, calls, expected = scenario_builder(kind, caller, original['storageLayout'], initial_count=initial_count,
         functions=functions, fields=fields, errors=errors, events=events, dirty_mappings=dirty_mappings)
     write_json(output / 'initial-storage.json', initial)
     write_json(output / 'transactions.json', calls)

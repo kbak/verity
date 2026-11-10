@@ -3168,6 +3168,8 @@ private partial def lowerRef (j : Json) : M Ref := do
           else
             let pre := (pre ++ key.pre).push (.ite (.lt key.expr (.localVar arr.lengthBinding)) [] [.panicCode (.literal 0x32)])
             let value := Expr.mload (.add (.add (.localVar arr.memoryPointer) (.literal 32)) (.mul key.expr (.literal 32)))
+            let value := if (← get).legacyWrapping && arr.elementType == "address" then
+                Expr.bitAnd value (.literal (2^160 - 1)) else value
             return .expr { pre, expr := value }
       | .expr baseVal =>
           let baseTy ← mType baseExpression
@@ -15333,11 +15335,17 @@ private def importSlice
             AbiLowering.bytesCalldataHead cb.offsetBinding cb.headerBinding cb.lengthBinding cb.dataBinding rootHeadWords headOffset
         abiGuards := abiGuards ++ checks.toArray
       if let some arr := env.scalarArrays.find? p.id then
+        if legacy && strictAbi then
+          (failAt fn "Solidity 0.7.6 address arrays require ABI coder v1").run' env
         let some i := modelParamNames.findIdx? (· == p.name)
           | throwError "missing scalar array model parameter {p.name}"
         let headOffset := 4 + (modelParams.toList.take i).foldl (fun n p => n + paramHeadSize p.ty) 0
         let checks :=
-          if arr.inMemory then
+          if legacy then
+            LegacyArrays.memoryHead arr.memoryPointer arr.offsetBinding arr.headerBinding
+              arr.lengthBinding arr.dataBinding arr.nextFreeBinding (arr.namePrefix ++ "_index")
+              rootHeadWords headOffset
+          else if arr.inMemory then
             AbiLowering.scalarArrayMemoryHead arr.memoryPointer arr.offsetBinding arr.headerBinding arr.lengthBinding arr.dataBinding arr.nextFreeBinding arr.namePrefix rootHeadWords headOffset arr.abiKind
               (if arr.elementType == "bytes4" then 2 ^ 224 - 1 else 0)
           else
