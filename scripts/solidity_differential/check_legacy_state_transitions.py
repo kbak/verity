@@ -89,8 +89,9 @@ def scenario(kind, caller, layout, *, initial_count=3, random_cases=8, seed=7611
     events = events or ('Inserted(address)', 'Limit(uint256)')
     slots = {f['label']: int(f['slot']) for f in layout['storage']}
     calls = list(cases(kind, caller, initial_count, random_cases, seed))
-    calls[:0] = [("nonpayable-value", 0, calls[0][2], caller),
-                 ("truncated-head", 0, calls[0][2][:-1], caller)]
+    # SequenceRunner deliberately rejects value transfers before model execution.
+    # This campaign supplies zero-value call frames; payable admission is tested separately.
+    calls[:0] = [("truncated-head", 0, calls[0][2][:-1], caller)]
     initial = {int(f['slot']): 0 for f in layout['storage']}
     initial[9999] = 0xABCDE  # Unrelated canary, observed even if never touched.
     for name, slot in slots.items():
@@ -117,12 +118,11 @@ def scenario(kind, caller, layout, *, initial_count=3, random_cases=8, seed=7611
         data = keccak(text=signature)[:4] + b''.join(n.to_bytes(32, 'big') for n in args)
         ident = str(len(transactions))
         tx = {'id': ident, 'label': label, 'function': signature.split('(')[0], 'args': args,
-              'sender': sender, 'target': caller,
-              'value': '0x1' if label == 'nonpayable-value' else '0x0', 'data': '0x' + data.hex(),
+              'sender': sender, 'target': caller, 'value': '0x0', 'data': '0x' + data.hex(),
               'timestamp': 1000000100 + len(transactions), 'blockNumber': 2 + len(transactions)}
         transactions.append(tx)
         next_state, logs, reason = dict(current), [], None
-        if label in ("nonpayable-value", "truncated-head"):
+        if label == "truncated-head":
             reason = ""  # Dispatcher failure, before any source guard or write.
         elif sender != caller:
             reason = errors['context']
@@ -247,7 +247,7 @@ def campaign(output, *, kind='links', context=0, optimized=False, initial_count=
               'kind': kind, 'context': context, 'optimized': optimized, 'initialCount': initial_count,
               'dirtyMappings': dirty_mappings,
               'sourceSha256': hashlib.sha256(source.encode()).hexdigest(),
-              'scope': 'finite call-frame sequences, explicit initial storage and self-sender impersonation; gas excluded'}
+              'scope': 'finite zero-value call-frame sequences, explicit initial storage and self-sender impersonation; gas/value transfers excluded'}
     write_json(output / 'results.json', report)
     passed = not result['divergences'] and not mismatches
     write_json(output / 'summary.json', {k: v for k, v in report.items() if k not in ('observations', 'discovery', 'slots')} | {'passed': passed})

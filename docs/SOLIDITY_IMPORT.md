@@ -117,8 +117,10 @@ helper modifiers and post-body modifier writes. Dirty packed-word preservation a
 maximum-count initial worlds are primitive-semantics checks; those worlds need
 not satisfy a downstream invariant.
 
-Self-sender experiments explicitly impersonate the contract only on local test
-nodes. They check a supplied call frame; they do not prove that an authorized
+These sequence experiments use zero-value calls: the existing runner rejects
+value transfers before executing Denote. Payable legacy declarations are covered
+by rejection controls, not by a value-transfer model. Self-sender experiments
+explicitly impersonate the contract only on local test nodes. They check a supplied call frame; they do not prove that an authorized
 transaction reaches that frame. Deployment initialization, signatures and proxy
 reachability require downstream evidence. Finite observations do not prove
 source/model correspondence, whole-world frames or arbitrary-sequence invariants.

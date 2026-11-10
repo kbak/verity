@@ -160,7 +160,8 @@ fork/deployed-bytecode equivalence. See `SOLIDITY_IMPORT.md` for the subset and
 reproduction commands. No proof axiom is added by this importer extension.
 The nonpayable legacy state-transition extension reuses existing write, modifier,
 event and rollback semantics. Its independent finite oracle checks exact state,
-logs and reverts, including nested failure after writes. Explicit local contract
+logs and reverts for zero-value call frames, including nested failure after writes.
+Value-transfer transactions remain outside the sequence runner. Explicit local contract
 sender impersonation is a call-frame experiment, not transaction authorization
 or reachability evidence. Arbitrary-world frames and configuration invariants
 remain downstream proof obligations; source-defect controls are not a proof of
