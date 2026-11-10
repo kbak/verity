@@ -1426,3 +1426,72 @@ correspondence or cryptographic correctness; gas/resource exhaustion is excluded
 Dynamic packed arguments, direct hashing of arbitrary buffers, packed buffers as
 helper arguments or local initializers/returns and ABI-v2 packed encoding need separate semantics and
 evidence. This extension does not establish application authorization properties.
+
+
+## Ordered signature authorization
+
+The experimental 0.7.6 profile can compose bounded loops, guarded arithmetic,
+record decoding, bytes-memory reconstruction, recovery, bytes4 static validators,
+and packed hashing in a thresholded ordered-record checker. The generic fixture
+`LegacyOrderedSignatures.sol` combines four modes: raw recovery, prefixed recovery,
+executor/preapproved hashes, and contract validation. Existing admission limits
+for each constituent construct still apply.
+
+`Compiler.SolidityImport.OrderedEntryPoint.entry_authorized` proves a property of
+actual `Denote.execStmtList` execution. A successful complete entrypoint yields an
+actual loop trace containing exactly the requested number of distinct signers.
+Every signer has nonzero membership in the **initial storage snapshot**, is
+nonzero, and differs from the designated sentinel. `EntryEvidence` records the
+reached count read and trace; distinctness is a conclusion, not an assumption.
+For a stored-threshold wrapper, `evidence_stored_count` and `evidence_positive`
+connect that count to initial storage and establish positivity from the reached
+zero-rejection gate. A zero-count explicit helper can still succeed with no signers.
+
+The proof is decomposed into legacy static-call storage/local frames, a closed
+read-only statement fragment, the lowered short-circuit guard, loop induction,
+and complete-entrypoint composition. Certificates exclude early successful exits
+and changes to protected locals/storage. Static child frames follow from the
+existing checked adversary boundary. The smoke proof
+`LegacyOrderedSignaturesProofs.lean` instantiates these certificates on an actual
+Solidity import and proves kernel equality with its **entire** imported body.
+No source/model/compiler semantics are replaced and no new axioms are introduced.
+
+This establishes resolved-signer authorization in the imported interpreter. It
+does not prove secp256k1 unforgeability, the correctness of arbitrary external
+validators, linked-list reachability, configuration invariants, transaction
+execution, delegatecall behavior, or gas/resource adequacy. The executor argument
+is an explicit input; its relationship to a transaction caller is outside this
+checker. Solidity-to-model and model-to-EVM correspondence remain experimentally
+validated boundaries, not consequences of the authorization theorem.
+
+The independent Python oracle decodes raw records, uses native Python secp256k1
+recovery, and checks an explicit initial membership/approval world. Contract mocks
+bind responses to complete ABI calldata. Every transaction has an exact return or
+revert-payload expectation, compared against source EVM, Denote, and compiled EVM.
+Cases cover all four modes together, stored thresholds, zero counts, truncation,
+ignored tails, ordering, duplicate signers across modes, nonmembers, distinguished
+addresses, high-s signatures, dirty words, dynamic offsets, checked arithmetic,
+and malformed/failed contract responses. Shifted storage slots and optimization
+can be exercised with the same oracle:
+
+```bash
+turbo-lean build Contracts.SolidityImportSmoke.LegacyOrderedSignaturesProofs --project-dir .
+PYTHONPATH=scripts python3 -m solidity_differential.check_legacy_ordered_signatures \
+  --output .lake/ordered-signatures
+PYTHONPATH=scripts python3 -m solidity_differential.check_legacy_ordered_signatures \
+  --optimized --context 2 --output .lake/ordered-signatures-optimized
+PYTHONPATH=scripts python3 -m solidity_differential.check_ordered_signature_mutation \
+  --output .lake/ordered-signature-mutation
+```
+
+The mutation changes the source rejection guard from `current <= previous` to
+`current < previous`. It requires an unchanged positive control to pass first,
+then requires duplicate acceptance to violate the independent oracle on **all
+three routes**, in both the explicit-count and stored-threshold entrypoints,
+with no inter-route divergence. This is a source/property mutation:
+three agreeing implementations can all execute the same authorization bug.
+Compilation errors, missing oracle rows, and instrumentation failures never count
+as detections. Zero-address acceptance is recorded separately and cannot substitute
+for a duplicate witness. The campaign is also registered as the
+`ordered-signature-duplicate` task in `scripts/solidity_import_mutations.py`.
+Generated campaign JSON, Yul and proof/build artifacts stay under ignored `.lake/`.

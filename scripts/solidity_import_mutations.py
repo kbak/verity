@@ -836,6 +836,15 @@ def extcodecopy_struct_decode_mutant(mutant: str) -> None:
     print(f"pass {mutant}", flush=True)
 
 
+def ordered_signature_mutation() -> None:
+    output = module_campaign_output("check_ordered_signature_mutation",
+                                    "ordered-signature-duplicate", 2 * MUTANT_TIMEOUT)
+    result = json.loads((output / "summary.json").read_text())
+    if not result["detected"] or not result["witnessCaseIds"] or result["controlCases"] <= 0:
+        raise SystemExit("ordered signature mutation requires accepted duplicates and a passing control")
+    print("pass duplicate-signature source mutation against independent authorization", flush=True)
+
+
 def tasks(update_golden: bool) -> list:
     """Independent work items, most expensive first (each runs in its own snapshot).
 
@@ -853,6 +862,7 @@ def tasks(update_golden: bool) -> list:
              ("reference-wrong-root", 1, reference_mutation),
              ("reference-location", 1, reference_location_mutation),
              ("byte-call", 1, byte_call_mutations),
+             ("ordered-signature-duplicate", 1, ordered_signature_mutation),
              ("deployment-world", 1, deployment_world_mutations),
              ("create2-opcode", 1, create2_opcode_mutations),
              ("account-storage", 1, account_storage_mutations),
