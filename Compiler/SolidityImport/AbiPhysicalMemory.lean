@@ -180,6 +180,7 @@ theorem execForEachLoop_clear_physical (oracle : DenoteOracle) (fields : List Fi
   | «return» value after => simp only [actual, LoopOutcomePost] at result
   | revert => simp only [actual, LoopOutcomePost] at result
   | revertWithData bytes => simp only [actual, LoopOutcomePost] at result
+  | invalid => simp only [actual, LoopOutcomePost] at result
 
 /-- Complete actual forEach clearing statement, including its initial index
 binding. Count evaluation and all range checks remain explicit obligations. -/

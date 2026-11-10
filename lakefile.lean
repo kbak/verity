@@ -75,6 +75,7 @@ lean_lib «SolidityImportSmoke» where
     .one `Contracts.SolidityImportSmoke.LegacyOrderedSignaturesProofs,
     .one `Contracts.SolidityImportSmoke.LegacyStateTransitionsModel,
     .one `Contracts.SolidityImportSmoke.LegacyAddressArraysModel,
+    .one `Contracts.SolidityImportSmoke.LegacyMemoryArraysModel,
     .one `Contracts.SolidityImportSmoke.AbiCoverageChecks,
     .one `Contracts.SolidityImportSmoke.ExplicitAbiChecks,
     .one `Contracts.SolidityImportSmoke.YulFeeContextChecks,

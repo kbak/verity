@@ -103,7 +103,7 @@ end
 /-- Every continuing or returning frame still has an empty raw buffer. -/
 def outcomeRawFree : StmtOutcome → Prop
   | .continue st | .stop st | .return _ st => st.rawReturndata = none
-  | .revert | .revertWithData _ => True
+  | .revert | .invalid | .revertWithData _ => True
 
 /-! ## Expression-level agreement -/
 
@@ -199,13 +199,14 @@ theorem denote_evalExprList_eq (fields : List Field) (s : DenoteState)
 
 /-! ## Statement-level agreement: outcome conversion and write bridges -/
 
-/-- Outcome conversion between the mirrored result types. -/
+/-- Coarse outcome conversion erases exact revert bytes and INVALID identity.
+The agreement fragment excludes all closed byte transports, including INVALID. -/
 def toStmtResult : StmtOutcome → SourceSemantics.StmtResult
   | .continue st => .continue (toRuntimeState st)
   | .stop st => .stop (toRuntimeState st)
   | .return v st => .return v (toRuntimeState st)
   | .revert => .revert
-  | .revertWithData _ => .revert
+  | .invalid | .revertWithData _ => .revert
 
 theorem storageArraySetAt_eq :
     ∀ (xs : List Verity.Core.Uint256) (idx : Nat) (v : Verity.Core.Uint256),
@@ -545,6 +546,7 @@ theorem execForEachLoop_rawFree {varName : String} {runBody : DenoteState → St
         | .stop next => .stop next
         | .return value next => .return value next
         | .revert => .revert
+        | .invalid => .invalid
         | .revertWithData data => .revertWithData data)
       cases hr : runBody ls <;> rw [hr] at hb <;>
         first
@@ -567,6 +569,7 @@ theorem execForEachSetBitLoop_rawFree {varName : String} {runBody : DenoteState 
           | .stop next => .stop next
           | .return value next => .return value next
           | .revert => .revert
+          | .invalid => .invalid
           | .revertWithData data => .revertWithData data)
         cases hr : runBody ls <;> rw [hr] at hb <;>
           first
@@ -696,6 +699,7 @@ theorem execForEachLoop_agree {varName : String}
             | .stop next => .stop next
             | .return value next => .return value next
             | .revert => .revert
+            | .invalid => .invalid
             | .revertWithData data => .revertWithData data) = _
       revert hf
       cases runBody ls <;>
@@ -731,6 +735,7 @@ theorem execForEachSetBitLoop_agree {varName : String}
             | .stop next => .stop next
             | .return value next => .return value next
             | .revert => .revert
+            | .invalid => .invalid
             | .revertWithData data => .revertWithData data) = _
         revert hf
         cases runBody ls <;>

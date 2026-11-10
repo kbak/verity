@@ -221,6 +221,6 @@ theorem denote_eq_sourceSemantics
             bindings := bindings
             selector := tx.functionSelector, errors := spec.errors } fn.body <;>
         simp [DenoteAgreement.toStmtResult, DenoteAgreement.toRuntimeState,
-          DenoteAgreement.toSourceResult_revertData]
+          DenoteAgreement.toSourceResult_revertData, DenoteAgreement.toSourceResult_invalid]
 
 end Compiler.Proofs.IRGeneration.DenoteEquivalence

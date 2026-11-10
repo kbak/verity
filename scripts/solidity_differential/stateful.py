@@ -37,8 +37,8 @@ def validate_observation(row):
         raise HarnessError('incomplete or unknown transaction observation fields')
     if not isinstance(row['id'], str) or not row['id']:
         raise HarnessError('missing transaction identity')
-    if row['status'] not in ('ok', 'revert'):
-        raise HarnessError('execution failure is not a contract revert')
+    if row['status'] not in ('ok', 'revert', 'invalid'):
+        raise HarnessError('unclassified execution failure')
     _bytes(row['data'])
     if not all(isinstance(row[k], list) for k in ('touched', 'storage', 'events')):
         raise HarnessError('observation arrays required')
@@ -64,7 +64,9 @@ def validate_observation(row):
             raise HarnessError('invalid EVM event topics')
         for topic in event['topics']:
             _bytes(topic, 32)
-    if row['status'] == 'revert' and row['events']:
+    if row['status'] == 'invalid' and row['data'] != '0x':
+        raise HarnessError('INVALID cannot return bytes')
+    if row['status'] != 'ok' and row['events']:
         raise HarnessError('reverted transaction retained emitted events')
     return set(touched), storage
 

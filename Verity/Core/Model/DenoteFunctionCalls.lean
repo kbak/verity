@@ -503,6 +503,7 @@ mutual
         | .stop next => .stop next
         | .return value next => .return value next
         | .revert => .revert
+        | .invalid => .invalid
         | .revertWithData data => .revertWithData data
 end
 
@@ -513,6 +514,8 @@ structure FunctionExecution where
   world : ContractState
   /-- Byte observation kept separately from the legacy word-return interface. -/
   revertBytes : Option (List UInt8) := none
+  /-- Retained for exact frame observations, not inferred from generic failure. -/
+  invalid : Bool := false
 
 /-- Execute a FunctionSpec with raw / linked calls in-fragment. -/
 def executeFunctionWithCalls (env : CallEnv) (spec : CompilationModel)
@@ -531,6 +534,7 @@ def executeFunctionWithCalls (env : CallEnv) (spec : CompilationModel)
           { result := .success [], world := state.world }
       | .return value state =>
           { result := .success [value], world := state.world }
+      | .invalid => { result := .failure [], world := worldWithTx, invalid := true }
       | .revert => { result := .revert [], world := worldWithTx }
       | .revertWithData data =>
           { result := .revert [], world := worldWithTx, revertBytes := some data }
@@ -544,7 +548,8 @@ def denoteFunctionWithCalls (env : CallEnv) (spec : CompilationModel)
   match execution.result with
   | .success [] => successResult env.oracle spec execution.world none
   | .success (word :: _) => successResult env.oracle spec execution.world (some word)
-  | .failure _ | .revert _ => revertedResult env.oracle spec execution.world
+  | .failure _ | .revert _ =>
+      { (revertedResult env.oracle spec execution.world) with invalid := execution.invalid }
 
 /-- Adapt a source-shaped FunctionSpec execution to the official framed
 multi-contract boundary.  The frame's pre-credit callee snapshot is supplied

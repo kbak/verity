@@ -723,6 +723,7 @@ theorem execStmt_copyBytes (oracle : DenoteOracle) (fields : List Field)
   | «return» value after => simp [executed, LoopOutcomePost] at actual
   | revert => simp [executed, LoopOutcomePost] at actual
   | revertWithData bytes => simp [executed, LoopOutcomePost] at actual
+  | invalid => simp [executed, LoopOutcomePost] at actual
 
 /-- Word-grid specification for the allocator's output clearing pass. -/
 def abiZeroWords (memory : Nat → Verity.Core.Uint256) (base count : Nat) :

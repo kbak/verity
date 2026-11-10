@@ -12,6 +12,7 @@ private theorem worldFrame_memory (before : DenoteState) (outcome : StmtOutcome)
   | «return» value after => exact congrArg Verity.ContractState.memory frame
   | revert => exact True.intro
   | revertWithData bytes => exact True.intro
+  | invalid => exact True.intro
 
 private theorem scalarWrite_memory (oracle : DenoteOracle) (fields : List Field)
     (state : DenoteState) (name : String) (value : Expr) :
@@ -94,6 +95,7 @@ theorem abiHeaderPreservingList_memory (oracle : DenoteOracle) (fields : List Fi
       | «return» value after => simpa [preservesMemory, executed] using headFrame
       | revert => simp [preservesMemory]
       | revertWithData bytes => simp [preservesMemory]
+      | invalid => simp [preservesMemory]
 end
 
 end Compiler.CompilationModel.Denote

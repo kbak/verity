@@ -29,7 +29,7 @@ def ofIRTransaction (tx : IRTransaction) : Denote.DenoteTransaction :=
     functionSelector := tx.functionSelector
     args := tx.args }
 
-/-- Denote result → source result (the two structures coincide). -/
+/-- Project Denote observations to the coarser source result, erasing halt details. -/
 def toSourceResult (r : Denote.DenoteResult) : SourceSemantics.SourceContractResult :=
   { success := r.success
     returnValue := r.returnValue
@@ -176,6 +176,10 @@ theorem findDynamicArrayElementAtSlot_go_eq
 theorem toSourceResult_revertData (r : Denote.DenoteResult) (data : Option (List UInt8)) :
     toSourceResult { r with revertData := data } = toSourceResult r := rfl
 
+/-- The source result also omits the distinction between INVALID and REVERT. -/
+theorem toSourceResult_invalid (r : Denote.DenoteResult) (halt : Bool) :
+    toSourceResult { r with invalid := halt } = toSourceResult r := rfl
+
 @[simp] theorem toSourceResult_revertedResult
     (spec : CompilationModel) (world : Verity.ContractState) :
     toSourceResult (Denote.revertedResult sourceOracle spec world) =
@@ -221,7 +225,7 @@ theorem denoteFunction_eq
           { world := SourceSemantics.withTransactionContext initialWorld tx,
             immutable := fun _ => 0, bindings := bindings,
             selector := tx.functionSelector, errors := spec.errors } fn.body <;>
-        simp [toStmtResult, toRuntimeState, toSourceResult_revertData]
+        simp [toStmtResult, toRuntimeState, toSourceResult_revertData, toSourceResult_invalid]
 
 end DenoteAgreement
 
