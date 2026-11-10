@@ -6891,7 +6891,8 @@ private partial def lowerCall (j : Json) : M Val := do
         unless args.size == 1 do failAt j "keccak256 requires one byte buffer"
         if (← get).legacyWrapping then
           unless LegacyPacked.isEncoding args[0]! || LegacyAbi.isEncoding args[0]! do
-            failAt args[0]! "legacy hashing requires abi.encodePacked or abi.encode with static arguments"
+            failAt args[0]!
+              "legacy hashing requires abi.encodePacked or abi.encode with static arguments"
         let bytes ← lowerEncodedBytes args[0]!
         return { pre := bytes.pre, expr := .keccak256 bytes.pointer bytes.size }
       if calleeId == -2 || calleeId == -16 then

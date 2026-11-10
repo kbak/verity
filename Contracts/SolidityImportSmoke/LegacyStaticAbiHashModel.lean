@@ -23,10 +23,13 @@ solidity_import imported from "Contracts/SolidityImportSmoke" entry "LegacyStati
   function inspect(bytes,bytes32,uint256)
   function mixed(bytes32,uint256)
   function loop(bytes32,uint256)
+/-- Imported static ABI hashing fixture, also built by the CI smoke target. -/
 def model : CompilationModel := imported.model
+/-- Concrete hash oracle used by the executable comparison driver. -/
 def oracle : Denote.DenoteOracle := SolidityImport.Differential.oracle
 end SolidityImportSmoke.LegacyStaticAbiHashModel
 
+/-- Compile the fixture to Yul or replay an explicit sequence of call frames. -/
 def main (args : List String) : IO UInt32 := do
   match args with
   | ["compile", selectorsFile, output] =>
