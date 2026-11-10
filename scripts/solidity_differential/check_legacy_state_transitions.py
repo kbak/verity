@@ -173,12 +173,15 @@ def scenario(kind, caller, layout, *, initial_count=3, random_cases=8, seed=7611
 
 def campaign(output, *, kind='links', context=0, optimized=False, initial_count=3,
              fixture=FIXTURE, contract=None, functions=None, extra_sources=None,
-             fields=None, errors=None, events=None, dirty_mappings=False):
+             fields=None, errors=None, events=None, dirty_mappings=False, prepared=False):
     output = Path(output).resolve()
     output.mkdir(parents=True, exist_ok=False)
-    command(['turbo-lean', '--json', 'build', 'Compiler.SolidityImport.Import',
-             'Compiler.SolidityImport.Differential', 'Compiler.SolidityImport.SequenceRunner',
-             '--project-dir', '.'], timeout=1800, log=output / 'build.log')
+    # Parallel execution must share fixed artifacts: build once before workers.
+    # ImplementationIdentity still rejects every source/artifact change.
+    if not prepared:
+        command(['turbo-lean', '--json', 'build', 'Compiler.SolidityImport.Import',
+                 'Compiler.SolidityImport.Differential', 'Compiler.SolidityImport.SequenceRunner',
+                 '--project-dir', '.'], timeout=1800, log=output / 'build.log')
     contract = contract or CONTRACTS[kind]
     functions = functions or FUNCTIONS[kind]
     source = fixture.read_text()
@@ -258,12 +261,14 @@ def main():
     parser.add_argument('--kind', choices=CONTRACTS, default='links')
     parser.add_argument('--context', type=int, default=0)
     parser.add_argument('--optimized', action='store_true')
+    parser.add_argument('--prepared', action='store_true',
+                        help='reuse artifacts explicitly built for this exact source before parallel runs')
     parser.add_argument('--dirty-mappings', action='store_true')
     parser.add_argument('--initial-count', type=int, default=3)
     args = parser.parse_args()
     try:
         return campaign(args.output, kind=args.kind, context=args.context, optimized=args.optimized,
-                        initial_count=args.initial_count, dirty_mappings=args.dirty_mappings)
+                        initial_count=args.initial_count, dirty_mappings=args.dirty_mappings, prepared=args.prepared)
     except (HarnessError, ValueError, KeyError, OSError) as exc:
         print(f'HARNESS ERROR: {exc}', file=sys.stderr)
         return 2

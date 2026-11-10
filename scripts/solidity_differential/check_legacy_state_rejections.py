@@ -11,7 +11,7 @@ CASES = {
     'modifier-division': ('modifier guard(uint256 x) { stored = 12 / x; _; } '
         'function run(uint256 x) public guard(x) { stored = x; }', 'legacy exceptional halt is not modeled'),
     'helper-assert': ('function helper(uint256 x) internal { stored = x; assert(x != 0); } '
-        'function run(uint256 x) public { helper(x); }', 'assert/INVALID is not modeled'),
+        'function run(uint256 x) public { helper(x); }', 'only builtin require calls are supported as expression statements'),
     'helper-division': ('function helper(uint256 x) internal { stored = 12 / x; } '
         'function run(uint256 x) public { helper(x); }', 'legacy exceptional halt is not modeled'),
     'assembly-write': ('function run(uint256 x) public { assembly { sstore(0, x) } }',

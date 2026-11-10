@@ -134,6 +134,13 @@ python3 scripts/solidity_import_mutations.py --task legacy-state-transitions \
   --task legacy-state-rejections
 ```
 
+For concurrent runs in one checkout, first build `Compiler.SolidityImport.Import`,
+`Compiler.SolidityImport.Differential` and `Compiler.SolidityImport.SequenceRunner`
+for the exact candidate with `turbo-lean build`, then pass `--prepared`. Do not
+edit or build while execution workers run. The implementation snapshot check
+remains active and rejects artifact replacements even when content is identical.
+Default runs build their prerequisites automatically.
+
 The mutation task requires an unchanged passing control and all-three-route
 violations of the independent requirement when self-context, zero/upper bounds or
 a mapping-link update is removed from the fixture. Those are source defect

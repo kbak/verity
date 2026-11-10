@@ -16,10 +16,10 @@ MUTATIONS = {
 }
 
 
-def run(output):
+def run(output, *, prepared=False):
     output = Path(output).resolve()
     output.mkdir(parents=True, exist_ok=False)
-    if campaign(output / 'control'):
+    if campaign(output / 'control', prepared=prepared):
         raise HarnessError('unmodified state-transition control failed')
     original = FIXTURE.read_text()
     reports = []
@@ -29,7 +29,7 @@ def run(output):
         mutated = original.replace(before, after)
         fixture = output / f'{name}.sol'
         fixture.write_text(mutated)
-        result = campaign(output / name, fixture=fixture)
+        result = campaign(output / name, fixture=fixture, prepared=True)
         report = json.loads((output / name / 'results.json').read_text())
         witnesses = [row for row in report['expectationMismatches'] if row['label'] == label and row['field'] == field]
         if result != 1 or report['divergences'] or {row['route'] for row in witnesses} != {'source', 'model', 'compiled'}:
@@ -47,4 +47,6 @@ def run(output):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
-    run(parser.parse_args().output)
+    parser.add_argument('--prepared', action='store_true')
+    args = parser.parse_args()
+    run(args.output, prepared=args.prepared)
