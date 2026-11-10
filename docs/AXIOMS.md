@@ -22,6 +22,10 @@ axiom. Its generated `covered` certificates use the existing coverage check;
 legacy semantics and source correspondence remain frontend trust assumptions.
 Differential and mutation outcomes are execution evidence, not proofs of source
 or deployed-bytecode equivalence.
+The nonpayable legacy state-transition extension likewise adds no project axiom
+or universal correctness theorem. Its scalar/mapping writes, modifiers, logs and
+nested rollback checks use the existing executable model. Local self-sender
+impersonation supplies a call frame and does not establish authorization.
 
 ## Policy
 

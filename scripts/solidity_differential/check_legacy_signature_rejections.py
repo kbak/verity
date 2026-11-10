@@ -25,7 +25,7 @@ CASES = {
     'non-view': (HEADER + INTERFACE.replace('external view', 'external') +
         'contract P { function run(address a, bytes32 h, bytes memory s) public returns(uint256) '
         '{ return uint256(bytes32(I(a).validate(h,s))); }}', 'run(address,bytes32,bytes)',
-        'requires a read-only function'),
+        'external calls require the ABI-v1 bytes4 view slice'),
     'byte-allocation': (HEADER + INTERFACE +
         'contract P { function run(address a, bytes32 h) public view returns(uint256) '
         '{ bytes memory s = new bytes(4); return uint256(bytes32(I(a).validate(h,s))); }}',

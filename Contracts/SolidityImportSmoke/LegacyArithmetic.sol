@@ -65,6 +65,11 @@ contract LegacyArithmetic {
         return stored;
     }
 
+    function payableMutation(uint256 x, uint256) external payable returns (uint256) {
+        stored = x;
+        return stored;
+    }
+
     function fixedBytesConversion(uint256 x, uint256 unused) external pure returns (bytes32) {
         return bytes32(x);
     }

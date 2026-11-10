@@ -100,12 +100,15 @@ partial def validateLegacyDeclaration (node : Json) (packedInput : Bool := false
           "ElementaryTypeName", "ElementaryTypeNameExpression", "FunctionCall",
           "MemberAccess", "IndexAccess", "Mapping", "TupleExpression",
           "UserDefinedTypeName", "OverrideSpecifier", "StructuredDocumentation",
-          "ForStatement", "WhileStatement"].contains kind do
+          "ForStatement", "WhileStatement", "ModifierDefinition", "ModifierInvocation",
+          "PlaceholderStatement", "EmitStatement"].contains kind do
         failAt node s!"Solidity 0.7.6 scalar slice does not support {kind}"
-      if kind == "FunctionDefinition" then
+      if kind == "FunctionDefinition" || kind == "ModifierDefinition" then
         validateLegacyControlFlow node
-        unless #[some "pure", some "view"].contains (optStr node "stateMutability") do
-          failAt node "Solidity 0.7.6 scalar slice requires a read-only function"
+      if kind == "FunctionDefinition" then
+        unless #[some "pure", some "view", some "nonpayable"].contains
+            (optStr node "stateMutability") do
+          failAt node "Solidity 0.7.6 payable functions are outside the state-transition slice"
       if let some ty := (field? node "typeDescriptions").bind (optStr · "typeString") then
         if ty.contains '[' || ty.startsWith "struct " || ty.startsWith "enum " ||
             (ty.startsWith "int" && !ty.startsWith "int_const") ||
@@ -152,7 +155,8 @@ partial def validateLegacyDeclaration (node : Json) (packedInput : Bool := false
           let source := (field? arg "typeDescriptions").bind (optStr · "typeString") |>.getD ""
           unless source.startsWith "uint" || source.startsWith "address" ||
               source.startsWith "int_const" || (fixedBytesWidth? source).isSome ||
-              source.startsWith "literal_string " do
+              source.startsWith "literal_string " ||
+              (target.startsWith "address" && source.startsWith "contract ") do
             failAt node "Solidity 0.7.6 scalar slice admits only unsigned/address conversions"
       if kind == "FunctionCall" && optStr node "kind" == some "functionCall" then
         let callee ← mField node "expression"

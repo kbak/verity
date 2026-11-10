@@ -8897,6 +8897,7 @@ private partial def lowerModifier (modInv : Json) : M (Array Stmt × Array Stmt)
   let modId := refId.toNat
   if (← get).stack.contains modId then failAt modInv s!"recursive modifier {modId}"
   let some modDecl := (← get).modifiers.find? modId | failAt modInv s!"unresolved modifier {modId}"
+  if (← get).legacyWrapping then validateLegacyDeclaration modDecl
   let isVirtual := optStr modDecl "virtual" == some "true" ||
     (field? modDecl "virtual").bind (fun v => v.getBool?.toOption) == some true
   let hasOverrides := (field? modDecl "overrides").filter (!·.isNull) |>.isSome
