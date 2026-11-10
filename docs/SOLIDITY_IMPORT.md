@@ -92,7 +92,53 @@ for 0.8; an explicit 0.8 `unchecked` block does not leak into a helper. In
 particular a wrap-then-`require` idiom must evaluate the wrapped result before
 its explicit guard. The additional declaration gate is conservative and runs
 on roots and reached helpers; existing construct checks still apply. Functions
-must be declared `pure` or `view`; state-changing calls need separate evidence.
+may be `pure`, `view`, or `nonpayable`; the state-transition extension below
+adds scoped write/modifier/event evidence. Payable functions remain rejected.
+
+### Legacy state transitions
+
+The legacy boundary admits nonpayable functions, reached single-placeholder
+modifiers, unsigned/address scalar and mapping writes, wrapping increments and
+compound assignments, and scalar events through the existing lowering. Reached
+modifier declarations receive the same legacy AST and division-path checks as
+functions; internal calls restore the legacy arithmetic default. `address(this)`
+retains the current contract address when converted from its contract type.
+Payable entry points, arbitrary external writes, raw `sstore` assembly, arrays,
+assertions and unguarded division remain rejected. This is a supported construct
+subset, not general 0.7.6 support.
+
+`LegacyStateTransitions.sol` and `check_legacy_state_transitions.py` compare
+source EVM, imported Denote and generated EVM sequences against independently
+specified storage, ordered log topics/data and exact revert bytes. Cases cover
+self-sender restrictions, zero/upper bounds, no-op writes, indexed address events,
+nested calls that fail after writes/logs, ABI-v1 dirty scalars, narrow/wide wrapping,
+and unrelated storage canaries. Storage-free and single-field variants exercise
+helper modifiers and post-body modifier writes. Dirty packed-word preservation and
+maximum-count initial worlds are primitive-semantics checks; those worlds need
+not satisfy a downstream invariant.
+
+Self-sender experiments explicitly impersonate the contract only on local test
+nodes. They check a supplied call frame; they do not prove that an authorized
+transaction reaches that frame. Deployment initialization, signatures and proxy
+reachability require downstream evidence. Finite observations do not prove
+source/model correspondence, whole-world frames or arbitrary-sequence invariants.
+
+```sh
+PYTHONPATH=scripts python3 -m solidity_differential.check_legacy_state_transitions \
+  --output .lake/legacy-state --dirty-mappings
+PYTHONPATH=scripts python3 -m solidity_differential.check_legacy_state_transitions \
+  --kind scalar --context 2 --optimized --output .lake/legacy-scalar
+PYTHONPATH=scripts python3 -m solidity_differential.check_legacy_state_transitions \
+  --kind stateless --output .lake/legacy-stateless
+python3 scripts/solidity_import_mutations.py --task legacy-state-transitions \
+  --task legacy-state-rejections
+```
+
+The mutation task requires an unchanged passing control and all-three-route
+violations of the independent requirement when self-context, zero/upper bounds or
+a mapping-link update is removed from the fixture. Those are source defect
+controls, not compiler mutations or discovered vulnerabilities. Build failures
+and timeouts never count as detections.
 
 ABI coder v1 is the 0.7.6 default. Scalar calldata words are cleaned to their
 type rather than rejected for noncanonical upper bits; boolean words normalize
@@ -101,7 +147,7 @@ select validation in the target contract's source unit. Inherited functions
 use the target contract's decoder, even when their defining file selects the
 other coder. Except for ABI coder v1 memory bytes described below, dynamic and
 aggregate ABI, signed arithmetic, enum conversions,
-narrow fixed-bytes root ABI, modifiers, general assembly, and general external calls
+narrow fixed-bytes root ABI, general assembly, and general external calls
 remain outside the legacy slice. Builtins are limited to `require`, `revert`, and
 the `ecrecover` extension described below.
 The fixed-byte and terminal memory-revert extension below admits additional

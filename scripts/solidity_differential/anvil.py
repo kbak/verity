@@ -127,12 +127,14 @@ class SequenceAdapter:
     initial storage is installed verbatim from the fixture. ABI values and
     emitted events are observed without normalization.
     """
-    def __init__(self, directory, bytecodes, initial_storage=(), calldata_key='data', observer=None):
+    def __init__(self, directory, bytecodes, initial_storage=(), calldata_key='data', observer=None,
+                 impersonated_senders=()):
         self.directory = Path(directory)
         self.bytecodes = tuple(bytecodes)
         self.initial_storage = tuple(tuple(row) for row in initial_storage)
         self.calldata_key = calldata_key
         self.observer = observer
+        self.impersonated_senders = tuple(impersonated_senders)
         self.runs = 0
 
     def __call__(self, transactions, plan):
@@ -149,6 +151,11 @@ class SequenceAdapter:
                     raise HarnessError('fixture deployment failed')
             for account, slot, value in self.initial_storage:
                 node.rpc('anvil_setStorageAt', account, slot, value)
+            # Explicit call-frame experiments only; this is not evidence of
+            # transaction authorization or reachability of a contract sender.
+            for sender in self.impersonated_senders:
+                node.rpc('anvil_impersonateAccount', sender)
+                node.rpc('anvil_setBalance', sender, hex(10**24))
             for transaction, slots in zip(transactions, plan):
                 # Require exact environments. Silently filling these from the
                 # host clock would make block-dependent imports incomparable.
@@ -179,6 +186,7 @@ class SequenceAdapter:
         (directory / 'sequence.json').write_text(json.dumps(
             {'bytecodes': self.bytecodes, 'initialStorage': self.initial_storage,
              'calldataKey': self.calldata_key, 'node': node.provenance,
+             'impersonatedSenders': self.impersonated_senders,
              'transactions': transactions, 'receipts': receipts,
              'slots': plan, 'observations': observations}, indent=2) + '\n')
         return observations

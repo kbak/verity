@@ -845,6 +845,22 @@ def ordered_signature_mutation() -> None:
     print("pass duplicate-signature source mutation against independent authorization", flush=True)
 
 
+def legacy_state_mutations() -> None:
+    output = module_campaign_output("check_legacy_state_mutations",
+                                    "legacy-state-transitions", 2 * MUTANT_TIMEOUT)
+    result = json.loads((output / "summary.json").read_text())
+    expected = {"self-context", "zero-bound", "upper-bound", "mapping-link"}
+    if (not result["passed"] or {row["mutant"] for row in result["mutants"]} != expected
+            or not all(row["detected"] and row["baselinePassed"] for row in result["mutants"])):
+        raise SystemExit("legacy state defects need independent three-route witnesses")
+    print("pass legacy state-transition source mutations", flush=True)
+
+
+def legacy_state_rejections() -> None:
+    module_campaign_output("check_legacy_state_rejections", "legacy-state-rejections", MUTANT_TIMEOUT)
+    print("pass legacy state-transition located rejections", flush=True)
+
+
 def tasks(update_golden: bool) -> list:
     """Independent work items, most expensive first (each runs in its own snapshot).
 
@@ -863,6 +879,8 @@ def tasks(update_golden: bool) -> list:
              ("reference-location", 1, reference_location_mutation),
              ("byte-call", 1, byte_call_mutations),
              ("ordered-signature-duplicate", 1, ordered_signature_mutation),
+             ("legacy-state-transitions", 1, legacy_state_mutations),
+             ("legacy-state-rejections", 1, legacy_state_rejections),
              ("deployment-world", 1, deployment_world_mutations),
              ("create2-opcode", 1, create2_opcode_mutations),
              ("account-storage", 1, account_storage_mutations),

@@ -25,7 +25,7 @@ def rejection_controls(output):
                          ("helperDivision", "legacy exceptional halt is not modeled"),
                          ("modulo", "legacy exceptional halt is not modeled"),
                          ("assertion", "assert/INVALID is not modeled"),
-                         ("mutation", "requires a read-only function")):
+                         ("payableMutation", "payable functions are outside")):
         path = output / f"reject-{name}.lean"
         path.write_text('import Compiler.SolidityImport.Import\n'
             'solidity_import rejected from "Contracts/SolidityImportSmoke" entry "LegacyArithmetic.sol"\n'
