@@ -79,6 +79,7 @@ private def execute (model : CompilationModel) (fn : FunctionSpec) (j : Json) : 
       | .stop final => match final.observedReturnWords with
         | some xs => pure ("ok", xs, xs.flatMap wordBytes, final.world)
         | none => throw "covered slice stopped without return words"
+      | .invalid => pure ("invalid", [], [], initial.world)
       | .revertWithData bytes => pure ("revert", [], bytes, initial.world)
       | .revert => throw "Denote failure has no exact revert observation"
       | _ => throw "covered slice did not return or revert"

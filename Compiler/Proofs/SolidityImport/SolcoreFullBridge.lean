@@ -99,6 +99,7 @@ private theorem execStmtList_append_of_continue
       · contradiction
       · contradiction
       · contradiction
+      · contradiction
 
 /-- Fuel-bounded iteration preserves `StateRefines` for every `fuel : Nat`. -/
 theorem execIter_preserves_stateRefines

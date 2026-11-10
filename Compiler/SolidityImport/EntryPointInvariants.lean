@@ -24,6 +24,10 @@ theorem finishFrame_failed_world (initial : Verity.ContractState)
       cases observed
       cases failed
   | revert => simp [finishFrame] at observed
+  | invalid =>
+      simp only [finishFrame, Except.ok.injEq] at observed
+      cases observed
+      rfl
   | revertWithData bytes =>
       simp only [finishFrame, Except.ok.injEq] at observed
       cases observed

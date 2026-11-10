@@ -189,12 +189,14 @@ def execute (model : CompilationModel) (oracle : DenoteOracle) (input : Json)
     let publicResult := denoteFunction oracle model fn tx initial (byteCalls := byteCalls)
     let result : TracedFrameResult ←
       match bindExternalParams selector fn.bindingParams args with
-      | none => pure ⟨⟨false, [], initial⟩, []⟩
+      | none => pure ⟨⟨false, [], initial, false⟩, []⟩
       | some bindings =>
           executeTracedBody oracle (effectiveFields model) initial
             bindings fn.body model.events model.errors selector byteCalls
     unless result.frame.success == publicResult.success do
       throw "traced execution status differs from public Denote"
+    unless result.frame.invalid == publicResult.invalid do
+      throw "traced INVALID status differs from public Denote"
     if publicResult.success then
       let returned := if publicResult.returnWords.isEmpty then publicResult.returnValue.toList
         else publicResult.returnWords
@@ -221,7 +223,7 @@ def execute (model : CompilationModel) (oracle : DenoteOracle) (input : Json)
       throw "model flat/account storage observations are incoherent"
     let deployment ← observeDeployment account world transaction
     rows := rows.push (Json.mkObj <| [
-      ("id", toJson ident), ("status", toJson (if result.frame.success then "ok" else "revert")),
+      ("id", toJson ident), ("status", toJson (if result.frame.success then "ok" else if result.frame.invalid then "invalid" else "revert")),
       ("data", toJson (hexBytes result.frame.data)),
       ("touched", toJson (touched.map fun (owner, slot) => [hexAddress owner, hexWord slot])),
       ("storage", toJson (slots.map fun (owner, slot) =>

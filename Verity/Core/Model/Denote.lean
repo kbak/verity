@@ -307,6 +307,10 @@ inductive StmtOutcome where
       represents unsupported evaluation, so differential tests must not invent
       bytes for it. -/
   | revertWithData (data : List UInt8)
+  /-- Explicit INVALID, distinct from REVERT and unsupported evaluation.
+  Carries no state: the enclosing frame rolls back and exposes no return bytes.
+  The gas-free denotation records the halt kind, not an opcode gas cost. -/
+  | invalid
 
 /-- Canonical big-endian ABI word bytes. -/
 def wordBytes (value : Nat) : List UInt8 :=
@@ -1795,6 +1799,7 @@ def execForEachLoop
       | .stop next => .stop next
       | .return value next => .return value next
       | .revert => .revert
+      | .invalid => .invalid
       | .revertWithData data => .revertWithData data
 
 def msbIndex (bitmap : Nat) : Nat :=
@@ -1821,6 +1826,7 @@ def execForEachSetBitLoop
         | .stop next => .stop next
         | .return value next => .return value next
         | .revert => .revert
+        | .invalid => .invalid
         | .revertWithData data => .revertWithData data
 
 mutual
@@ -2250,6 +2256,9 @@ mutual
             match executeByteExtCodeCopy oracle fields state mod resultVar args with
             | .ok outcome => outcome
             | .error _ => .revert
+        | some .invalid =>
+            if mod == Compiler.ECM.SolidityInvalid.module && args.isEmpty then .invalid
+            else .revert
         | some .revertMemory =>
             match executeByteRevertMemory oracle fields state mod args with
             | .ok outcome => outcome
@@ -2302,6 +2311,7 @@ mutual
         | .stop next => .stop next
         | .return value next => .return value next
         | .revert => .revert
+        | .invalid => .invalid
         | .revertWithData data => .revertWithData data
 end
 
@@ -2331,6 +2341,8 @@ structure DenoteResult where
   returnWords : List Nat := []
   /-- Exact bytes from an observed revert; none is not an invented empty payload. -/
   revertData : Option (List UInt8) := none
+  /-- Explicit INVALID; it is never an ordinary empty REVERT. -/
+  invalid : Bool := false
   finalStorage : Nat → Nat
   events : List (List Nat)
 
@@ -2454,6 +2466,7 @@ def denoteFunction (oracle : DenoteOracle) (spec : CompilationModel) (fn : Funct
             (returnWords := state.observedReturnWords.getD [])
       | .return value state => successResult oracle spec state.world (some value)
       | .revert => revertedResult oracle spec worldWithTx
+      | .invalid => { (revertedResult oracle spec worldWithTx) with invalid := true }
       | .revertWithData bytes =>
           { (revertedResult oracle spec worldWithTx) with revertData := some bytes }
 

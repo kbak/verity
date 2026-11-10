@@ -315,6 +315,7 @@ private theorem execStmtList_append_of_continue
       · contradiction
       · contradiction
       · contradiction
+      · contradiction
 
 /-- Inductive straight-line `Solcore` statement AST over storage, transient
     storage, local variables, and event log emission. -/

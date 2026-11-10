@@ -158,6 +158,16 @@ than interpreting them with 0.8 semantics. Its differential comparisons observe
 execution checks; they establish neither frontend equivalence nor historical
 fork/deployed-bytecode equivalence. See `SOLIDITY_IMPORT.md` for the subset and
 reproduction commands. No proof axiom is added by this importer extension.
+Address-array indexing now has an explicit closed INVALID transport. The model
+and frame runner preserve its identity and rollback, but do not model opcode gas
+or claim compiler simulation for this transport. Allocation uses the legacy
+empty-revert count limit, and ABI-v1 returns preserve raw memory words. Bounded
+traversal relies on checked syntax (a zero-start counter and mandatory indexed
+write), not a presumed well-formed linked list. The extra iteration preserves
+failure on cycles/overlong lists; unused capacity is zero-filled. Array aliases,
+assembly references, and unsupported loop forms fail closed. The source identity
+includes both `LegacyArrays.lean` and `LegacyArrayLoops.lean`.
+
 The nonpayable legacy state-transition extension reuses existing write, modifier,
 event and rollback semantics. Its independent finite oracle checks exact state,
 logs and reverts for zero-value call frames, including nested failure after writes.

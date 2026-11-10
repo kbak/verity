@@ -30,6 +30,8 @@ structure FrameResult where
   success : Bool
   data : List UInt8
   world : Verity.ContractState
+  /-- True only for an explicitly observed INVALID instruction. -/
+  invalid : Bool := false
 
 /-- Preserve exact bytes and select the committed or rolled-back world.
 A payload-free Denote failure is an instrumentation error, never an invented
@@ -37,13 +39,14 @@ empty revert. Events remain in the returned world for subsequent ABI encoding. -
 def finishFrame (initial : Verity.ContractState) : StmtOutcome → Except String FrameResult
   | .continue _ => .error "Denote frame fell through without an explicit return"
   | .stop final =>
-      if final.observedStop then .ok ⟨true, [], final.world⟩ else
+      if final.observedStop then .ok ⟨true, [], final.world, false⟩ else
       match final.observedReturnWords with
       | none => .error "Denote frame stopped without an explicit return observation"
-      | some words => .ok ⟨true, words.flatMap wordBytes, final.world⟩
-  | .return value final => .ok ⟨true, wordBytes value, final.world⟩
+      | some words => .ok ⟨true, words.flatMap wordBytes, final.world, false⟩
+  | .return value final => .ok ⟨true, wordBytes value, final.world, false⟩
+  | .invalid => .ok ⟨false, [], initial, true⟩
   | .revert => .error "Denote failure has no exact revert payload"
-  | .revertWithData bytes => .ok ⟨false, bytes, initial⟩
+  | .revertWithData bytes => .ok ⟨false, bytes, initial, false⟩
 
 /-- Execute a body through Denote, after installing fresh frame-local state.
 This function is a frame runner, not yet a full ABI/dispatch transaction runner. -/
@@ -82,6 +85,6 @@ theorem finishFrame_revert_accounts (initial : Verity.ContractState) (bytes : Li
 
 /-- Rollback retains the original persistent world and exact revert bytes. -/
 theorem finishFrame_revert (initial : Verity.ContractState) (bytes : List UInt8) :
-    finishFrame initial (.revertWithData bytes) = .ok ⟨false, bytes, initial⟩ := rfl
+    finishFrame initial (.revertWithData bytes) = .ok ⟨false, bytes, initial, false⟩ := rfl
 
 end Compiler.CompilationModel.SolidityImport.Transactions

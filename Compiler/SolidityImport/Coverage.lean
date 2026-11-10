@@ -189,6 +189,7 @@ def closedTransportCovered (mod : Compiler.ECM.ExternalCallModule) (args : List 
   | some (.extCodeCopy resultVar) =>
       mod == Compiler.ECM.SolidityExtCodeCopy.module resultVar && args.length == 1 &&
         exprListCovered args
+  | some .invalid => mod == Compiler.ECM.SolidityInvalid.module && args.isEmpty
   | some .revertMemory =>
       mod == Compiler.ECM.SolidityRevertMemory.module && args.length == 2 && exprListCovered args
   | some .returnMemory =>
@@ -1004,7 +1005,7 @@ def denoteScalarBody
       { world := { world with blockTimestamp := Verity.Core.Uint256.ofNat timestamp }
         bindings := bindings } body with
   | .stop state | .continue state | .return _ state => state.observedReturnWords
-  | .revert | .revertWithData _ => none
+  | .revert | .invalid | .revertWithData _ => none
 
 private theorem boolAnd2 {a b : Bool} (h : (a && b) = true) : a = true ∧ b = true := by
   cases a <;> cases b <;> simp_all
@@ -1017,7 +1018,7 @@ private theorem boolAnd3 {a b c : Bool} (h : (a && b && c) = true) :
 A revert has no successor state. -/
 def preservesWorld (origin : DenoteState) : StmtOutcome → Prop
   | .continue next | .stop next | .return _ next => next.world = origin.world
-  | .revert | .revertWithData _ => True
+  | .revert | .invalid | .revertWithData _ => True
 
 mutual
 
@@ -1088,6 +1089,7 @@ theorem execStmtList_slice_world
         simpa [preservesWorld, hExec] using hone
       · rename_i value next
         simpa [preservesWorld, hExec] using hone
+      · simp [preservesWorld]
       · simp [preservesWorld]
       · simp [preservesWorld]
 

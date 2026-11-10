@@ -8,7 +8,7 @@ open Denote
 def BindingFrame (key : String) (state : DenoteState) : StmtOutcome → Prop
   | .continue next => lookupValue next.bindings key = lookupValue state.bindings key ∧
       next.world.storageWords = state.world.storageWords
-  | .revert | .revertWithData _ => True
+  | .revert | .invalid | .revertWithData _ => True
   | _ => False
 
 /-- Instrumentation errors carry no successful execution. -/

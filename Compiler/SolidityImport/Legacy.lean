@@ -104,7 +104,7 @@ partial def validateLegacyDeclaration (node : Json) (packedInput : Bool := false
           "MemberAccess", "IndexAccess", "Mapping", "TupleExpression",
           "UserDefinedTypeName", "OverrideSpecifier", "StructuredDocumentation",
           "ForStatement", "WhileStatement", "ModifierDefinition", "ModifierInvocation",
-          "PlaceholderStatement", "EmitStatement", "ArrayTypeName"].contains kind do
+          "PlaceholderStatement", "EmitStatement", "ArrayTypeName", "NewExpression"].contains kind do
         failAt node s!"Solidity 0.7.6 scalar slice does not support {kind}"
       if kind == "FunctionDefinition" || kind == "ModifierDefinition" then
         validateLegacyControlFlow node
@@ -123,8 +123,6 @@ partial def validateLegacyDeclaration (node : Json) (packedInput : Bool := false
           failAt node s!"Solidity 0.7.6 scalar slice does not support type {ty}"
       if kind == "FunctionDefinition" then
         for ret in (← mArr (← mField (← mField node "returnParameters") "parameters")) do
-          if (← mType ret).contains '[' then
-            failAt ret "Solidity 0.7.6 array returns are outside the guarded-read slice"
           if (← mType ret) == "bytes" then
             failAt ret "Solidity 0.7.6 dynamic bytes returns are outside the decoding slice"
       if kind == "VariableDeclaration" then

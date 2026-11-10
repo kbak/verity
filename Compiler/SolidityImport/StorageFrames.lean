@@ -77,7 +77,7 @@ theorem execStmt_setStorage_memory_frame (oracle : DenoteOracle) (fields : List 
 remain observable separately and this predicate asserts nothing about them. -/
 def preservesMemory (before : DenoteState) : StmtOutcome → Prop
   | .continue after | .stop after | .return _ after => after.world.memory = before.world.memory
-  | .revert | .revertWithData _ => True
+  | .revert | .invalid | .revertWithData _ => True
 
 /-- Emitting an event changes events, not the decoded ABI memory header. -/
 theorem execStmt_emit_memory_frame (oracle : DenoteOracle) (fields : List Field)
@@ -129,6 +129,7 @@ theorem execStmtList_memory_frame_of_steps (oracle : DenoteOracle) (fields : Lis
       | «return» value next => simpa [preservesMemory, executed] using headFrame
       | revert => simp [preservesMemory]
       | revertWithData bytes => simp [preservesMemory]
+      | invalid => simp [preservesMemory]
 
 /-- The bounded executor composes a body memory frame at every actual index.
 Updating the index binding does not modify memory. -/
@@ -153,6 +154,7 @@ theorem execForEachLoop_memory_frame (name : String) (runBody : DenoteState → 
       | «return» value next => simpa [preservesMemory, executed] using frame
       | revert => simp [preservesMemory]
       | revertWithData bytes => simp [preservesMemory]
+      | invalid => simp [preservesMemory]
 
 /-- Every mapping target store preserves memory, regardless of alias slots. -/
 theorem writeMappingTargets_memory_frame (fields : List Field) (name : String)

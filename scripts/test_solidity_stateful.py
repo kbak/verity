@@ -35,6 +35,20 @@ class StatefulTests(unittest.TestCase):
                     mismatch = compare_sequences(['tx'], data)
                     self.assertEqual(mismatch[0]['signature'][0][0], field)
 
+    def test_invalid_is_distinct_from_empty_revert(self):
+        data = traces()
+        for route in ROUTES:
+            data[route][0]['status'] = 'invalid'
+        self.assertEqual(compare_sequences(['tx'], data), [])
+        data['model'][0]['status'] = 'revert'
+        self.assertEqual(compare_sequences(['tx'], data)[0]['signature'][0][0], 'status')
+        for field, value in [('data', '0x01'), ('events', [
+                {'address': ACCOUNT, 'topics': [], 'data': '0x'}])]:
+            data = traces()
+            data['model'][0].update(status='invalid', **{field: value})
+            with self.assertRaises(HarnessError):
+                compare_sequences(['tx'], data)
+
     def test_exact_revert_bytes(self):
         data = traces()
         for route in ROUTES:

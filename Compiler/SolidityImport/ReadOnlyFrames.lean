@@ -45,6 +45,7 @@ theorem loop_frame (key indexVar : String) (runBody : DenoteState → StmtOutcom
       | «return» value next => simp [h, BindingFrame] at body
       | revert => trivial
       | revertWithData bytes => trivial
+      | invalid => trivial
 
 /-- The count evaluation and initial loop-index binding preserve the frame. -/
 theorem foreach_frame (o : DenoteOracle) (fs : List Field) (state : DenoteState)
@@ -79,7 +80,7 @@ def protectedStmt (key : String) : Stmt → Bool
   | .forEach index _ body => decide (index ≠ key) && protectedList key body
   | .ecm mod _ => match mod.byteTransport with
     | some (.legacyRecover result) | some (.legacyBytes4 result _) => decide (result ≠ key)
-    | some .revertMemory => true
+    | some .revertMemory | some .invalid => true
     | _ => false
   | _ => false
 /-- All instructions must belong to the closed fragment. -/
@@ -116,6 +117,9 @@ theorem ecm_frame (o : DenoteOracle) (fs : List Field) (state : DenoteState)
         have h := legacy_call_frame o fs state mod result key (some selector) args accepted
         simp only [execStmt, transport]
         exact call_frame_outcome key state _ h
+      case invalid =>
+        simp only [execStmt, transport]
+        split <;> trivial
       case revertMemory =>
         have h := revert_frame o fs state mod args key
         simp only [execStmt, transport]
@@ -174,6 +178,7 @@ theorem protected_list_frame (o : DenoteOracle) (fs : List Field) (state : Denot
       | «return» value next => simp [h, BindingFrame] at first
       | revert => trivial
       | revertWithData bytes => trivial
+      | invalid => trivial
 end
 end Compiler.CompilationModel.SolidityImport.AuthorizationFrames
 
@@ -206,6 +211,7 @@ theorem append_no_continue (o : DenoteOracle) (fields : List Field) (pre suffix 
   | «return» value next => simp
   | revert => simp
   | revertWithData bytes => simp
+  | invalid => simp
 
 /-- Revert payload construction followed by the closed revert transport always rejects. -/
 theorem ends_memory_revert (o : DenoteOracle) (fields : List Field) (pre : List Stmt)
