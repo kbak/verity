@@ -27,7 +27,7 @@ CASES = {
         'returndatacopy(p,1,returndatasize()) revert(p,returndatasize()) } }',
          SIGNATURE, 'assembly builtin is unsupported'),
     'live-returndata': (FUNCTION + CALL + 'assembly { let p := mload(64) '
-        'returndatacopy(p,0,returndatasize()) } }', SIGNATURE, 'assembly builtin is unsupported'),
+        'returndatacopy(p,0,returndatasize()) } }', SIGNATURE, 'requires a terminal memory revert'),
     'enum-helper-write': ('function h(E e) internal pure returns(bool) { '
         'assembly { e := 1 } return e==E.A; } '
         'function run(E e) public pure returns(bool) { return h(e); }',
