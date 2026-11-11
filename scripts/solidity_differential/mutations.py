@@ -10,7 +10,7 @@ from .engine import ROOT, WORKSPACE, MUTANT_BUILD_TIMEOUT, HarnessError, command
 MUTANTS = {
     'void-call-offset': ('Verity/Core/Model/LegacyVoidCalls.lean', 'store head (.call "sub" [tail, add ptr 4])', 'store head (.call "sub" [tail, ptr])'),
     'void-call-code': ('Verity/Core/Model/LegacyVoidCalls.lean', '.if_ (.call "iszero" [.call "extcodesize" [target]])', '.if_ (.lit 0)'),
-    'void-call-failure': ('Verity/Core/Model/LegacyVoidCalls.lean', '.if_ (.call "iszero" [ident "success"])', '.if_ (.lit 0)'),
+    'void-call-failure': ('Verity/Core/Model/LegacyVoidCalls.lean', '.exprStmt (.call "revert" [.lit 0, .call "returndatasize" []])', '.exprStmt (.call "revert" [.lit 0, .lit 0])'),
     'void-call-pre': ('Verity/Core/Model/LegacyVoidCalls.lean', 'return [.block body]', 'return if layout.any (· != .word) then [] else [.block body]'),
     'void-call-post': ('Verity/Core/Model/LegacyVoidCalls.lean', 'return [.block body]', 'return if layout.all (· == .word) then [] else [.block body]'),
     'void-call-return-decoder': ('Verity/Core/Model/LegacyVoidCalls.lean', 'return [.block body]', 'return [.block (body ++ [.if_ (.call "lt" [.call "returndatasize" [], .lit 32]) [.exprStmt (.call "revert" [.lit 0, .lit 0])]])]'),
