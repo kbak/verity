@@ -124,7 +124,7 @@ partial def validateLegacyDeclaration (node : Json) (encodingInput : Bool := fal
     if let some kind := optStr node "nodeType" then
       unless #["FunctionDefinition", "ParameterList", "VariableDeclaration", "Block",
           "ExpressionStatement", "VariableDeclarationStatement", "IfStatement", "Return",
-          "BinaryOperation", "UnaryOperation", "Assignment", "Identifier", "Literal",
+          "BinaryOperation", "UnaryOperation", "Assignment", "Identifier", "Literal", "Conditional",
           "ElementaryTypeName", "ElementaryTypeNameExpression", "FunctionCall",
           "MemberAccess", "IndexAccess", "Mapping", "TupleExpression",
           "UserDefinedTypeName", "OverrideSpecifier", "StructuredDocumentation",
@@ -191,8 +191,16 @@ partial def validateLegacyDeclaration (node : Json) (encodingInput : Bool := fal
                 (#["==", "!=", "<", "<=", ">", ">="].contains ·) do
               failAt node "Solidity 0.7.6 enum operands require a comparison"
       if kind == "Conditional" then
-        if (← mType node).startsWith "enum " then
+        let ty ← mType node
+        if ty.startsWith "enum " then
           failAt node "Solidity 0.7.6 enum conditionals are outside the scalar enum slice"
+        unless ty == "bool" || ty == "address" || ty == "address payable" ||
+            ty.startsWith "contract " || (fixedBytesWidth? ty).isSome ||
+            (ty.startsWith "uint" && (bitsOf ty).isSome) do
+          failAt node ("Solidity 0.7.6 conditionals require an unsigned, bool, address " ++
+            "or fixed-bytes result")
+        unless (← mType (← mField node "condition")) == "bool" do
+          failAt node "Solidity 0.7.6 conditional condition must be bool"
       if kind == "UnaryOperation" then
         if (← mType (← mField node "subExpression")).startsWith "enum " then
           failAt node "Solidity 0.7.6 enum mutations are outside the scalar enum slice"

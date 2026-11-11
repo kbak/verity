@@ -7,7 +7,35 @@ import sys
 
 from .engine import ROOT, WORKSPACE, MUTANT_BUILD_TIMEOUT, HarnessError, command, write_json
 
+# Exact shared lowering anchor; every mutation must still compile and diverge at runtime.
+CONDITIONAL_LOWERING = """private partial def lowerConditional (j : Json) : M Val := do
+  let cond ← atom (← lowerExpr (← mField j "condition"))
+  let yes ← lowerExpr (← mField j "trueExpression")
+  let no ← lowerExpr (← mField j "falseExpression")
+  let dest ← fresh
+  let thenB := yes.pre.push (.assignVar dest yes.expr)
+  let elseB := no.pre.push (.assignVar dest no.expr)
+  let ite := Stmt.ite cond.expr thenB.toList elseB.toList
+  pure { pre := cond.pre.push (.letVar dest (.literal 0)) |>.push ite, expr := .localVar dest }
+"""
+
 MUTANTS = {
+    'conditional-invert': ('Compiler/SolidityImport/Import.lean', CONDITIONAL_LOWERING,
+        CONDITIONAL_LOWERING.replace('Stmt.ite cond.expr thenB.toList elseB.toList',
+            'Stmt.ite (.logicalNot cond.expr) thenB.toList elseB.toList')),
+    'conditional-eager-true': ('Compiler/SolidityImport/Import.lean', CONDITIONAL_LOWERING,
+        CONDITIONAL_LOWERING.replace('let thenB := yes.pre.push (.assignVar dest yes.expr)',
+            'let thenB := #[Stmt.assignVar dest yes.expr]').replace('pre := cond.pre.push',
+            'pre := (cond.pre ++ yes.pre).push')),
+    'conditional-eager-false': ('Compiler/SolidityImport/Import.lean', CONDITIONAL_LOWERING,
+        CONDITIONAL_LOWERING.replace('let elseB := no.pre.push (.assignVar dest no.expr)',
+            'let elseB := #[Stmt.assignVar dest no.expr]').replace('pre := cond.pre.push',
+            'pre := (cond.pre ++ no.pre).push')),
+    'conditional-repeat-condition': ('Compiler/SolidityImport/Import.lean', CONDITIONAL_LOWERING,
+        CONDITIONAL_LOWERING.replace('  let yes ← lowerExpr',
+            '  let repeated ← atom (← lowerExpr (← mField j "condition"))\n  let yes ← lowerExpr').replace(
+            'pre := cond.pre.push', 'pre := (cond.pre ++ repeated.pre).push')),
+
     'helper-copy-source': ('Compiler/SolidityImport/LegacyMemory.lean',
         'let copy ← copyCalldata data source length',
         'let copy ← copyCalldata data (.add source (.literal 1)) length'),
@@ -327,6 +355,10 @@ def mutation_campaign(output, selected=None):
                         "import sys; sys.path.insert(0, 'scripts'); "
                         "from solidity_differential.check_legacy_calldata_hash import main; sys.exit(main())",
                         "--output", str(directory / ".lake/campaign")]
+            if name.startswith("conditional-"):
+                kind = "effects" if name == "conditional-repeat-condition" else "scalar"
+                argv = [sys.executable, "-m", "solidity_differential.check_legacy_scalar_conditionals",
+                        "--kind", kind, "--output", str(directory / ".lake/campaign")]
             if name.startswith(("helper-copy-", "helper-forward-")):
                 argv = [sys.executable, "-m", "solidity_differential.check_legacy_calldata_helpers",
                         "--output", str(directory / ".lake/campaign")]

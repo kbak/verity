@@ -585,3 +585,10 @@ project axiom or external transport. They lower to existing memory and loop mode
 statements. Differential and mutation evidence does not establish a compiler/source
 equivalence theorem; the remaining translation and resource assumptions are recorded
 in [TRUST_ASSUMPTIONS.md](TRUST_ASSUMPTIONS.md).
+
+
+Legacy scalar conditionals and conditional-edge division guards add no project
+axiom or transport. They reuse the existing scalar branch lowering and conservative
+immutable-local analysis. Runtime/negative/mutation checks do not prove the
+importer's source correspondence; the trust boundary and exclusions are recorded
+in [TRUST_ASSUMPTIONS.md](TRUST_ASSUMPTIONS.md).

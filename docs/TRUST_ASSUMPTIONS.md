@@ -2511,3 +2511,21 @@ call. This does not admit arbitrary slices, returned/reassigned calldata, ABI-v2
 conversion semantics, general effectful argument ordering or storage access after
 state-changing external calls. Finite campaigns assume adequate gas, memory and call
 depth; external interaction cases retain their explicit callee-world obligations.
+
+
+### Legacy scalar conditional boundary (experimental)
+
+The 0.7.6 declaration gate admits unsigned, bool, address/contract and fixed-byte
+conditional results through the existing scalar `Stmt.ite` lowering. The condition
+runs once and only the selected arm's effects execute. Both arms still undergo
+source admission checks. The nonzero-divisor analysis propagates facts into each
+arm only for never-assigned unsigned local declarations; it neither exports those
+facts past the conditional nor imports caller assumptions into a helper.
+
+No new model primitive, transport, project axiom or source/compiler equivalence
+theorem is introduced. The admission/translation remains unproved and is checked
+with independent value/state expectations, negative controls and executable
+mutations. Gas, memory and call-depth adequacy remain assumptions. Signed, enum,
+aggregate/reference and function-pointer conditionals, general effectful argument
+ordering and gas/refund behavior are not established by this slice. Existing
+external-world correspondence obligations remain when admitted helpers interact.

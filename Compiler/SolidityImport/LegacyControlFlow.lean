@@ -91,6 +91,12 @@ private partial def validateExpression (node : Json)
     validateExpression (child node "rightExpression") eligible
       (branchFacts lhs (op == "&&") eligible facts)
     return
+  if kind == some "Conditional" then
+    let cond := child node "condition"
+    validateExpression cond eligible facts
+    validateExpression (child node "trueExpression") eligible (branchFacts cond true eligible facts)
+    validateExpression (child node "falseExpression") eligible (branchFacts cond false eligible facts)
+    return
   if (kind == some "BinaryOperation" && (op == "/" || op == "%")) ||
       (kind == some "Assignment" && (op == "/=" || op == "%=")) then
     let rhs := child node (if kind == some "Assignment" then "rightHandSide" else "rightExpression")

@@ -1991,3 +1991,41 @@ This is finite semantic evidence, not a Solidity/importer/compiler equivalence
 proof. Gas, memory resources and call-depth adequacy remain assumptions. Complete
 application execution, argument side-effect ordering, gas observations and refund
 handling still require additional work. Generated artifacts remain under `.lake/`.
+
+
+### Scalar conditional expressions (experimental)
+
+Solidity 0.7.6 admits `condition ? yes : no` for unsigned integers, bools,
+addresses (including payable/contract addresses), and fixed bytes. Nested choices,
+scalar helper results/arguments, selected scalar assignments and existing increment
+forms use the shared scalar lowerer. The condition is evaluated once; the chosen
+arm's prelude and value stay inside its `Stmt.ite` branch. Skipped arms do not
+allocate, emit events, write storage or execute their require/revert behavior.
+Legacy wrapping arithmetic and ABI-v1 scalar cleaning retain their existing rules.
+Narrow fixed-byte root parameters/returns remain rejected; internal conditional
+values can be observed through the existing full-word conversions.
+
+The declaration gate validates both arms, including statically unselected arms.
+Signed values, enum results, tuples, dynamic/reference values and function pointers
+remain outside this legacy conditional slice. Existing restrictions on argument
+ordering and storage access after external interactions still apply. This does not
+admit `gasleft()`, gas prices, refund calls or general effectful call arguments.
+
+Division-path validation follows each conditional edge using the same conservative
+facts as `if` and short-circuit expressions. For example, `d == 0 ? 0 : n / d`
+is admitted for an unsigned, never-assigned local `d`. Facts do not escape the
+expression, cross helper calls, survive mutation, or justify a truncated divisor.
+An unguarded zero-divisor path remains rejected; no legacy exceptional-halt behavior
+is replaced with a modern panic.
+
+`check_legacy_scalar_conditionals` compares the original compiler, public/traced
+Denote and generated EVM with independent ABI, arithmetic, allocation, state and
+ordered-event expectations. It covers both branch outcomes, nested choices, dirty
+ABI values, width/overflow boundaries, lazy failures/copies, condition effects,
+selected increments/assignments and outer rollback. `check_legacy_conditional_rejections`
+checks supported scalar contexts and neighboring unsafe division/non-scalar cases.
+Executable mutations invert the choice, eagerly execute either arm or repeat the
+condition; an unchanged control must pass before runtime divergence counts.
+
+These are finite translation checks, not a new compiler-correctness theorem.
+The existing model primitives and resource/external-world assumptions are unchanged.
