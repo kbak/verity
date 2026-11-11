@@ -22,9 +22,9 @@ def _calldata(tx):
     if not isinstance(data, str) or not re.fullmatch(r'0x[0-9a-f]*', data):
         raise HarnessError('canonical source calldata required')
     raw = bytes.fromhex(data[2:]) if len(data) % 2 == 0 else b''
-    if len(raw) < 4 or (len(raw) - 4) % 32:
-        raise HarnessError('stateful Denote requires word-aligned source calldata')
-    words = [int.from_bytes(raw[i:i+32], 'big') for i in range(4, len(raw), 32)]
+    if len(raw) < 4:
+        raise HarnessError('stateful Denote requires a complete source selector')
+    words = [int.from_bytes(raw[i:i+32].ljust(32, b'\0'), 'big') for i in range(4, len(raw), 32)]
     args = tx.get('args')
     if not isinstance(args, list) or any(type(arg) is not int for arg in args) or words != args:
         raise HarnessError('source calldata differs from model argument words')
@@ -99,6 +99,9 @@ class SequenceAdapter:
                 'timestamp': _uint(tx['timestamp']), 'blockNumber': _uint(tx['blockNumber']),
                 'observe': [[str(int(_bytes(owner, 20), 16)), str(int(_bytes(slot, 32), 16))]
                             for owner, slot in slots]})
+            calldata_size = (len(tx['data'])-2)//2
+            if (calldata_size-4) % 32:
+                converted[-1]['calldataSize'] = str(calldata_size)
             if 'observeAccounts' in tx:
                 # Deployment plans are discovered from EVM traces, never by the model.
                 if not isinstance(tx['observeAccounts'], list):

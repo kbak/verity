@@ -16,14 +16,26 @@ class StatefulCalldataIdentityTests(unittest.TestCase):
         with self.assertRaisesRegex(HarnessError, 'differs'):
             _calldata({'args': [2], 'data': '0x12345678' + f'{1:064x}'})
 
-    def test_partial_word_rejected(self):
-        with self.assertRaisesRegex(HarnessError, 'word-aligned'):
+    def test_missing_partial_word_rejected(self):
+        with self.assertRaisesRegex(HarnessError, 'differs'):
             _calldata({'args': [], 'data': '0x1234567800'})
 
     def test_missing_selector_rejected(self):
-        with self.assertRaisesRegex(HarnessError, 'word-aligned'):
+        with self.assertRaisesRegex(HarnessError, 'complete source selector'):
             _calldata({'args': [], 'data': '0x123456'})
 
     def test_boolean_is_not_a_word(self):
         with self.assertRaisesRegex(HarnessError, 'differs'):
             _calldata({'args': [True], 'data': '0x12345678' + f'{1:064x}'})
+
+    def test_partial_word_is_right_zero_padded(self):
+        self.assertEqual(_calldata({'args': [0x1234 << 240], 'data': '0xdeadbeef1234'}),
+                         str(0xdeadbeef))
+
+    def test_partial_word_wrong_alignment_rejected(self):
+        with self.assertRaisesRegex(HarnessError, 'differs'):
+            _calldata({'args': [0x1234], 'data': '0xdeadbeef1234'})
+
+    def test_partial_word_hidden_padding_rejected(self):
+        with self.assertRaisesRegex(HarnessError, 'differs'):
+            _calldata({'args': [(0x12 << 248)+1], 'data': '0xdeadbeef12'})

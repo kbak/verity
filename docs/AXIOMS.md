@@ -44,6 +44,12 @@ theorem. Its generated coverage certificates and existing Keccak/environment
 semantics are unchanged; scalar encoding and allocation remain frontend trust
 assumptions, checked by finite differential and compiler-mutation campaigns.
 
+The legacy calldata/enum/scratch-memory extension also adds no project axiom.
+It lowers byte-exact copies through physical memory, the Keccak oracle and the closed
+INVALID transport. ABI-v1 cleanup, enum use-site failure selection and
+assembly admission remain frontend trust assumptions with finite independent
+runtime and compiler-mutation checks; they are not source-equivalence theorems.
+
 ## Policy
 
 Axioms are exceptional. When an axiom exists, it must have:

@@ -8,6 +8,20 @@ import sys
 from .engine import ROOT, WORKSPACE, MUTANT_BUILD_TIMEOUT, HarnessError, command, write_json
 
 MUTANTS = {
+    'import-legacy-calldata-source': ('Compiler/SolidityImport/LegacyMemory.lean',
+        'copyCalldata destination source count)',
+        'copyCalldata destination (.add source (.literal 1)) count)'),
+    'import-legacy-calldata-length': ('Compiler/SolidityImport/LegacyMemory.lean',
+        'else cb.lengthBinding)', 'else cb.dataBinding)'),
+    'import-legacy-calldata-hash': ('Compiler/SolidityImport/LegacyMemory.lean',
+        '| "keccak256", #[a, b] => return .keccak256 a b',
+        '| "keccak256", #[a, b] => return .keccak256 a (.add b (.literal 1))'),
+    'import-legacy-calldata-enum-entry': ('Compiler/SolidityImport/Import.lean',
+        'let limit := if !strictAbi then none else match env.enumBounds.find? p.id with',
+        'let limit := if !strictAbi && !env.enumBounds.contains p.id then none else match env.enumBounds.find? p.id with'),
+    'import-legacy-calldata-enum-invalid': ('Compiler/SolidityImport/Import.lean',
+        'Stmt.ecm Compiler.ECM.SolidityInvalid.module [] else .panicCode (.literal 0x21)',
+        'Stmt.revertEmpty else .panicCode (.literal 0x21)'),
     'import-legacy-static-header': ('Compiler/SolidityImport/LegacyAbi.lean',
         '.mstore header (.literal size)', '.mstore header (.literal (size + 1))'),
     'import-legacy-static-stride': ('Compiler/SolidityImport/LegacyAbi.lean',
@@ -221,6 +235,11 @@ def mutation_campaign(output, selected=None):
                 argv = [sys.executable, "-c",
                         "import sys; sys.path.insert(0, 'scripts'); "
                         "from solidity_differential.check_legacy_static_abi import main; sys.exit(main())",
+                        "--output", str(directory / ".lake/campaign")]
+            if name.startswith("import-legacy-calldata-"):
+                argv = [sys.executable, "-c",
+                        "import sys; sys.path.insert(0, 'scripts'); "
+                        "from solidity_differential.check_legacy_calldata_hash import main; sys.exit(main())",
                         "--output", str(directory / ".lake/campaign")]
             # A pre-existing fixture divergence is not evidence that a mutation was
             # detected. Run the identical inputs in the private snapshot first.
