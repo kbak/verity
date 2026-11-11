@@ -2529,3 +2529,20 @@ mutations. Gas, memory and call-depth adequacy remain assumptions. Signed, enum,
 aggregate/reference and function-pointer conditionals, general effectful argument
 ordering and gas/refund behavior are not established by this slice. Existing
 external-world correspondence obligations remain when admitted helpers interact.
+
+
+### Legacy commuting postfix argument boundary (experimental)
+
+A legacy internal call with several arguments may contain one direct unsigned
+postfix increment of a scalar identifier when all siblings are independent scalar
+identifiers/literals or at most one calldata bytes descriptor. Existing
+lowering snapshots the old value and updates the target before entering the helper;
+legacy wrapping and outer transaction rollback use existing model operations.
+The structural guard avoids imposing a source evaluation order on interacting
+siblings. It does not establish general effectful argument ordering, gas adequacy,
+arbitrary reference aliasing or full application execution correctness.
+
+This is an unproved source-admission/translation extension, validated through finite
+independent state/value/event expectations, rejection controls and executable
+mutations. No new model primitive or external transport is added. Existing
+resource, importer correspondence and external-world assumptions remain in force.

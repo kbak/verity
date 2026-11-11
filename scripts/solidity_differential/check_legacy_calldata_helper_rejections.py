@@ -34,9 +34,12 @@ CASES = {
         '{ return h(b).length; }', 'run(bytes)', 'msg.data helper call must take zero arguments'),
     'memory-construction': ('', MEMORY+ROOT.replace('h(b)', 'h(new bytes(b.length))'),
         'run(bytes)', 'byte construction is outside'),
+    'independent-postincrement': ('', 'function h(bytes memory b,uint256 n) internal pure '
+        'returns(uint256) { return b.length+n; } function run(bytes calldata b,uint256 n) '
+        'external pure returns(uint256) { return h(b,n++); }', 'run(bytes,uint256)', None),
     'effectful-neighbor': ('', 'function h(bytes memory b,uint256 n) internal pure '
         'returns(uint256) { return b.length+n; } function run(bytes calldata b,uint256 n) '
-        'external pure returns(uint256) { return h(b,n++); }', 'run(bytes,uint256)',
+        'external pure returns(uint256) { return h(b,n++ + 1); }', 'run(bytes,uint256)',
         'assignment expression in multi-argument call'),
     'post-call-write': ('interface I { function hook() external; }',
         MEMORY+'function run(bytes calldata b,address t) external { I(t).hook(); stored=h(b); }',

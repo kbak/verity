@@ -592,3 +592,10 @@ axiom or transport. They reuse the existing scalar branch lowering and conservat
 immutable-local analysis. Runtime/negative/mutation checks do not prove the
 importer's source correspondence; the trust boundary and exclusions are recorded
 in [TRUST_ASSUMPTIONS.md](TRUST_ASSUMPTIONS.md).
+
+
+Legacy independent unsigned postfix helper arguments add no project axiom or
+transport. They reuse the existing increment, helper and rollback lowering under
+a conservative sibling-independence guard. Finite runtime and mutation checks are
+not a source-equivalence proof; the remaining obligations and exclusions are
+recorded in [TRUST_ASSUMPTIONS.md](TRUST_ASSUMPTIONS.md).

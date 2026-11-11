@@ -2029,3 +2029,34 @@ condition; an unchanged control must pass before runtime divergence counts.
 
 These are finite translation checks, not a new compiler-correctness theorem.
 The existing model primitives and resource/external-world assumptions are unchanged.
+
+
+### Independent postfix helper arguments (experimental)
+
+The 0.7.6 profile admits one direct unsigned `x++` argument in an internal call
+with multiple arguments. The target must be a writable scalar local/parameter or
+a scalar storage identifier. The existing lowering captures its old value, writes
+the incremented value once (with legacy width-dependent wrapping), and passes the
+old value to the helper. The helper observes the updated storage; outer failure
+rolls back the increment, helper writes and logs under the existing transaction model.
+Scalar, multiple-result and void helpers share the argument boundary.
+
+[Solidity leaves sibling evaluation order unspecified](https://docs.soliditylang.org/en/v0.7.6/control-structures.html#order-of-evaluation-of-expressions).
+This slice admits only
+commuting siblings: numeric/bool literals, distinct scalar identifiers and at most
+one existing calldata bytes identifier. That descriptor may be forwarded or
+copied for a memory parameter; its allocation cannot alias the incremented scalar.
+The existing finite-resource assumptions still apply. A sibling read of the target,
+multiple increments, prefix/decrement/assignment forms, computed expressions,
+sibling calls, memory/storage references and multiple byte descriptors remain
+rejected in this new multi-argument boundary. Modern compiler admission is unchanged.
+Single-argument calls retain their previous boundary.
+
+`check_legacy_postincrement_arguments` compares original 0.7.6 EVM, public/traced
+Denote and generated EVM with independent old/new-value, state, event, ABI and
+rollback expectations, including every argument position, local/helper aliases,
+narrow locals, wraparound, nested calls and calldata forwarding/copying.
+`check_legacy_postincrement_rejections` checks the neighboring rejection boundary.
+Executable mutations pass the new value, write twice, omit the write or pass the
+new local value; each must compile and fail runtime checks after a passing control.
+No new primitive, axiom, transport or source-equivalence theorem is introduced.

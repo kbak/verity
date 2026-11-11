@@ -79,6 +79,7 @@ lean_lib «SolidityImportSmoke» where
     .one `Contracts.SolidityImportSmoke.LegacyCalldataHelpersModel,
     .one `Contracts.SolidityImportSmoke.LegacyScalarConditionalsModel,
     .one `Contracts.SolidityImportSmoke.LegacyConditionalEffectsModel,
+    .one `Contracts.SolidityImportSmoke.LegacyPostIncrementArgumentsModel,
     .one `Contracts.SolidityImportSmoke.LegacyCalldataExecutionModel,
     .one `Contracts.SolidityImportSmoke.LegacyPayableModel,
     .one `Contracts.SolidityImportSmoke.LegacyPostCallEventsModel,

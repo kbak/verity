@@ -12,6 +12,7 @@ import Compiler.SolidityImport.TypesAndRecords
 import Compiler.SolidityImport.TransportBarriers
 import Compiler.SolidityImport.LibraryCallGuard
 import Compiler.SolidityImport.Legacy
+import Compiler.SolidityImport.LegacyCallArguments
 import Compiler.SolidityImport.LegacyBytePointers
 import Compiler.SolidityImport.ExprHelpers
 import Compiler.SolidityImport.StorageLayout
@@ -6145,12 +6146,13 @@ private partial def lowerCallArgs (j : Json) (receiver? : Option Json) : M (Arra
   let nodes := match receiver? with
     | some recv => #[recv] ++ args
     | none => args
+  let independentIncrement := independentLegacyPostIncrementArgs nodes (← get)
   let mut vals : Array CallArg := #[]
   for arg in nodes do
     if statefulCallIn arg (← get) then
       unless nodes.size == 1 && (← get).stateVars.size > 1 do
         failAt arg "stateful helper call arguments require explicit evaluation-order support"
-    if nodes.size > 1 && assignmentIn arg then
+    if nodes.size > 1 && assignmentIn arg && !independentIncrement then
       failAt arg "assignment expression in multi-argument call requires explicit evaluation-order support"
     let argTy ← mType arg
     if argTy.startsWith "struct " && !argTy.contains "[" then
