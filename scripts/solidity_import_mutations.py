@@ -490,6 +490,7 @@ solidity_import both from "{WORK / "base"}" entry "Slice.sol"
 # Compile and execute actual Denote mutants: a build failure is invalid,
 # not a detected semantic mutation. These regressions compare EVM bytes.
 DIFFERENTIAL_MUTANTS = (
+    'void-call-offset', 'void-call-code', 'void-call-failure', 'void-call-pre', 'void-call-post', 'void-call-return-decoder', 'void-call-length-reload', 'void-call-stored-address', 'void-call-head-order',
     'post-log-emitter', 'post-log-payload', 'post-log-order',
     'post-log-parent-prefix', 'post-log-caller', 'post-log-outer-rollback',
     'payable-credit', 'payable-debit', 'payable-rollback',
@@ -910,6 +911,13 @@ def tasks(update_golden: bool) -> list:
              ("post-call-logs-optimized", 1, lambda: module_campaign_output(
                  "check_legacy_post_call_events", "post-call-logs-optimized", MUTANT_TIMEOUT,
                  "--optimized")),
+             ("void-callbacks-optimized", 1, lambda: module_campaign_output(
+                 "check_legacy_void_callbacks", "void-callbacks-optimized", MUTANT_TIMEOUT,
+                 "--optimized")),
+             ("void-call-boundary", 1, lambda: module_campaign_output(
+                 "check_void_call_boundary", "void-call-boundary", MUTANT_TIMEOUT)),
+             ("void-call-rejections", 1, lambda: module_campaign_output(
+                 "check_legacy_void_rejections", "void-call-rejections", MUTANT_TIMEOUT)),
              ("post-call-log-boundary", 1, lambda: module_campaign_output(
                  "check_post_call_log_boundary", "post-call-log-boundary", MUTANT_TIMEOUT)),
              ("legacy-payable-rejections", 1, lambda: module_campaign_output(

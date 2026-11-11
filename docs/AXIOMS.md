@@ -559,3 +559,13 @@ external program correspondence and gas/depth adequacy remain environment
 obligations, as detailed in [TRUST_ASSUMPTIONS.md](TRUST_ASSUMPTIONS.md). The finite
 `PostCallLogMocks` validation program is excluded on the same basis as existing
 external mocks; no proof or core journal module is excluded.
+
+
+The legacy void callback extension introduces no project axiom or proof shortcut.
+Its closed transport retains `proofStatus.assumed`: the new kernel-checked dispatch
+equation and existing raw-call/journal laws are model properties, not a proof of
+Solidity/importer/compiler correspondence. Core ABI encoders and the dispatch law
+remain in the generated inventories. Only the finite `VoidCallMocks` validation
+program is excluded, consistently with existing external mocks. The added physical
+ABI ordering, constant-slot address cleanup and callback environment obligations are
+specified in [TRUST_ASSUMPTIONS.md](TRUST_ASSUMPTIONS.md).

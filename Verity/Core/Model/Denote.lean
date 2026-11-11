@@ -1,3 +1,4 @@
+import Verity.Core.Model.VoidCalls
 import Verity.Core
 import Verity.Core.Uint256
 import Verity.Core.Int256
@@ -1351,6 +1352,41 @@ def executeRawCall (oracle : DenoteOracle) (fields : List Field) (state : Denote
     byteCallAccesses := state.byteCallAccesses ++ observed.touched }
   return (.continue next, observed.touched)
 
+/-- Execute a code-checked, value-free typed CALL. Successful returndata is
+ignored regardless of size or content; the complete buffer is still observable. -/
+def executeLegacyVoidCall (oracle : DenoteOracle) (fields : List Field) (state : DenoteState)
+    (mod : Compiler.ECM.ExternalCallModule) (selector : Nat)
+    (layout : List Compiler.Yul.LegacyVoidCalls.Argument) (args : List Expr) :
+    Except String (StmtOutcome × List Verity.StorageKey) := do
+  unless mod == Compiler.ECM.LegacyVoidCall.module selector layout do
+    throw "closed legacy void call metadata differs"
+  let some adversary := state.byteCallAdversary | throw "legacy void call adversary missing"
+  let some gas := state.byteCallGas | throw "legacy void call gas environment missing"
+  let some values := evalExprList oracle fields state args
+    | throw "legacy void call operand evaluation unsupported"
+  unless selector < 2^32 && values.length == Compiler.Yul.LegacyVoidCalls.arity layout do
+    throw "legacy void call selector or argument count differs"
+  let pointer := (state.world.memory 64).val
+  let inputByte := fun i =>
+    let n := if i ≥ state.world.calldataSize.val then 0
+      else if i < 4 then selectorWord state.selector / 2^(8*(31-i))
+      else calldataloadWord state.selector state.world.calldata i / 2^248
+    (⟨n % 256, Nat.mod_lt _ (by decide)⟩ : DenoteMemory.Byte)
+  let (prepared, size) := VoidCalls.encode state.world selector layout values inputByte
+  let target := values[0]! % 2^160
+  if DenoteExternalCode.extCodeSize prepared (Verity.Core.Address.ofNat target) == 0 then
+    return (.revertWithData [], [])
+  let request : ByteExternalCall.Request := {
+    kind := .call, caller := prepared.thisAddress.val, target, value := 0, gas,
+    calldata := (List.range size).map fun i => UInt8.ofNat (prepared.physicalByte (pointer+i)).val }
+  let observed ← RawCalls.execute adversary request prepared
+  if !observed.success then return (.revertWithData observed.returndata, observed.touched)
+  let next := { state with
+    world := observed.world
+    rawReturndata := some observed.returndata
+    byteCallAccesses := state.byteCallAccesses ++ observed.touched }
+  return (.continue next, observed.touched)
+
 /-- Execute the legacy transports against an explicit byte-call environment.
 Missing instrumentation is an error, never an invented Solidity revert. -/
 def executeLegacySignatureCall (oracle : DenoteOracle) (fields : List Field)
@@ -2235,6 +2271,10 @@ mutual
         | none => .revert
     | state, .ecm mod args =>
         match mod.byteTransport with
+        | some (.legacyVoid selector layout) =>
+            match executeLegacyVoidCall oracle fields state mod selector layout args with
+            | .ok (outcome, _) => outcome
+            | .error _ => .revert
         | some (.rawCall resultVar delegated) =>
             match executeRawCall oracle fields state mod resultVar delegated args with
             | .ok (outcome, _) => outcome

@@ -26,7 +26,12 @@ MUTANTS = {
     'truncate-buffer': ('bindings := bindValue prepared.bindings resultVar value\n    rawReturndata := some observed.returndata',
                         'bindings := bindValue prepared.bindings resultVar value\n    rawReturndata := some (observed.returndata.take 32)',
                         'oversized response buffer truncated'),
-    'drop-cancelled-access': ('return (.revertWithData observed.returndata, observed.touched)', 'return (.revertWithData observed.returndata, [])', 'cancelled foreign access lost'),
+    'drop-cancelled-access': (
+        'let observed ← ByteExternalCall.executeChecked adversary preparation.request prepared.world\n'
+        '  if !observed.success then return (.revertWithData observed.returndata, observed.touched)',
+        'let observed ← ByteExternalCall.executeChecked adversary preparation.request prepared.world\n'
+        '  if !observed.success then return (.revertWithData observed.returndata, [])',
+        'cancelled foreign access lost'),
     'raw-copy-offset': ('(rawPhysicalByte bytes) dst src sz', '(rawPhysicalByte bytes) dst (src + 1) sz', 'unaligned raw copy differs'),
     'empty-revert': ('| _, .revertEmpty => .revertWithData []',
                      '| state, .revertEmpty => .revertWithData (state.rawReturndata.getD [])',

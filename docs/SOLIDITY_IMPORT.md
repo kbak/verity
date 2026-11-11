@@ -1854,3 +1854,53 @@ account preservation, prefix admission and child/outer transaction rollback.
 These laws do not establish Solidity/importer/compiler correspondence. Gas,
 call-depth adequacy, arbitrary external programs, callbacks, and complete
 application execution remain explicit obligations or later work.
+
+
+### ABI-v1 void callbacks and constant-slot address reads (experimental)
+
+Solidity 0.7.6 admits resolved, nonpayable interface calls with no return values.
+Receivers must be explicit interface conversions of effect-free address expressions.
+Arguments are captured `uint256`, `bytes32`, address/payable-address, bool or enum
+scalars and existing memory/calldata bytes. Enum ordinals retain the legacy INVALID
+use-site check. Dynamic arrays, structs, strings, value-bearing typed calls,
+effectful argument evaluation and internal calldata-to-memory helper conversions
+remain rejected. The call site must use ABI coder v1.
+
+`LegacyVoidCall` is a closed, assumed transport. It writes the selector and all
+scalar head words before dynamic offsets and payloads, at the current free pointer.
+Memory lengths are read during encoding and reloaded for the copy after the outgoing
+length store; overlapping copies observe earlier writes. Calldata arguments copy
+exact source bytes with zero padding, including when the external interface declares
+its bytes parameters as memory. This external ABI conversion allocates no separate
+intermediate memory buffer in the pinned compiler. The free pointer is not advanced. Code must
+exist at the cleaned target address. CALL sends zero value and has no output area:
+success ignores arbitrary return bytes, including empty/noncanonical buffers.
+Failure forwards the complete revert buffer. Exact returndata remains observable.
+
+Constant-slot assembly `sload` is also admitted. Address results are cleaned to
+160 bits at the Solidity boundary; later unmasked narrow assembly reads remain
+rejected. Dynamic-slot reads and assembly storage writes are not added. This permits
+reading a callback address from a fixed storage slot before entering the interaction
+window. After the first callback, continuations still require storage-free
+expressions and admit only the existing closed calls, scalar events and termination
+forms. Reading storage after a callback, including in another callback's arguments,
+remains rejected.
+
+`check_legacy_void_callbacks` compares original 0.7.6 EVM execution, public/traced
+Denote and generated EVM code against independent ABI, storage, balance, nonce and
+log expectations. It covers both callback phases, full eleven-argument tuples with
+two byte buffers, empty/odd buffers, pointer aliases, dirty stored addresses, arbitrary
+successful return lengths, pre/post rejection, raw CALL/DELEGATECALL and outer rollback.
+The separately compiled `VoidCallOracle` and finite `VoidCallMocks` program supply
+external behavior; they are not a general external-bytecode interpreter.
+
+Focused controls reject malformed closed metadata, missing environments and adjacent
+unsupported source forms. Actual runtime mutants target offsets, code checks,
+failure forwarding, omitted phases, accidental return decoding, address cleanup and
+head-store order, each after an unchanged control. Compiler/build failure is never
+a mutation kill. The kernel-checked coverage equation pins the canonical dispatch
+arm; the existing raw-call and event-journal laws supply model rollback properties.
+These are not Solidity/importer/compiler correspondence proofs. Gas, memory-resource
+and call-depth adequacy and arbitrary callback implementation correspondence remain
+explicit external-environment obligations. Complete application execution, callback
+installation and refund accounting require additional work.

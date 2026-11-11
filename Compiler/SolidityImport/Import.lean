@@ -1307,6 +1307,9 @@ private partial def lowerYul (j : Json) : M Val := do
       | "not", #[a] => pure { pre, expr := .bitNot a }
       | "tload", #[a] => pure { pre, expr := .tload a }
       | "sload", #[a] => do
+          if (← get).legacyWrapping then
+            unless pre.isEmpty && (match a with | .literal _ => true | _ => false) do
+              failAt j "legacy assembly storage reads require a constant slot"
           modify fun e => { e with usedRawStorage := true }
           pure { pre, expr := .storageArrayElement rawStorageFieldName a }
       | "caller", #[] => pure { pre, expr := .caller }
@@ -1486,10 +1489,11 @@ private def lowerAssembly (j : Json) (retName : String) : M Val := do
   unless retName != "" && vname == retName do
     failAt asg s!"Yul assigns {vname}, not the return name {retName}"
   checkYulReturnTarget j asg vars[0]! vname retName
-  let value ← lowerYulValue (← mField asg "value")
+  let mut value ← lowerYulValue (← mField asg "value")
   if (← get).legacyWrapping then
     if let some (_, ty) := (← get).helperResult then
       let some scalar := localParamType ty | failAt j "unsupported legacy Yul result type"
+      value := cleanLegacyStorageAddress scalar value
       validateLegacyYulAssignment asg scalar value.expr
   return value
 
@@ -1535,6 +1539,7 @@ private def yulStringPrefixLit? (node : Json) : M (Option (Nat × Nat)) := do
 
 private def lowerYulDirectAssignmentTarget (j stmt varNode : Json) (refs : Array Json) (retName : String) (rhsVal : Val) : M Stmt := do
   let vname ← mStr (← mField varNode "name")
+  let mut rhsVal := rhsVal
   if retName != "" && vname == retName && (← get).helperResult.isSome then
     checkYulReturnTarget j stmt varNode vname retName
     let some (binding, ty) := (← get).helperResult
@@ -1543,6 +1548,7 @@ private def lowerYulDirectAssignmentTarget (j stmt varNode : Json) (refs : Array
       failAt j "Yul assignment to an enum result is unsupported"
     if (← get).legacyWrapping then
       let some scalar := localParamType ty | failAt j "unsupported legacy Yul result type"
+      rhsVal := cleanLegacyStorageAddress scalar rhsVal
       validateLegacyYulAssignment stmt scalar rhsVal.expr
     let cleaned := cleanHelperResultExpr ty rhsVal
     return .assignVar binding cleaned
@@ -1572,7 +1578,9 @@ private def lowerYulDirectAssignmentTarget (j stmt varNode : Json) (refs : Array
       else failAt stmt s!"Yul assignment target {vname} is shadowed"
     let some scalarType := env.scalarTy.find? targetId
       | failAt stmt s!"unknown scalar type for Yul assignment target {vname}"
-    if env.legacyWrapping then validateLegacyYulAssignment stmt scalarType rhsVal.expr
+    if env.legacyWrapping then
+      rhsVal := cleanLegacyStorageAddress scalarType rhsVal
+      validateLegacyYulAssignment stmt scalarType rhsVal.expr
     if isProvablyBoundedYulExpr scalarType rhsVal.expr then
       return .assignVar binding rhsVal.expr
     if let .bytesN byteW := scalarType then
@@ -6566,6 +6574,8 @@ private partial def lowerInterfaceStaticCall (j : Json) : M Val := do
     pure (ps, ← rs.mapM mType)
   let rawParamTypes ← params.mapM mType
   if env.legacyWrapping then
+    if LegacyVoidCalls.applies j env then
+      return ← LegacyVoidCalls.lower j decl lowerExpr
     if env.legacyAbiV2Files.contains env.currentFile then
       failAt j "legacy bytes4 external calls require ABI coder v1 at the call site"
     unless mutability == some "view" && rawParamTypes == #["bytes32", "bytes"] &&
@@ -15518,11 +15528,11 @@ private def importSlice
       else do
         let mutability ← str (← field fn "stateMutability")
         pure (mutability == "view" || mutability == "pure")
-    let rawCalls := Stmt.anyDeepList (fun
-      | .ecm mod _ => isClosedRawCall mod
+    let statefulCalls := Stmt.anyDeepList (fun
+      | .ecm mod _ => isClosedRawCall mod || isClosedVoidCall mod
       | _ => false) body.toList
-    if rawCalls && !onlyTrailingCallReentrancyWindows body.toList then
-      (failAt fn "raw calls require a storage-free trailing continuation").run' env
+    if statefulCalls && !onlyTrailingCallReentrancyWindows body.toList then
+      (failAt fn "raw and void calls require a storage-free trailing continuation").run' env
     specs := specs.push
       { name := functionName, params := modelParams.toList, returnType := none,
         returns := returns.toList, isView,
@@ -15530,7 +15540,7 @@ private def importSlice
         abiDecoding := if env.explicitAbi then .explicitPrelude else .standard,
         allowPostInteractionWrites := onlyStaticCallCEIBarriers body.toList ||
           onlyClosedTransportCEIBarriers body.toList ||
-          (rawCalls && onlyTrailingCallReentrancyWindows body.toList),
+          (statefulCalls && onlyTrailingCallReentrancyWindows body.toList),
         reentrancyTrusted := onlyCreate2ReentrancyWindows body.toList ||
           onlyTrailingCallReentrancyWindows body.toList,
         localObligations := (if abiGuards.isEmpty && !env.rootMsgDataReturn && (collectUnguardedUnsafeBoundaryMechanicsFromStmts body.toList).isEmpty then [] else [{
@@ -15563,7 +15573,8 @@ private def importSlice
           (if onlyTrailingCallReentrancyWindows body.toList then [{
             name := "solidity_trailing_low_level_call_reentrancy"
             obligation := "Every external interaction that can re-enter is a closed low-level " ++
-              "CALL or DELEGATECALL after which the body reads and writes no storage. " ++
+              "CALL, DELEGATECALL or void interface callback after which the body reads " ++
+              "and writes no storage. " ++
               "Scalar logs use storage-free arguments and make no call, so a re-entrant " ++
               "entrypoint observes only the completed state " ++
               "updates. Denote lets the callee's committed world change any account, " ++
@@ -15669,6 +15680,10 @@ private def importSlice
   let legacyMemorySrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyMemory.lean"
   let signatureSrc ← moduleText sourceRoot "Verity/Core/Model/LegacySignatureCalls.lean"
   let rawCallsSrc ← moduleText sourceRoot "Verity/Core/Model/RawCalls.lean"
+  let voidLoweringSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyVoidCalls.lean"
+  let voidCompilerSrc ← moduleText sourceRoot "Verity/Core/Model/LegacyVoidCalls.lean"
+  let voidModelSrc ← moduleText sourceRoot "Verity/Core/Model/VoidCalls.lean"
+  let barriersSrc ← moduleText sourceRoot "Compiler/SolidityImport/TransportBarriers.lean"
   let callWorldSrc ← moduleText sourceRoot "Verity/Core/Model/CallWorld.lean"
   let legacyCallsSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyCalls.lean"
   let ecmSrc ← moduleText sourceRoot "Verity/Core/Model/ECM.lean"
@@ -15696,6 +15711,10 @@ private def importSlice
       ("ExprHelpers.lean", Json.str exprHelpersSrc),
       ("LegacySignatureCalls.lean", Json.str signatureSrc),
       ("RawCalls.lean", Json.str rawCallsSrc),
+      ("SolidityImport/LegacyVoidCalls.lean", Json.str voidLoweringSrc),
+      ("Model/LegacyVoidCalls.lean", Json.str voidCompilerSrc),
+      ("VoidCalls.lean", Json.str voidModelSrc),
+      ("TransportBarriers.lean", Json.str barriersSrc),
       ("CallWorld.lean", Json.str callWorldSrc),
       ("LegacyCalls.lean", Json.str legacyCallsSrc),
       ("ECM.lean", Json.str ecmSrc), ("Denote.lean", Json.str denoteSrc)])]
