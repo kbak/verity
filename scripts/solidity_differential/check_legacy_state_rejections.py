@@ -19,7 +19,7 @@ CASES = {
     'dynamic-assembly-write': ('function run(uint256 x) public { assembly { sstore(x, 1) } }',
         'storage writes require a constant slot'),
     'external-write': ('function run(uint256 x) public { this.other(x); } '
-        'function other(uint256 x) external { stored = x; }', 'external calls require the ABI-v1 bytes4 view slice'),
+        'function other(uint256 x) external { stored = x; }', 'discarded helper calls require an internal or private declaration'),
     'array-write': ('uint256[] private items; function run(uint256 x) public { items.push(x); }',
         'does not support type'),
 }
@@ -44,7 +44,7 @@ def run(output):
         driver.with_suffix('.log').write_text(log)
         if reason is None:
             if proc.returncode != 0:
-                raise HarnessError(f'{name}: supported payable root did not import: {log}')
+                raise HarnessError(f'{name}: supported root did not import: {log}')
         elif proc.returncode == 0 or '[solidity-import:unsupported]' not in log or reason not in log:
             raise HarnessError(f'{name}: missing located rejection: {log}')
         reports.append({'case': name, 'status': 'admitted' if reason is None else 'rejected', 'diagnostic': reason})
