@@ -21,10 +21,10 @@ MUTANTS = {
     'post-log-parent-prefix': ('Verity/Core/Model/RawCalls.lean',
         'CallWorld.commitCalleeWorld before observed.world else before',
         'CallWorld.commitCalleeWorld before observed.world else { before with events := [] }'),
-    'post-log-caller': ('Verity/Core/Model/Denote.lean',
-        'events := state.world.events ++\n                  [{ name := eventName\n'
-        '                     args := valuesAsEventArgs resolved\n                     indexedArgs := [] }]',
-        'events := state.world.events'),
+    'post-log-caller': ('Compiler/CompilationModel/Compile.lean',
+        'Stmt.emit eventName args => do\n'
+        '      compileEmit fields events dynamicSource eventName args internalFunctions',
+        'Stmt.emit _ _ => do\n      return []'),
     'post-log-outer-rollback': ('Compiler/CompilationModel/Compile.lean',
         'YulStmt.exprStmt (YulExpr.call "revert" [\n          YulExpr.lit 0,\n'
         '          YulExpr.ident "__returndata_size"',
