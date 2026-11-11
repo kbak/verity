@@ -1,6 +1,7 @@
 import Compiler.SolidityImport.LegacyControlFlow
 import Compiler.SolidityImport.LegacyAbi
 import Compiler.SolidityImport.LegacyArrays
+import Compiler.SolidityImport.LegacyMemory
 
 /-! Conservative admission for the initial Solidity 0.7.6 scalar slice.
 The existing lowering remains responsible for admitting individual constructs.
@@ -70,7 +71,8 @@ def validateLegacyAssemblyReads (node : Json) : M Unit := do
         failAt node "Solidity 0.7.6 assembly array references are outside the guarded-read slice"
       if let some ty := env.scalarTy.find? id then
         unless isFullWordYulScalar ty do
-          unless (env.values.find? id).any (fun | .literal _ => true | _ => false) do
+          unless env.legacyCleanParams.contains id ||
+              (env.values.find? id).any (fun | .literal _ => true | _ => false) do
             failAt node "Solidity 0.7.6 assembly reads require full-word or literal scalars"
 
 /-- Narrow assignment results need an explicit bound in the legacy assembly
@@ -93,6 +95,8 @@ partial def validateLegacyDeclaration (node : Json) (encodingInput : Bool := fal
           (((field? stmt "expression").bind (field? · "functionName")).bind
             (optStr · "name")) == some "revert") then
         validateLegacyYul true ast
+      else if LegacyMemory.applies ast then
+        LegacyMemory.validate ast
       else
         validateLegacyYul false ast
       return
@@ -114,15 +118,30 @@ partial def validateLegacyDeclaration (node : Json) (encodingInput : Bool := fal
             (optStr node "stateMutability") do
           failAt node "Solidity 0.7.6 payable functions are outside the state-transition slice"
       if let some ty := (field? node "typeDescriptions").bind (optStr · "typeString") then
+        if ty.startsWith "enum " then
+          let ref := (field? node "referencedDeclaration").bind (·.getNat?.toOption)
+          let stored := ref.any (← get).stateVars.contains ||
+            (field? node "stateVariable").any (fun x => x.getBool?.toOption == some true)
+          if stored then failAt node "Solidity 0.7.6 enum storage is outside the scalar enum slice"
         let supportedArray := ty == "address[]" || ty == "address[] memory" ||
           (ty.startsWith "function (" && !(ty.replace "address[] memory" "address").contains '[')
         if (ty.contains '[' && !supportedArray) ||
-            ty.startsWith "struct " || ty.startsWith "enum " ||
+            ty.startsWith "struct " ||
             (ty.startsWith "int" && !ty.startsWith "int_const") ||
-            (ty.startsWith "bytes " && ty != "bytes memory") || ty.startsWith "string " then
+            (ty.startsWith "bytes " && ty != "bytes memory" && ty != "bytes calldata") ||
+            ty.startsWith "string " then
           failAt node s!"Solidity 0.7.6 scalar slice does not support type {ty}"
       if kind == "FunctionDefinition" then
-        for ret in (← mArr (← mField (← mField node "returnParameters") "parameters")) do
+        let params ← mArr (← mField (← mField node "parameters") "parameters")
+        let returns ← mArr (← mField (← mField node "returnParameters") "parameters")
+        let hasEnum ← (params ++ returns).anyM fun p => return (← mType p).startsWith "enum "
+        if hasEnum && !#[some "public", some "external"].contains (optStr node "visibility") then
+          failAt node "Solidity 0.7.6 enum helpers are outside the scalar enum slice"
+        for ret in returns do
+          if (← mType ret).startsWith "enum " &&
+              (returns.size != 1 || optStr ret "name" != some "") then
+            failAt ret "Solidity 0.7.6 enum returns require one unnamed scalar result"
+        for ret in returns do
           if (← mType ret) == "bytes" then
             failAt ret "Solidity 0.7.6 dynamic bytes returns are outside the decoding slice"
       if kind == "VariableDeclaration" then
@@ -130,10 +149,13 @@ partial def validateLegacyDeclaration (node : Json) (encodingInput : Bool := fal
           unless optStr node "storageLocation" == some "memory" do
             failAt node "Solidity 0.7.6 address arrays require memory location"
         if (← mType node) == "bytes" then
-          unless optStr node "storageLocation" == some "memory" do
-            failAt node "Solidity 0.7.6 byte decoding requires bytes memory"
+          unless #[some "memory", some "calldata"].contains (optStr node "storageLocation") do
+            failAt node "Solidity 0.7.6 byte decoding requires memory or calldata"
       if kind == "VariableDeclarationStatement" then
         let decls ← mArr (← mField node "declarations")
+        if ← decls.anyM fun d =>
+            if d.isNull then pure false else return (← mType d).startsWith "enum " then
+          failAt node "Solidity 0.7.6 enum locals are outside the scalar enum slice"
         let hasBytes ← decls.anyM fun d =>
           if d.isNull then pure false else return (← mType d) == "bytes"
         if hasBytes then
@@ -142,17 +164,44 @@ partial def validateLegacyDeclaration (node : Json) (encodingInput : Bool := fal
             unless optStr init "nodeType" == some "Identifier" &&
                 (← mType init) == "bytes memory" do
               failAt node "Solidity 0.7.6 bytes locals require an existing memory buffer"
+      if kind == "BinaryOperation" then
+        for key in #["leftExpression", "rightExpression"] do
+          if (← mType (← mField node key)).startsWith "enum " then
+            failAt node "Solidity 0.7.6 enum comparisons are outside the scalar enum slice"
+      if kind == "Conditional" then
+        if (← mType node).startsWith "enum " then
+          failAt node "Solidity 0.7.6 enum conditionals are outside the scalar enum slice"
+      if kind == "UnaryOperation" then
+        if (← mType (← mField node "subExpression")).startsWith "enum " then
+          failAt node "Solidity 0.7.6 enum mutations are outside the scalar enum slice"
       if kind == "FunctionCall" then
+        for arg in (← mArr (← mField node "arguments")) do
+          if (← mType arg).startsWith "enum " &&
+              !(optStr node "kind" == some "typeConversion" &&
+                (← mType node).startsWith "uint") then
+            failAt arg "Solidity 0.7.6 enum arguments require an unsigned conversion"
+          if (← mType arg) == "bytes calldata" then
+            failAt arg "Solidity 0.7.6 calldata call arguments are outside the copying slice"
         if (← mType node) == "bytes memory" && !(encodingInput &&
             (LegacyPacked.isEncoding node || LegacyAbi.isEncoding node)) then
           failAt node "Solidity 0.7.6 byte construction is outside the decoding slice"
       if kind == "Assignment" then
+        if (← mType (← mField node "leftHandSide")).startsWith "enum " then
+          failAt node "Solidity 0.7.6 enum assignment is outside the scalar enum slice"
+        if (← mType (← mField node "leftHandSide")) == "bytes calldata" then
+          failAt node "Solidity 0.7.6 calldata assignment is outside the copying slice"
         if (← mType (← mField node "leftHandSide")) == "bytes memory" then
           let rhs ← mField node "rightHandSide"
           unless optStr rhs "nodeType" == some "Identifier" && (← mType rhs) == "bytes memory" do
             failAt node "Solidity 0.7.6 bytes assignment requires an existing memory buffer"
       if kind == "IndexAccess" then
+        let index := field? node "indexExpression" |>.getD Json.null
+        unless index.isNull do
+          if (← mType index).startsWith "enum " then
+            failAt node "Solidity 0.7.6 enum keys require an unsigned conversion"
         let base ← mField node "baseExpression"
+        if (← mType base) == "bytes calldata" then
+          failAt node "Solidity 0.7.6 calldata indexing is outside the copying slice"
         if (← mType base) == "bytes memory" then
           failAt node "Solidity 0.7.6 bytes indexing may execute INVALID"
         if (fixedBytesWidth? (← mType base)).isSome then
@@ -160,12 +209,14 @@ partial def validateLegacyDeclaration (node : Json) (encodingInput : Bool := fal
       if kind == "FunctionCall" && optStr node "kind" == some "typeConversion" then
         let target := (field? node "typeDescriptions").bind (optStr · "typeString") |>.getD ""
         unless target.startsWith "uint" || target.startsWith "address" ||
-            (fixedBytesWidth? target).isSome || target.startsWith "contract " do
+            (fixedBytesWidth? target).isSome || target.startsWith "contract " ||
+            target.startsWith "enum " do
           failAt node "Solidity 0.7.6 scalar slice admits only unsigned/address conversions"
         for arg in (← mArr (← mField node "arguments")) do
           let source := (field? arg "typeDescriptions").bind (optStr · "typeString") |>.getD ""
           unless source.startsWith "uint" || source.startsWith "address" ||
-              source.startsWith "int_const" || (fixedBytesWidth? source).isSome ||
+              source.startsWith "int_const" || source.startsWith "enum " ||
+              (fixedBytesWidth? source).isSome ||
               source.startsWith "literal_string " ||
               (target.startsWith "address" && source.startsWith "contract ") do
             failAt node "Solidity 0.7.6 scalar slice admits only unsigned/address conversions"

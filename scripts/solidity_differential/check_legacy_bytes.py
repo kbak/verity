@@ -145,10 +145,10 @@ REJECTIONS = [
     ("index", "bytes, uint256", "bytes indexing may execute INVALID"),
     ("allocate", "uint256", "bytes locals require an existing memory buffer"),
     ("returnBytes", "bytes", "dynamic bytes returns are outside the decoding slice"),
-    ("calldataBuffer", "bytes", "scalar slice does not support type bytes calldata"),
+    ("calldataBuffer", "bytes", None),  # Retain the newly supported root as a positive control.
     ("dirtyRead", "bytes, uint256", "assembly reads require full-word or literal scalars"),
     ("dirtyWrite", "bytes", "Yul assignment to narrow local"),
-    ("memoryWrite", "bytes", "assembly requires a terminal memory revert or read-only decoding"),
+    ("memoryWrite", "bytes", "free-pointer root and constant displacement"),
     ("literalBuffer", "uint256", "bytes helpers require an existing memory buffer"),
     ("decode", "bytes, uint256", "bytes memory requires ABI coder v1"),
 ]
@@ -174,6 +174,11 @@ def check_rejections(output):
         proc = run_bounded(["lake", "env", "lean", driver], cwd=ROOT, timeout=180)
         log = proc.stdout + proc.stderr
         driver.with_suffix(".log").write_text(log)
+        if reason is None:
+            if proc.returncode != 0:
+                raise HarnessError(f"{name}: required positive import control failed: {log}")
+            reports.append({"root": name, "accepted": True})
+            continue
         if proc.returncode == 0 or "[solidity-import:unsupported]" not in log or reason not in log:
             raise HarnessError(f"{name}: missing source-located rejection: {log}")
         reports.append({"root": name, "diagnostic": reason})

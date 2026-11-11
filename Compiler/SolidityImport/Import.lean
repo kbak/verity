@@ -1988,6 +1988,14 @@ private partial def lowerAssemblyStmts (j : Json) (retName : String) : M (Array 
   let savedScratch0 := (← get).yulScratch0
   let savedScratch32 := (← get).yulScratch32
   modify fun e => { e with yulScratch0 := false, yulScratch32 := false }
+  if (← get).legacyWrapping && LegacyMemory.applies ast then
+    let out ← LegacyMemory.lower j stmts refs lowerYul fun stmt target value =>
+      lowerYulDirectAssignmentTarget j stmt target refs retName value
+    modify fun e => { e with
+      yulNames := savedYulNames
+      yulScratch0 := savedScratch0
+      yulScratch32 := savedScratch32 }
+    return out
   if let some prefixStmts ← lowerYulPrefixKeccakBlock? j stmts refs retName then
     modify fun e => { e with yulNames := savedYulNames, yulScratch0 := savedScratch0, yulScratch32 := savedScratch32 }
     return prefixStmts
@@ -4126,10 +4134,18 @@ private partial def lowerCast (j : Json) : M Val := do
     unless (src.startsWith "uint" && (bitsOf src).isSome) ||
         src == "int256" || src == "int" || src.startsWith "int_const" do
       failAt j s!"unsupported enum cast source {src} for {callTy}"
-    let a ← atom v
+    let legacy := (← get).legacyWrapping
+    let cleaned := if legacy then
+      match paramType src with
+      | some ty => { v with expr := LegacyMemory.cleanScalar ty v.expr }
+      | none => v
+      else v
+    let a ← atom cleaned
     let dest ← fresh
+    let failure := if legacy then
+      Stmt.ecm Compiler.ECM.SolidityInvalid.module [] else .panicCode (.literal 0x21)
     let check := Stmt.ite (.lt a.expr (.literal members.size))
-      [.assignVar dest a.expr] [.panicCode (.literal 0x21)]
+      [.assignVar dest a.expr] [failure]
     return { pre := a.pre.push (.letVar dest (.literal 0)) |>.push check,
              expr := .localVar dest }
   unless (← mKind targetExpr) == "ElementaryTypeNameExpression" do
@@ -4143,6 +4159,8 @@ private partial def lowerCast (j : Json) : M Val := do
     if src.startsWith "literal_string " then
       return ← fixedBytesLiteral args[0]! byteW
   let v ← lowerExpr args[0]!
+  let v ← if (← get).legacyWrapping && src.startsWith "enum " then
+    LegacyMemory.checkedEnum args[0]! src v else pure v
   if src.startsWith "int" && !src.startsWith "int_const" && (signedBitsOf src).isNone then
     failAt j s!"unsupported cast source {src}"
   if let some pb := signedBitsOf tname then
@@ -14149,6 +14167,14 @@ private partial def lowerRootStatements (stmts : Array Json) (isTail : Bool := f
             out := out ++ env.rootPost ++ #[.returnValues env.rootReturns.toList]
           else
             failAt s "bare return requires a void or named-return root function"
+        else if env.legacyWrapping && env.rootReturnTypes.size == 1 &&
+            (env.rootReturnTypes[0]!).startsWith "enum " then
+          let value ← atom (← lowerExpr expr)
+          let captured ← fresh
+          let checked ← LegacyMemory.checkedEnum expr (env.rootReturnTypes[0]!)
+            { pre := #[], expr := .localVar captured }
+          out := out ++ value.pre |>.push (.letVar captured value.expr)
+          out := out ++ env.rootPost ++ checked.pre |>.push (.returnValues [checked.expr])
         else if env.legacyWrapping && env.rootReturnTypes == #["address[]"] then
           let .scalarArray id pre ← lowerRef expr
             | failAt expr "Solidity 0.7.6 array return requires a memory array reference"
@@ -14731,6 +14757,9 @@ private def lowerRoot (fn : Json) : M (Array Stmt × Array SrcParam) := do
                    yulNames := e.yulNames.insert rname rexpr }
   modify fun e =>
     { e with bodyAssigned := bodyAssignedIds body,
+             legacyCleanParams := srcParams.toList.filterMap fun p =>
+               if e.scalarTy.contains p.id && !(bodyAssignedIds body).contains p.id then
+                 some p.id else none,
              rootIsVoid := returns.isEmpty,
              rootReturns := if allNamedScalar || (flatStructRet?.isSome && !rootRetExprs.isEmpty) then rootRetExprs else #[],
              rootReturnTypes := rootReturnTypes,
@@ -15260,6 +15289,7 @@ private def importSlice
     let rootFile := env.nodeFile.find? rootId |>.getD entry
     env := { env with currentFile := rootFile, next := 0, bound := [], values := RBMap.empty, paths := RBMap.empty,
                       snapshots := RBMap.empty, mems := RBMap.empty, flatStructs := RBMap.empty, abiElements := RBMap.empty, calldataBytes := RBMap.empty, scalarArrays := RBMap.empty, byteBuffers := RBMap.empty, stringBuffers := RBMap.empty, nonLiteralByteLocals := #[], storageBytesVars := RBMap.empty, storageDynamicArrayVars := RBMap.empty, scalarTy := RBMap.empty, enumBounds := RBMap.empty, bytes4Params := #[], writableLocals := RBMap.empty, fnPtrs := RBMap.empty, bodyAssigned := [], zeroInitLocals := #[], yulNames := RBMap.empty, yulMemoryArrays := RBMap.empty, yulMemoryStructs := RBMap.empty,
+                      legacyCleanParams := [],
                       projections := #[], rawBindings := RBMap.empty, explicitAbi := false, encodingMemory := false, helperResult := none, helperReturnId := none, multiHelperResults := none, flatStructHelperResult := none, helperPost := #[], rootIsVoid := false, rootReturns := #[], rootReturnTypes := #[], rootNamedReturn := none, rootFixedArrayReturn := none, rootFlatStructReturn := none, rootMsgDataReturn := false, rootDynamicBytesReturn := none, rootPost := #[], publicVarGetterReturns := #[] }
     let ((body, srcParams), env2) ← (lowerRoot fn).run env
     env := env2
@@ -15353,7 +15383,10 @@ private def importSlice
           | throwError "missing calldata bytes model parameter {p.name}"
         let headOffset := 4 + (modelParams.toList.take i).foldl (fun n p => n + paramHeadSize p.ty) 0
         let checks :=
-          if legacy then
+          if legacy && !cb.inMemory then
+            LegacyMemory.calldataHead cb.offsetBinding cb.headerBinding cb.lengthBinding
+              cb.dataBinding rootHeadWords headOffset
+          else if legacy then
             AbiLowering.legacyBytesMemoryHead cb.memoryPointer cb.offsetBinding cb.headerBinding
               cb.lengthBinding cb.dataBinding cb.nextFreeBinding cb.copyIndexBinding
               rootHeadWords headOffset
@@ -15415,7 +15448,9 @@ private def importSlice
             (.eq (.bitAnd rawWord (.literal (2 ^ 248 - 1))) (.literal 0))
             [] [.revertEmpty])
         if let some binding := env.rawBindings.find? p.id then
-          abiGuards := abiGuards.push (.letVar binding rawWord)
+          let decoded := if legacy && !strictAbi then
+            LegacyMemory.cleanScalar ty rawWord else rawWord
+          abiGuards := abiGuards.push (.letVar binding decoded)
     let body := abiGuards ++ body
     let returns ← (do
       if (← mKind fn) == "VariableDeclaration" then
@@ -15592,6 +15627,7 @@ private def importSlice
   let bytePointersSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyBytePointers.lean"
   let packedSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyPacked.lean"
   let legacyAbiSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyAbi.lean"
+  let legacyMemorySrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyMemory.lean"
   let signatureSrc ← moduleText sourceRoot "Verity/Core/Model/LegacySignatureCalls.lean"
   let ecmSrc ← moduleText sourceRoot "Verity/Core/Model/ECM.lean"
   let denoteSrc ← moduleText sourceRoot "Verity/Core/Model/Denote.lean"
@@ -15613,6 +15649,7 @@ private def importSlice
       ("LegacyBytePointers.lean", Json.str bytePointersSrc),
       ("LegacyPacked.lean", Json.str packedSrc),
       ("LegacyAbi.lean", Json.str legacyAbiSrc),
+      ("LegacyMemory.lean", Json.str legacyMemorySrc),
       ("AbiLowering.lean", Json.str abiLoweringSrc),
       ("ExprHelpers.lean", Json.str exprHelpersSrc),
       ("LegacySignatureCalls.lean", Json.str signatureSrc),

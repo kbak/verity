@@ -154,8 +154,8 @@ type rather than rejected for noncanonical upper bits; boolean words normalize
 to zero or one. `pragma experimental ABIEncoderV2` and `pragma abicoder v2`
 select validation in the target contract's source unit. Inherited functions
 use the target contract's decoder, even when their defining file selects the
-other coder. Except for ABI coder v1 memory bytes described below, dynamic and
-aggregate ABI, signed arithmetic, enum conversions,
+other coder. Except for ABI coder v1 bytes and address arrays described below, dynamic and
+aggregate ABI, signed arithmetic, enum storage,
 narrow fixed-bytes root ABI, general assembly, and general external calls
 remain outside the legacy slice. Builtins are limited to `require`, `revert`, and
 the `ecrecover` extension described below.
@@ -245,6 +245,58 @@ PYTHONPATH=scripts python3 -m solidity_differential.check_legacy_array_rejection
   --output .lake/legacy-array-rejections
 ```
 
+### Legacy calldata copying, scalar enums and scratch hashing (experimental)
+
+ABI-v1 `bytes calldata` root parameters retain their decoded offset and length
+without allocating memory. Both have inclusive 32-bit bounds, and the complete
+byte range must fit calldata. Malformed entry data reverts with zero bytes.
+ABI-v1 decodes enum arguments as their unsigned integer representation (8 bits
+for the admitted 1–256 members), without checking the member count. Assembly
+therefore observes truncated out-of-range ordinals. Explicit unsigned-to-enum
+conversions clean the source width and check the member bound; enum-to-unsigned
+conversions and single unnamed enum returns also check the bound at use. These
+checks execute `INVALID`, not a modern panic or empty revert. Enum locals,
+assignments, comparisons, conditionals, direct mapping keys, helper arguments, named/multiple enum
+returns and enum storage remain rejected.
+
+Straight-line assembly may copy calldata, read/write words and hash bytes at
+the free-memory pointer or a constant nonnegative displacement of at most
+`2^32`. Pointer aliases and reassignment are tracked structurally. Writes to
+existing allocations, allocator metadata, variable destinations, Yul control
+flow and external effects remain rejected. `calldatacopy` preserves untouched
+destination bytes and zero-fills reads past calldata. It lowers to byte-preserving
+physical-memory stores. Hashes observe the exact physical bytes, including unaligned regions and stores whose value hashes the
+memory that they subsequently overwrite. This slice does not advance the free
+pointer; a later Solidity allocation can reuse the temporary region.
+
+Assembly can read unassigned external narrow scalar parameters: ABI-v1 cleans
+unsigned/address/bool words and enum integer representations at entry. Arbitrary
+narrow locals and helper parameters still require literal bindings. This is not
+general dirty-bit tracking. Calldata indexing, aliases/reassignment, helper-call
+arguments, slicing,
+ABI-v2 bytes, dynamic ABI encoding, payable entry points and general execution
+assembly remain outside this slice.
+
+The generic runtime oracle independently constructs ABI/hash inputs, checks
+byte-exact memory, malformed tails, enum failure kinds and watched storage.
+Partial final calldata words retain their exact byte length in both public and
+traced Denote execution; right-zero padding cannot fabricate available bytes.
+Compiler mutants perturb source offsets, lengths, hash lengths, entry enum
+checks and exceptional conversion outcomes. Passing controls are required;
+build failures do not count as detected mutations. These finite comparisons
+exclude gas/resource exhaustion and do not prove universal source equivalence.
+
+```bash
+PYTHONPATH=scripts python3 -m solidity_differential.check_legacy_calldata_hash \
+  --output .lake/legacy-calldata-hash
+PYTHONPATH=scripts python3 -m solidity_differential.check_legacy_calldata_rejections \
+  --output .lake/legacy-calldata-rejections
+```
+
+The pinned [ABI-v1 decoder and enum conversion implementation](https://github.com/ethereum/solidity/blob/v0.7.6/libsolidity/codegen/CompilerUtils.cpp)
+is the semantic reference. Public fixtures and lowering recognize language
+constructs; downstream transaction schemas are not embedded in the compiler.
+
 ### Fixed-byte conversions and memory reverts (development)
 
 The legacy extension admits `bytes1` through `bytes32` as local and helper
@@ -264,8 +316,8 @@ size)`. Other assembly control flow, storage/call effects and arbitrary loads
 remain rejected. The shared memory-revert transport preserves every byte of the
 requested slice, including unaligned offsets/lengths, overlapping stores, empty
 payloads and zero-filled memory. It never replaces a nonempty payload with an
-empty revert. Memory writes beyond scratch space are admitted only in a block
-whose final statement unconditionally reverts.
+empty revert. This terminal-revert path remains separate from the free-pointer
+scratch-memory continuation described above.
 
 Assembly may observe dirty padding in narrow values, as described by the
 [0.7.6 assembly rules](https://docs.soliditylang.org/en/v0.7.6/assembly.html#things-to-avoid).

@@ -2432,16 +2432,30 @@ theorem returndata_withTransactionContext (world : Verity.ContractState)
 
 /-- Canonical denotation of an external function of the deep model.
 Mirrors `SourceSemantics.interpretFunction` with the event-less statement
-semantics (see header note 2). -/
+semantics (see header note 2). Optional exact calldata length is for explicit
+ABI preludes or scalar heads; the caller must supply right-zero-padded words
+consistent with that length. The default preserves the word-aligned API. -/
 def denoteFunction (oracle : DenoteOracle) (spec : CompilationModel) (fn : FunctionSpec)
     (tx : DenoteTransaction) (initialWorld : Verity.ContractState)
     (externalCallSucceeded : Nat → Bool := fun _ => false)
     (externalCallReturnValues : Nat → List Nat := fun _ => [])
     (externalCallPostWorld : Nat → Option Verity.ContractState := fun _ => none)
-    (byteCalls : ByteCallEnvironment := {}) : DenoteResult :=
-  let worldWithTx := withTransactionContext initialWorld tx
+    (byteCalls : ByteCallEnvironment := {})
+    (calldataSize : Option Nat := none) : DenoteResult :=
+  let context := withTransactionContext initialWorld tx
+  let worldWithTx := match calldataSize with
+    | none => context
+    | some size => { context with calldataSize := Verity.Core.Uint256.ofNat size }
   let fields := effectiveFields spec
-  match bindExternalParams tx.functionSelector fn.bindingParams tx.args with
+  let bindings := match calldataSize with
+    | none => bindExternalParams tx.functionSelector fn.bindingParams tx.args
+    | some size =>
+        -- Exact byte tails use explicit ABI preludes or scalar heads only.
+        if size < 4 + 32 * fn.bindingParams.length ||
+            !(fn.bindingParams.all fun p => (decodeSupportedParamWord p.ty 0).isSome) then
+          none
+        else bindExternalParams tx.functionSelector fn.bindingParams tx.args
+  match bindings with
   | none => revertedResult oracle spec worldWithTx
   | some bindings =>
       match execStmtList oracle fields

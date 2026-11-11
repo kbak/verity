@@ -159,6 +159,8 @@ structure Env where
   bytes4Params : Array Nat := #[]
   writableLocals : RBMap Nat String compare := RBMap.empty
   zeroInitLocals : Array Nat := #[]
+  /-- Unassigned external scalar parameters cleaned by the legacy ABI decoder. -/
+  legacyCleanParams : List Nat := []
   rawBindings : RBMap Nat String compare := RBMap.empty
   encodingMemory : Bool := false
   explicitAbi : Bool := false
@@ -769,7 +771,11 @@ def resolveEnumMembers (j : Json) (ty : String) : M (Array String) := do
 
 def validateEnumTypeIfNeeded (j : Json) (ty : String) : M (Option Nat) := do
   if ty.startsWith "enum " then
-    pure (some (← resolveEnumMembers j ty).size)
+    let bound := (← resolveEnumMembers j ty).size
+    if (← get).legacyWrapping && optStr j "nodeType" == some "VariableDeclaration" then
+      let id ← mNat (← mField j "id")
+      modify fun e => { e with enumBounds := e.enumBounds.insert id bound }
+    pure (some bound)
   else
     pure none
 

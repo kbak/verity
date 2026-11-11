@@ -174,7 +174,7 @@ def scenario(kind, caller, layout, *, initial_count=3, random_cases=8, seed=7611
 def campaign(output, *, kind='links', context=0, optimized=False, initial_count=3,
              fixture=FIXTURE, contract=None, functions=None, extra_sources=None,
              fields=None, errors=None, events=None, dirty_mappings=False, prepared=False,
-             scenario_builder=scenario):
+             scenario_builder=scenario, import_functions=None):
     output = Path(output).resolve()
     output.mkdir(parents=True, exist_ok=False)
     # Parallel execution must share fixed artifacts: build once before workers.
@@ -201,7 +201,7 @@ def campaign(output, *, kind='links', context=0, optimized=False, initial_count=
                                         f'from "{output}" entry "Sequence.sol"')
     template = template.replace('  contract LegacyStateTransitions', '  contract ' + contract)
     template = template.replace('  function setLimit(uint256)\n  function insert(address,uint256)',
-                                '\n'.join('  function ' + f.replace('address[]', '«address[]»') for f in functions))
+                                '\n'.join('  function ' + f.replace('address[]', '«address[]»') for f in (import_functions or functions)))
     if optimized:
         template = template.replace('optimizerRuns := none', 'optimizerRuns := some 200')
     driver = output / 'Driver.lean'
@@ -211,8 +211,14 @@ def campaign(output, *, kind='links', context=0, optimized=False, initial_count=
         'metadata': {'bytecodeHash': 'none'}, 'outputSelection': {'*': {'*': [
             'evm.bytecode.object', 'evm.methodIdentifiers', 'storageLayout']}}}},
         output, output / 'source-solc', solc=Path.cwd() / '.lake/solidity-import/solc-0.7.6')['contracts']['Sequence.sol'][contract]
+    # Import selection uses source enum names; selectors use their canonical ABI types.
+    selected = [f.replace('«', '').replace('»', '') for f in roots(template)]
+    if selected != list(import_functions or functions):
+        raise HarnessError('driver roots differ from the requested source signatures')
+    if [f.split('(')[0] for f in selected] != [f.split('(')[0] for f in functions]:
+        raise HarnessError('import roots and canonical function selectors differ')
     write_json(output / 'selectors.json', [int(original['evm']['methodIdentifiers'][f.replace('«', '').replace('»', '')], 16)
-                                           for f in roots(template)])
+                                           for f in functions])
     command(['lake', 'env', 'lean', '--run', driver, 'compile', output / 'selectors.json', output / 'model.yul'],
             timeout=900, log=output / 'compile.log')
     generated = solc_compile({'language': 'Yul', 'sources': {'Model.yul': {'content': (output / 'model.yul').read_text()}},

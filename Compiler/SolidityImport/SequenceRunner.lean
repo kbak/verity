@@ -6,7 +6,8 @@ import Compiler.CompilationModel.SelectorInteropHelpers
 import Lean.Data.Json
 
 /-! JSON bridge for the Denote sequence adapter. Input arguments are complete
-word-aligned source ABI payloads, decoded using the function binding policy.
+source ABI words, with an explicit exact byte size for partial final words.
+Partial tails require explicit ABI preludes or scalar heads.
 Unsupported observations fail instead of supplying synthetic values. -/
 namespace Compiler.CompilationModel.SolidityImport.SequenceRunner
 open Lean Denote Transactions Verity.Core
@@ -162,6 +163,18 @@ def execute (model : CompilationModel) (oracle : DenoteOracle) (input : Json)
     let candidates := externalFns.filter (·.name == name)
     let [fn] := candidates | throw s!"model function must resolve uniquely: {name}"
     let args ← (← (← transaction.getObjVal? "args").getArr?).toList.mapM word
+    let exactSize ← match transaction.getObjVal? "calldataSize" with
+      | .error _ => pure none
+      | .ok value => pure (some (← word value))
+    if let some size := exactSize then
+      unless 4 ≤ size && (size - 4 + 31) / 32 == args.length do
+        throw "exact calldata size differs from its padded word count"
+      let remainder := (size - 4) % 32
+      if remainder != 0 then
+        unless args.getLast! % 2^(8*(32-remainder)) == 0 do
+          throw "partial calldata word has nonzero padding"
+      unless fn.bindingParams.all (fun p => (decodeSupportedParamWord p.ty 0).isSome) do
+        throw "partial calldata requires scalar heads or an explicit ABI prelude"
     let selector ← getWord transaction "selector"
     unless selector < 2^32 do throw "model selector exceeds four bytes"
     let [selected] := dispatch.filter (fun entry => entry.2 == selector)
@@ -185,10 +198,17 @@ def execute (model : CompilationModel) (oracle : DenoteOracle) (input : Json)
       { sender, txOrigin := sender, thisAddress := account, msgValue := value,
         blockTimestamp := timestamp, blockNumber := number, chainId := 31337,
         functionSelector := selector, args }
-    let initial := beginTransaction (withTransactionContext world tx)
-    let publicResult := denoteFunction oracle model fn tx initial (byteCalls := byteCalls)
+    let context := withTransactionContext world tx
+    let context := match exactSize with
+      | none => context
+      | some size => { context with calldataSize := Uint256.ofNat size }
+    let initial := beginTransaction context
+    let publicResult := denoteFunction oracle model fn tx initial
+      (byteCalls := byteCalls) (calldataSize := exactSize)
+    let bindings := if exactSize.any (· < 4 + 32 * fn.bindingParams.length) then none
+      else bindExternalParams selector fn.bindingParams args
     let result : TracedFrameResult ←
-      match bindExternalParams selector fn.bindingParams args with
+      match bindings with
       | none => pure ⟨⟨false, [], initial, false⟩, []⟩
       | some bindings =>
           executeTracedBody oracle (effectiveFields model) initial

@@ -34,7 +34,7 @@ CASES = {
         'contract P { function run(address a, bytes32 h, bytes memory s) public view returns(uint256) '
         '{ bytes memory p; assembly { p := add(s, 32) mstore(p, 4) } '
         'return uint256(bytes32(I(a).validate(h,p))); }}', 'run(address,bytes32,bytes)',
-        'assembly requires a terminal memory revert or read-only decoding'),
+        'is not a writable scalar local'),
     'assertion': (HEADER + 'contract P { function run(bytes32 h) public pure returns(address) '
         '{ assert(h != 0); return ecrecover(h,27,h,h); }}', 'run(bytes32)',
         'builtin call is outside the scalar slice'),
