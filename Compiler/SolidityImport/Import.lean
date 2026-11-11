@@ -15544,8 +15544,9 @@ private def importSlice
           (if onlyTrailingCallReentrancyWindows body.toList then [{
             name := "solidity_trailing_low_level_call_reentrancy"
             obligation := "Every external interaction that can re-enter is a closed low-level " ++
-              "CALL or DELEGATECALL after which the body reads and writes no storage and logs " ++
-              "nothing, so a re-entrant entrypoint observes only the completed state " ++
+              "CALL or DELEGATECALL after which the body reads and writes no storage. " ++
+              "Scalar logs use storage-free arguments and make no call, so a re-entrant " ++
+              "entrypoint observes only the completed state " ++
               "updates. Denote lets the callee's committed world change any account, " ++
               "including this one. The trailing position is checked by the importer, not proved."
             proofStatus := .unchecked }] else []) }

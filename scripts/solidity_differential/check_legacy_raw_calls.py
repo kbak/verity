@@ -137,12 +137,13 @@ def transactions(seed, caller, accounts, random_cases, *, methods=('run', 'forwa
 
 def campaign(directory, *, optimized=False, seed=7401, random_cases=24,
              fixture=FIXTURE, driver_template=DRIVER, extra_sources=None,
-             make_transactions=transactions, value_transactions=False, contract_name=None):
+             make_transactions=transactions, value_transactions=False, contract_name=None,
+             oracle_fixture=ORACLE, mock_module="RawCallMocks", mock_program="raw-context-echo-v1"):
     directory = Path(directory).resolve()
     directory.mkdir(parents=True, exist_ok=False)
     command(['turbo-lean', '--json', 'build', 'Compiler.SolidityImport.Import',
              'Compiler.SolidityImport.Differential', 'Compiler.SolidityImport.SequenceRunner',
-             'Compiler.SolidityImport.RawCallMocks', '--project-dir', '.'], timeout=1800,
+             'Compiler.SolidityImport.' + mock_module, '--project-dir', '.'], timeout=1800,
             log=directory / 'build.log')
     source = fixture.read_text()
     (directory / 'Sequence.sol').write_text(source)
@@ -182,10 +183,10 @@ def campaign(directory, *, optimized=False, seed=7401, random_cases=24,
     if len(model) != 1:
         raise HarnessError('expected one compiled model object')
     mock = solc_compile({'language': 'Solidity',
-        'sources': {ORACLE.name: {'content': ORACLE.read_text()}},
+        'sources': {oracle_fixture.name: {'content': oracle_fixture.read_text()}},
         'settings': {'evmVersion': 'osaka', 'optimizer': {'enabled': True, 'runs': 466},
             'outputSelection': {'*': {'*': ['evm.bytecode.object', 'evm.deployedBytecode.object']}}}},
-        directory, directory / 'oracle-solc', solc=SOLC)['contracts'][ORACLE.name]['RawCallOracle']['evm']
+        directory, directory / 'oracle-solc', solc=SOLC)['contracts'][oracle_fixture.name][oracle_fixture.stem]['evm']
     caller, accounts = address(0), [address(1), address(2)]
     balances = [(caller, FUNDS), (accounts[0], 5), (accounts[1], 17), (EMPTY, 0)]
     if value_transactions:
@@ -194,7 +195,7 @@ def campaign(directory, *, optimized=False, seed=7401, random_cases=24,
     calls, expected = make_transactions(seed, caller, accounts, random_cases)
     write_json(directory / 'transactions.json', calls)
     write_json(directory / 'expectations.json', expected)
-    environment = {'program': 'raw-context-echo-v1', 'accounts': [str(int(a, 16)) for a in accounts],
+    environment = {'program': mock_program, 'accounts': [str(int(a, 16)) for a in accounts],
                    'emptyAccounts': [str(int(EMPTY, 16))]}
     plan = sorted([*accounts, EMPTY, *([SENDER] if value_transactions else [])])
     deployment_rows = {}

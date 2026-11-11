@@ -1357,7 +1357,7 @@ Validation: `check_create2_struct_emit.py` replays the fixture and its `renamed`
 | Supported Solidity | Lowering boundary |
 | --- | --- |
 | `require(token.code.length > 0, NoCode());` and other `<addr>.code.length` reads on `address`-typed accounts (`lowerExtCodeSize`) | The account expression is lowered to an atom and read by `Stmt.ecm (SolidityExtCodeSize.module r) [addr]`, compiled to `let r := extcodesize(addr)`. `Denote.executeByteExtCodeSize` binds `DenoteExternalCode.extCodeSize world (Address.ofNat addr)` (`executeByteExtCodeSize_eq`); the legacy `Expr.extcodesize` and its `ContractState.codeSize` view are unchanged. `address(this).code.length` rejects because the executing contract's code differs between the source and compiled routes. The transport hands control to no account, so `eraseClosedTransports` erases it for the CEI check. |
-| `(bool success, bytes memory returndata) = token.call(abi.encodeCall(IERC20.transfer, (to, amount)));` followed by the returndata-forwarding `if` and the optional-bool `require` (`lowerLowLevelCallSequence?`, hooked into `lowerRootStatements` and `lowerVoidHelperFrom`) | The three statements are matched structurally (`lowLevelCallMember?`, `isReturndataForwarding`, `isOptionalBoolValidation`, `lowLevelEncodeCallParts`); `success` and `returndata` may not be referenced elsewhere (`jsonMentionsDecl`). The receiver and encoded arguments are lowered in source order (stateful operands reject), converted to the function's parameter types, and emitted as `Stmt.ecm (SolidityLowLevelCall.optionalBoolModule r selector n) (target :: words)` followed by the `require`'s own `reason` on `r` (`lowerRequireWith`). `Denote.executeByteOptionalBoolCall` prepares the calldata with `prepareByteWordCall .call` (free pointer advanced after the call), runs `ByteExternalCall.executeChecked`, and dispatches on `classifyOptionalBoolCall`: forward the child's bytes, revert empty on malformed returndata, or bind the decoded word. `DenoteLowLevelCall` proves the request is `callBytesRequest` and that the result is `1` exactly when `decodeOptionalBoolCall` accepts. Functions whose reentrancy windows are only these calls, after which no storage is read or written and nothing is logged, carry `reentrancyTrusted` with the unchecked obligation `solidity_trailing_low_level_call_reentrancy`. |
+| `(bool success, bytes memory returndata) = token.call(abi.encodeCall(IERC20.transfer, (to, amount)));` followed by the returndata-forwarding `if` and the optional-bool `require` (`lowerLowLevelCallSequence?`, hooked into `lowerRootStatements` and `lowerVoidHelperFrom`) | The three statements are matched structurally (`lowLevelCallMember?`, `isReturndataForwarding`, `isOptionalBoolValidation`, `lowLevelEncodeCallParts`); `success` and `returndata` may not be referenced elsewhere (`jsonMentionsDecl`). The receiver and encoded arguments are lowered in source order (stateful operands reject), converted to the function's parameter types, and emitted as `Stmt.ecm (SolidityLowLevelCall.optionalBoolModule r selector n) (target :: words)` followed by the `require`'s own `reason` on `r` (`lowerRequireWith`). `Denote.executeByteOptionalBoolCall` prepares the calldata with `prepareByteWordCall .call` (free pointer advanced after the call), runs `ByteExternalCall.executeChecked`, and dispatches on `classifyOptionalBoolCall`: forward the child's bytes, revert empty on malformed returndata, or bind the decoded word. `DenoteLowLevelCall` proves the request is `callBytesRequest` and that the result is `1` exactly when `decodeOptionalBoolCall` accepts. Functions whose reentrancy windows are only these calls, after which no storage is read or written and any scalar event arguments are storage-free, carry `reentrancyTrusted` with the unchecked obligation `solidity_trailing_low_level_call_reentrancy`. |
 
 Validation: `check_external_code_and_low_level_call.py` replays the fixture and its `renamed` and `expanded` variants on source EVM, Denote and the compiled model against eleven `RecordingCallResponder` configurations (true, false, empty, invalid and short words, extra bytes, short/empty/long revert payloads), an account without code and the sender EOA; responders record the call count, calldata size and first four calldata words, so selector, argument encoding and committed callee writes are compared in storage. Denote receives the responders' deployed runtime code for code-length reads. `check_external_code_and_low_level_call_rejections.py` pins 19 located near-miss rejections and 7 positive controls, and `check_external_code_and_low_level_call_mutations.py` holds ten runtime importer/Denote/ECM mutants and five admission-guard mutants.
 
@@ -1729,8 +1729,9 @@ commit persistent effects while restoring parent context and memory.
 block `let p := mload(64); returndatacopy(p,0,returndatasize());
 revert(p,returndatasize())` forwards those bytes. Other return-data copies and
 nonempty output areas remain rejected. Raw calls require a trailing continuation:
-local computations, checks, further closed calls, and returns/reverts are allowed;
-later storage reads/writes and logs are rejected, including inside branches.
+local computations, checks, scalar events with storage-free arguments, further
+closed calls, and returns/reverts are allowed. Later persistent/transient storage
+reads and writes remain rejected, including inside branches and event arguments.
 The checked continuation justifies the compiler's CEI/reentrancy opt-outs;
 it does not assume that a delegated or reentrant child leaves caller state intact.
 
@@ -1751,7 +1752,8 @@ and arbitrary external logs remain outside this raw-call validation. Named payab
 entrypoints have the separate zero-fee envelope below. Request gas
 is the supplied opcode operand; the external environment must specify how gas
 and call depth affect its response. The fixture uses ample fixed gas and emits
-no external logs. Nonzero transaction values require the explicit envelope below.
+no external logs; the post-call log campaign below covers that boundary separately.
+Nonzero transaction values require the explicit envelope below.
 Semantic references: [EIP-7](https://eips.ethereum.org/EIPS/eip-7),
 [EIP-211](https://eips.ethereum.org/EIPS/eip-211), and the
 [pinned enum cleanup implementation](https://github.com/ethereum/solidity/blob/v0.7.6/libsolidity/codegen/CompilerUtils.cpp).
@@ -1807,3 +1809,48 @@ authorized; it is not a full Ethereum transaction-validity model.
 References: [Solidity 0.7.6 contract semantics](https://docs.soliditylang.org/en/v0.7.6/contracts.html),
 [EIP-2681 nonce limits](https://eips.ethereum.org/EIPS/eip-2681), and the
 [code-free sender rule](https://eips.ethereum.org/EIPS/eip-3607).
+
+
+### Post-call events and exact child-log rollback (experimental)
+
+Trailing-call continuations admit scalar `emit` statements whose arguments read
+no persistent or transient storage. This supports events derived from captured
+locals, call success and return-data size. Existing storage-access and interaction
+restrictions remain in force, including inside event arguments and branches.
+Dynamic/anonymous source events and arbitrary post-call assembly are not added.
+
+`Verity.EncodedLog` records the execution address, zero to four topics, and exact
+payload bytes. `Event.rawLog` carries that observation in the ordered event
+journal; existing typed events retain their ABI argument view. The sequence runner
+encodes root typed events with the root ABI and address, but consumes complete
+external logs directly: a child need not share the caller's event declarations.
+The closed memory-log transport also records exact bytes and its executing address;
+its existing word-aligned source-admission restriction is unchanged.
+`DenoteResult.eventTrace` exposes the complete ordered records. The old `events`
+field remains a word-only compatibility view, not a complete EVM log encoding.
+
+Successful raw calls must preserve the entire prior journal and append only
+complete logs with at most four topics. Malformed extensions are instrumentation
+errors. Child REVERT/INVALID drops the child's logs while retaining caller and
+successful sibling logs. A later outer REVERT/INVALID restores the transaction's
+entry journal and account state, including value transfers; the reserved EOA nonce
+still advances. DELEGATECALL logs use the execution account's address.
+
+`check_legacy_post_call_events.py` compares original Solidity 0.7.6 EVM execution,
+public/traced Denote and generated EVM execution against independent Python
+expectations. Its 385 cases cover LOG0 through LOG4, empty/odd payloads, nested
+CALL/DELEGATECALL, failed children, consecutive calls, pre/post-call events,
+full-buffer revert forwarding, late INVALID, dirty enums and incoming/outgoing
+value. Both compiler optimization settings are exercised. The explicitly bounded
+`PostCallLogMocks` program and separately compiled `PostCallLogOracle.sol` supply
+the child behavior; neither is a general external-bytecode interpreter.
+
+Six executable mutations target emitter, payload, ordering, pre-call prefix,
+caller events and outer rollback. A mutation counts only after an unmodified
+control passes and the changed executable produces runtime divergence. Nine
+boundary controls reject malformed external journals and check failure buffers.
+`EventLogProofs` supplies eight kernel-checked model laws for append/order,
+account preservation, prefix admission and child/outer transaction rollback.
+These laws do not establish Solidity/importer/compiler correspondence. Gas,
+call-depth adequacy, arbitrary external programs, callbacks, and complete
+application execution remain explicit obligations or later work.

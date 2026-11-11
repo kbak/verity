@@ -48,6 +48,11 @@ private def eventWord (ty : ParamType) (value : Nat) : Except String Nat := do
 Denote's legacy eventless executor retains arguments in source order. -/
 private def encodeEvent (account : Nat) (definitions : List EventDef)
     (event : Verity.Event) : Except String Json := do
+  if let some entry := event.rawLog then
+    unless entry.topics.length ≤ 4 do throw "logged event has more than four topics"
+    return Json.mkObj [("address", toJson (hexAddress entry.emitter.val)),
+      ("topics", toJson (entry.topics.map fun topic => hexWord topic.val)),
+      ("data", toJson (hexBytes entry.data))]
   let [definition] := definitions.filter (·.name == event.name)
     | throw s!"observed event must resolve uniquely: {event.name}"
   let topic0 := hexBytes (KeccakEngine.keccak256_str (eventSignature definition)).data.toList
@@ -253,6 +258,8 @@ def execute (model : CompilationModel) (oracle : DenoteOracle) (input : Json)
     if !publicResult.success then
       if let some bytes := publicResult.revertData then
         unless result.frame.data == bytes do throw "traced revert bytes differ from public Denote"
+    unless decide (result.frame.world.events = publicResult.eventTrace) do
+      throw "traced event journal differs from public Denote"
     let result := { result with frame := ValueTransactions.settle prepared result.frame }
     let emitted ← result.frame.world.events.mapM (encodeEvent account model.events)
     let touched ← result.touched.filterMapM fun key =>

@@ -1463,11 +1463,12 @@ def executeByteLog (oracle : DenoteOracle) (fields : List Field)
     DenoteMemory.wordValue (memory.readWord (offset + 32 * index))
   let expanded := if size = 0 then memory else memory.expand (offset + size)
   let world := state.world.installPhysicalMemory expanded
-  let event : Verity.Event :=
-    { name := eventName
-      args := words
-      indexedArgs := (values.take topicCount).map Verity.Core.Uint256.ofNat }
-  return .continue { state with world := { world with events := world.events ++ [event] } }
+  unless topicCount ≤ 4 do throw "event log has more than four topics"
+  let entry : Verity.EncodedLog :=
+    { emitter := world.thisAddress
+      topics := (values.take topicCount).map Verity.Core.Uint256.ofNat
+      data := (List.range size).map fun index => UInt8.ofNat (memory.readByte (offset + index)).val }
+  return .continue { state with world := EventLogs.append world entry eventName words }
 
 /-- Optional-bool view of a low-level `CALL` observation: a failed child
 forwards its returndata, empty returndata is `true`, a non-empty response shorter
@@ -2381,6 +2382,8 @@ structure DenoteResult where
   invalid : Bool := false
   finalStorage : Nat → Nat
   events : List (List Nat)
+  /-- Ordered records, including complete child logs. `events` retains its legacy word view. -/
+  eventTrace : List Verity.Event := []
 
 def encodeEvent (ev : Verity.Event) : List Nat :=
   ev.indexedArgs.map (fun arg => arg.val) ++ ev.args.map (fun arg => arg.val)
@@ -2393,7 +2396,8 @@ def revertedResult (oracle : DenoteOracle) (spec : CompilationModel)
   { success := false
     returnValue := none
     finalStorage := encodeStorage oracle spec initialWorld
-    events := encodeEvents initialWorld.events }
+    events := encodeEvents initialWorld.events
+    eventTrace := initialWorld.events }
 
 def successResult (oracle : DenoteOracle) (spec : CompilationModel)
     (world : Verity.ContractState) (ret : Option Nat) (returnWords : List Nat := []) :
@@ -2402,7 +2406,8 @@ def successResult (oracle : DenoteOracle) (spec : CompilationModel)
     returnValue := ret
     returnWords := returnWords
     finalStorage := encodeStorage oracle spec world
-    events := encodeEvents world.events }
+    events := encodeEvents world.events
+    eventTrace := world.events }
 
 def decodeSupportedParamWord (ty : ParamType) (word : Nat) : Option Nat :=
   let word := wordNormalize word

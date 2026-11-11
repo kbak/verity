@@ -1,5 +1,6 @@
 import Verity.Core.Model.CallWorld
 import Verity.Core.Model.ByteExternalCall
+import Verity.Core.Model.EventLogs
 
 /-! Functional CALL/DELEGATECALL boundary. Gas and call-depth behavior are
 obligations of the explicit external environment, not computed by this model.
@@ -55,6 +56,8 @@ def execute (adversary : Adversary Verity.ContractState Verity.StorageKey)
   let some prepared := prepared
     | return { success := false, world := before, returndata := [], touched := [] }
   let observed ← executeChecked adversary request prepared
+  unless !observed.success || EventLogs.validExtension before.events observed.world.events do
+    throw "raw-call success must preserve prior logs and append complete EVM logs"
   return { observed with world := if observed.success then
     CallWorld.commitCalleeWorld before observed.world else before }
 

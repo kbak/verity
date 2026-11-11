@@ -11,7 +11,9 @@ CALL = 'assembly { ok := call(n,target,0,add(data,32),mload(data),0,0) } '
 CASES = {
     'post-write': (FUNCTION + CALL + 'stored=n; }', SIGNATURE, 'storage-free trailing continuation'),
     'post-read': (FUNCTION + CALL + 'return stored>0; }', SIGNATURE, 'storage-free trailing continuation'),
-    'post-log': (FUNCTION + CALL + 'emit Seen(n); }', SIGNATURE, 'storage-free trailing continuation'),
+    'post-log': (FUNCTION + CALL + 'emit Seen(n); }', SIGNATURE, None),
+    'post-log-storage-read': (FUNCTION + CALL + 'emit Seen(stored); }', SIGNATURE,
+                              'storage-free trailing continuation'),
     'post-branch-read': (FUNCTION + CALL + 'if(ok) return stored>0; }', SIGNATURE,
                          'storage-free trailing continuation'),
     'output-area': (FUNCTION + CALL.replace('mload(data),0,0', 'mload(data),0,32') + '}',
@@ -60,7 +62,7 @@ def run(output, prepared=False):
         driver.with_suffix('.log').write_text(log)
         if reason is None:
             if proc.returncode != 0:
-                raise HarnessError(f'{name}: supported payable root did not import: {log}')
+                raise HarnessError(f'{name}: supported root did not import: {log}')
         elif proc.returncode == 0 or '[solidity-import:unsupported]' not in log or reason not in log:
             raise HarnessError(f'{name}: missing located rejection: {log}')
         reports.append({'case': name, 'status': 'admitted' if reason is None else 'rejected', 'diagnostic': reason})

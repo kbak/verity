@@ -8,6 +8,28 @@ import sys
 from .engine import ROOT, WORKSPACE, MUTANT_BUILD_TIMEOUT, HarnessError, command, write_json
 
 MUTANTS = {
+    'post-log-emitter': ('Verity/Core/Model/EventLogs.lean',
+        'rawLog := some entry',
+        'rawLog := some { entry with emitter := world.thisAddress }'),
+    'post-log-payload': ('Verity/Core/Model/EventLogs.lean',
+        'rawLog := some entry',
+        'rawLog := some { entry with data := entry.data.drop 1 }'),
+    'post-log-order': ('Verity/Core/Model/RawCalls.lean',
+        'CallWorld.commitCalleeWorld before observed.world else before',
+        'CallWorld.commitCalleeWorld before { observed.world with events := before.events ++ '
+        '(observed.world.events.drop before.events.length).reverse } else before'),
+    'post-log-parent-prefix': ('Verity/Core/Model/RawCalls.lean',
+        'CallWorld.commitCalleeWorld before observed.world else before',
+        'CallWorld.commitCalleeWorld before observed.world else { before with events := [] }'),
+    'post-log-caller': ('Verity/Core/Model/Denote.lean',
+        'events := state.world.events ++\n                  [{ name := eventName\n'
+        '                     args := valuesAsEventArgs resolved\n                     indexedArgs := [] }]',
+        'events := state.world.events'),
+    'post-log-outer-rollback': ('Compiler/CompilationModel/Compile.lean',
+        'YulStmt.exprStmt (YulExpr.call "revert" [\n          YulExpr.lit 0,\n'
+        '          YulExpr.ident "__returndata_size"',
+        'YulStmt.exprStmt (YulExpr.call "return" [\n          YulExpr.lit 0,\n'
+        '          YulExpr.ident "__returndata_size"'),
     'payable-credit': ('Compiler/SolidityImport/ValueTransactions.lean',
         'balance := Uint256.ofNat (recipient.balance.val + amount)',
         'balance := Uint256.ofNat recipient.balance.val'),
@@ -270,6 +292,9 @@ def mutation_campaign(output, selected=None):
                 argv = [sys.executable, "-c",
                         "import sys; sys.path.insert(0, 'scripts'); "
                         "from solidity_differential.check_legacy_calldata_hash import main; sys.exit(main())",
+                        "--output", str(directory / ".lake/campaign")]
+            if name.startswith("post-log-"):
+                argv = [sys.executable, "-m", "solidity_differential.check_legacy_post_call_events",
                         "--output", str(directory / ".lake/campaign")]
             if name.startswith("payable-"):
                 argv = [sys.executable, "-c",

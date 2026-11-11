@@ -515,3 +515,12 @@ The bounded-loop invariant rule and its concrete storage/panic checks in
 `Compiler/SolidityImport/LoopInvariants.lean` and
 `Contracts/SolidityImportSmoke/LoopInvariantChecks.lean` are included in the
 generated axiom inventory. They introduce no project axioms.
+
+
+The post-call log extension adds no project-level axiom. The eight journal laws in
+`Compiler/SolidityImport/EventLogProofs.lean` and the core `EventLogs` implementation
+are included in the generated axiom inventory. They establish model properties;
+external program correspondence and gas/depth adequacy remain environment
+obligations, as detailed in [TRUST_ASSUMPTIONS.md](TRUST_ASSUMPTIONS.md). The finite
+`PostCallLogMocks` validation program is excluded on the same basis as existing
+external mocks; no proof or core journal module is excluded.

@@ -177,8 +177,9 @@ def exprStorageFree (expression : Expr) : Bool :=
 abbrev purePostCallExpr := exprStorageFree
 
 /-- Statements allowed after a closed low-level call in a trailing-call body:
-local bindings, checks, returns and further closed low-level calls, none of
-which reads or writes storage or logs. -/
+local bindings, checks, scalar events, returns and further closed low-level calls.
+Event arguments must read no storage. Logs open no additional reentrancy window;
+post-call persistent/transient storage reads and writes remain rejected. -/
 partial def stmtAfterTrailingCall : Stmt → Bool
   | .letVar _ value | .assignVar _ value | .require value _ => exprStorageFree value
   | .requireError condition _ args => exprStorageFree condition && args.all exprStorageFree
@@ -188,7 +189,7 @@ partial def stmtAfterTrailingCall : Stmt → Bool
       mod == Compiler.ECM.SolidityInvalid.module) &&
       args.all exprStorageFree
   | .return value => exprStorageFree value
-  | .returnValues values => values.all exprStorageFree
+  | .returnValues values | .emit _ values => values.all exprStorageFree
   | .revertEmpty | .revertReturndata | .stop => true
   | _ => false
 

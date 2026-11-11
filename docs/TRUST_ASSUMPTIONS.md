@@ -2373,8 +2373,8 @@ requests fail the traced validation instrument instead of fabricating a response
 with typed calls; its execution-context restoration behavior is unchanged.
 
 Raw calls are admitted only when every continuation after interaction is free
-of caller storage reads/writes and logs. Consecutive calls may themselves change
-any account. The CEI and reentrancy opt-outs are checked syntactically, not proved.
+of caller storage reads/writes; scalar events with storage-free arguments are
+allowed. Consecutive calls may themselves change any account. The CEI and reentrancy opt-outs are checked syntactically, not proved.
 Enum helper inputs and comparisons retain ABI-v1 cleaning and use-site INVALID
 checks. Full-buffer terminal revert forwarding uses exact bytes; arbitrary
 return-data copies and nonzero output areas remain outside admission.
@@ -2407,3 +2407,30 @@ Kernel proofs establish balance conservation at preparation, nonce reservation
 and settlement projections. No new project axiom is added. Gas exhaustion,
 fee/reward accounting, signature validity, EIP-7702, receive/fallback dispatch,
 constructors and complete application execution remain outside this slice.
+
+
+### Ordered external logs and rollback (experimental)
+
+The event journal now distinguishes legacy typed ABI records from complete opcode
+observations (`EncodedLog`: execution address, topics, arbitrary bytes). External
+raw-call success must preserve the exact pre-call prefix and append complete logs
+with at most four topics. This guard does not prove that a supplied external
+program emitted those logs: the external environment still owns that obligation.
+The sequence runner never interprets foreign logs using the caller's ABI. Public
+Denote exposes the full journal through `eventTrace`; its older `events` projection
+is only a compatibility word view.
+
+Post-call scalar events are admitted only with storage-free arguments. This
+syntactic extension creates no new interaction and does not permit post-call
+storage access. Child failure retains earlier logs; outer failure rolls back the
+whole body journal with account effects and value transfers. Eight model laws in
+`EventLogProofs` cover journal append/order, unchanged accounts, prefix checking,
+child commit/failure and outer settlement. They introduce no project axioms and
+are included in both generated axiom inventories.
+
+The finite `PostCallLogMocks` external program is validation support and is excluded
+from the verified-module population, like the existing external mocks. The core
+journal implementation and proofs remain included. Three-route runtime checks,
+independent expectations, six runtime mutations and nine boundary controls test
+the scoped behavior. External program correspondence, gas/call-depth adequacy,
+source/compiler equivalence and full application execution are not proved.

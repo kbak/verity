@@ -223,12 +223,21 @@ structure StorageSlot (α : Type) where
 instance {α : Type} : Coe Nat (StorageSlot α) where
   coe slot := ⟨slot⟩
 
+/-- Exact EVM log, independent of an ABI declaration or payload alignment. -/
+structure EncodedLog where
+  emitter : Address
+  topics : List Uint256
+  data : List UInt8
+  deriving DecidableEq, Repr
+
 -- Event type for ERC20/ERC721 compliance (#153)
 structure Event where
   name : String
   args : List Uint256           -- Unindexed data arguments
   indexedArgs : List Uint256    -- Indexed topic arguments
-  deriving Repr
+  /-- Complete opcode observation when available; legacy typed events keep their ABI view. -/
+  rawLog : Option EncodedLog := none
+  deriving DecidableEq, Repr
 
 -- External-call journal: core-level observables for calls that cross the
 -- contract boundary. Mirrors the denotational call model
