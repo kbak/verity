@@ -2617,7 +2617,7 @@ def emitNamedExecutableAppendsNamedEvent : Bool :=
   match MacroEventTrace.emitNamed 7 5 Verity.defaultState with
   | .success () state =>
       match state.events with
-      | [{ name := "Transfer", args := [7, 12], indexedArgs := [] }] =>
+      | [{ name := "Transfer", args := [7, 12], indexedArgs := [], rawLog := none }] =>
           state.sender == Verity.defaultState.sender
       | _ => false
   | .revert _ _ => false
@@ -2628,7 +2628,7 @@ def emitArrayExecutableAppendsArrayLengthPlaceholder : Bool :=
   match MacroEventTrace.emitArray 7 #[11, 13] Verity.defaultState with
   | .success () state =>
       match state.events with
-      | [{ name := "Amounts", args := [7, 2], indexedArgs := [] }] =>
+      | [{ name := "Amounts", args := [7, 2], indexedArgs := [], rawLog := none }] =>
           state.sender == Verity.defaultState.sender
       | _ => false
   | .revert _ _ => false
@@ -2639,7 +2639,7 @@ def emitMemoryArrayExecutableAppendsArrayLengthPlaceholder : Bool :=
   match MacroEventTrace.emitMemoryArray 3 Verity.defaultState with
   | .success () state =>
       match state.events with
-      | [{ name := "MemoryAmounts", args := [3], indexedArgs := [] }] =>
+      | [{ name := "MemoryAmounts", args := [3], indexedArgs := [], rawLog := none }] =>
           state.sender == Verity.defaultState.sender
       | _ => false
   | .revert _ _ => false
@@ -2650,7 +2650,7 @@ def emitDynamicLogExecutableAppendsLowLevelTrace : Bool :=
   match MacroEventTrace.emitDynamicLog 3 4 64 96 Verity.defaultState with
   | .success () state =>
       match state.events with
-      | [{ name := "log2", args := [64, 96], indexedArgs := [3, 5] }] =>
+      | [{ name := "log2", args := [64, 96], indexedArgs := [3, 5], rawLog := none }] =>
           state.sender == Verity.defaultState.sender
       | _ => false
   | .revert _ _ => false
