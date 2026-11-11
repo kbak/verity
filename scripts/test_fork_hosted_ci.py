@@ -19,10 +19,13 @@ class ForkHostedCiTests(unittest.TestCase):
         for before, after in (
             ("github.repository == 'kbak/verity'", "github.repository == 'lfglabs-dev/verity'"),
             ('["ubuntu-24.04"]', '["self-hosted"]'),
-            ('"build-heavy"', '"build-medium"'),
+            ('"build-medium"', '"build-heavy"'),
+            ('blacksmith-16vcpu-ubuntu-2404', 'blacksmith-32vcpu-ubuntu-2404'),
+            ('blacksmith-32vcpu-ubuntu-2404', 'blacksmith-16vcpu-ubuntu-2404'),
         ):
             with self.subTest(after=after):
                 text = snapshot.workflow_text.replace(before, after)
+                self.assertNotEqual(text, snapshot.workflow_text, before)
                 changed = check.Snapshot(text, text.splitlines(), snapshot.jobs)
                 self.assertTrue(check.check_job_contracts(changed, build_spec()).errors)
 
@@ -38,7 +41,16 @@ class ForkHostedCiTests(unittest.TestCase):
                 )
                 self.assertIsNotNone(match, route)
                 self.assertEqual(json.loads(match[1]), ["ubuntu-24.04"])
-                self.assertIn('"self-hosted"', route.split("||")[1])
+                upstream = re.fullmatch(r" '\s*(.*?)'\) \}\}", route.split("||")[1])
+                self.assertIsNotNone(upstream, route)
+                labels = json.loads(upstream[1])
+                if labels[0].startswith("blacksmith-"):
+                    self.assertIn(labels, [
+                        ["blacksmith-16vcpu-ubuntu-2404"],
+                        ["blacksmith-32vcpu-ubuntu-2404"],
+                    ])
+                else:
+                    self.assertIn("self-hosted", labels)
 
     def test_local_restores_are_skipped_and_artifact_fallbacks_remain(self):
         snapshot = check.Snapshot.load()
