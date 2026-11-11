@@ -146,6 +146,25 @@ def execute (model : CompilationModel) (oracle : DenoteOracle) (input : Json)
       | throw "account nonce exceeds 64 bits"
     let current := world.accountWorld (Address.ofNat account)
     world := world.writeAccount (Address.ofNat account) { current with nonce := bounded }
+  if let .ok rows := input.getObjVal? "initialBalances" then
+    let balances ← (← rows.getArr?).toList.mapM pair
+    unless (balances.map Prod.fst).eraseDups.length == balances.length do
+      throw "duplicate initial balance account"
+    for (owner, balance) in balances do
+      unless owner < 2^160 do throw "initial balance account exceeds address width"
+      let address := Address.ofNat owner
+      world := world.writeAccount address
+        { world.accountWorld address with balance := Uint256.ofNat balance }
+  if let .ok rows := input.getObjVal? "accountNonces" then
+    let nonces ← (← rows.getArr?).toList.mapM pair
+    unless (nonces.map Prod.fst).eraseDups.length == nonces.length do
+      throw "duplicate foreign nonce account"
+    for (owner, nonce) in nonces do
+      unless owner < 2^160 && owner != account do throw "invalid foreign nonce account"
+      let some bounded := (if h : nonce < 2^64 then some (⟨nonce, h⟩ : Fin (2^64)) else none)
+        | throw "foreign nonce exceeds 64 bits"
+      let address := Address.ofNat owner
+      world := world.writeAccount address { world.accountWorld address with nonce := bounded }
   let externalFns := model.functions.filter fun fn =>
     !fn.isInternal && !isInteropEntrypointName fn.name
   let dispatch := externalFns.map fun fn =>

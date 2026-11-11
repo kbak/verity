@@ -1,5 +1,6 @@
 import Verity.Core.Model.Denote
 import Verity.Core.Model.ByteExternalCall
+import Verity.Core.Model.CallWorld
 
 /-!
 Byte-exact boundary attached to the actual Denote frame/world. This is a
@@ -31,27 +32,8 @@ def staticAdversary
     · exact fun _ => rfl
     · trivial
 
-/-- Commit a callee's persistent world into the caller: storage, account,
-balance, code, log and call-journal channels come from `callee`, while the
-caller's execution context, calldata, memories and legacy returndata stay. -/
-def commitCalleeWorld (caller callee : Verity.ContractState) : Verity.ContractState :=
-  { callee with
-    sender := caller.sender
-    thisAddress := caller.thisAddress
-    txOrigin := caller.txOrigin
-    msgValue := caller.msgValue
-    blockTimestamp := caller.blockTimestamp
-    blockNumber := caller.blockNumber
-    chainId := caller.chainId
-    blobBaseFee := caller.blobBaseFee
-    baseFee := caller.baseFee
-    gasPrice := caller.gasPrice
-    calldataSize := caller.calldataSize
-    calldata := caller.calldata
-    selector := caller.selector
-    memory := caller.memory
-    byteMemory := caller.byteMemory
-    returndata := caller.returndata }
+/-- Commit only persistent callee effects; retain the caller's execution context. -/
+abbrev commitCalleeWorld := CallWorld.commitCalleeWorld
 
 section CommitCalleeWorld
 

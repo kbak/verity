@@ -121,6 +121,8 @@ Tagged modules do not execute an arbitrary compilation closure. -/
 inductive ByteTransport where
   /-- Solidity 0.7.6 ECDSA precompile call, with explicit byte-world semantics. -/
   | legacyRecover (resultVar : String)
+  /-- Raw CALL/DELEGATECALL over memory with an empty output area. -/
+  | rawCall (resultVar : String) (delegated : Bool)
   /-- ABI v1 view call `(bytes32, bytes) returns (bytes4)`. -/
   | legacyBytes4 (resultVar : String) (selector : Nat)
   | staticUint256 (resultVar : String) (selector numStaticArgs : Nat)
@@ -951,6 +953,32 @@ def module : ExternalCallModule where
 
 end SolidityInvalid
 
+namespace SolidityRawCall
+
+/-- Preserve the opcode argument order and retain the complete return buffer. -/
+def compile (resultVar : String) (delegated : Bool) (args : List YulExpr) :
+    Except String (List YulStmt) := do
+  unless args.length == (if delegated then 4 else 5) do
+    throw "raw call argument count differs"
+  return [.let_ resultVar (.call (if delegated then "delegatecall" else "call")
+    (args ++ [.lit 0, .lit 0]))]
+
+/-- Closed state-changing transport. The byte environment describes the child;
+no external-contract or source-to-Yul correctness theorem is assumed here. -/
+def module (resultVar : String) (delegated : Bool) : ExternalCallModule where
+  name := if delegated then "solidityRawDelegateCall" else "solidityRawCall"
+  numArgs := if delegated then 4 else 5
+  resultVars := [resultVar]
+  writesState := true
+  readsState := true
+  compile := fun _ args => compile resultVar delegated args
+  byteTransport := some (.rawCall resultVar delegated)
+  proofStatus := .assumed
+  summaryName := "raw_call_byte_response"
+  summaryMutability := .call
+
+end SolidityRawCall
+
 namespace LegacySignatureCall
 
 /-- Closed legacy recovery transport. The external byte world supplies the
@@ -991,6 +1019,10 @@ def compileCanonical (module : ExternalCallModule) (context : CompilationContext
     (args : List YulExpr) : Except String (List YulStmt) := do
   match module.byteTransport with
   | none => module.compile context args
+  | some (.rawCall resultVar delegated) =>
+      unless module == SolidityRawCall.module resultVar delegated do
+        throw "closed raw call metadata differs"
+      SolidityRawCall.compile resultVar delegated args
   | some (.legacyRecover resultVar) =>
       unless module == LegacySignatureCall.recoverModule resultVar do
         throw "closed legacy recovery metadata differs"

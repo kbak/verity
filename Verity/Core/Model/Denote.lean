@@ -6,6 +6,7 @@ import Verity.Core.Model.DynamicAbi
 import Verity.Core.Model.Types
 import Verity.Core.Model.PhysicalMemory
 import Verity.Core.Model.ByteExternalCall
+import Verity.Core.Model.RawCalls
 import Verity.Core.Model.Create2Opcode
 import Verity.Core.Model.DenoteExternalCode
 
@@ -1319,6 +1320,37 @@ def executeByteStaticCall (oracle : DenoteOracle) (fields : List Field)
   }
   return (.continue next, observed.touched)
 
+/-- Read an exact input-memory slice and execute a closed raw call. The low-level
+success bit is returned even on child failure; its return buffer is overwritten
+on every attempt, including insufficient funds and exceptional child halts. -/
+def executeRawCall (oracle : DenoteOracle) (fields : List Field) (state : DenoteState)
+    (mod : Compiler.ECM.ExternalCallModule) (resultVar : String) (delegated : Bool)
+    (args : List Expr) : Except String (StmtOutcome × List Verity.StorageKey) := do
+  unless mod == Compiler.ECM.SolidityRawCall.module resultVar delegated do
+    throw "closed raw call metadata differs"
+  let some adversary := state.byteCallAdversary | throw "raw call adversary missing"
+  let some values := evalExprList oracle fields state args
+    | throw "raw call operand evaluation unsupported"
+  unless values.length == (if delegated then 4 else 5) do
+    throw "raw call argument count differs"
+  let pointer := values[if delegated then 2 else 3]!
+  let size := values[if delegated then 3 else 4]!
+  let request : ByteExternalCall.Request := {
+    kind := if delegated then .delegatecall else .call
+    caller := state.world.thisAddress.val
+    target := values[1]! % 2^160
+    value := if delegated then state.world.msgValue.val else values[2]!
+    gas := values[0]!
+    calldata := (List.range size).map fun i =>
+      UInt8.ofNat (state.world.physicalByte (pointer + i)).val }
+  let observed ← RawCalls.execute adversary request state.world
+  let next := { state with
+    world := observed.world
+    bindings := bindValue state.bindings resultVar (if observed.success then 1 else 0)
+    rawReturndata := some observed.returndata
+    byteCallAccesses := state.byteCallAccesses ++ observed.touched }
+  return (.continue next, observed.touched)
+
 /-- Execute the legacy transports against an explicit byte-call environment.
 Missing instrumentation is an error, never an invented Solidity revert. -/
 def executeLegacySignatureCall (oracle : DenoteOracle) (fields : List Field)
@@ -2202,6 +2234,10 @@ mutual
         | none => .revert
     | state, .ecm mod args =>
         match mod.byteTransport with
+        | some (.rawCall resultVar delegated) =>
+            match executeRawCall oracle fields state mod resultVar delegated args with
+            | .ok (outcome, _) => outcome
+            | .error _ => .revert
         | some (.legacyRecover resultVar) =>
             match executeLegacySignatureCall oracle fields state mod resultVar none args with
             | .ok (outcome, _) => outcome

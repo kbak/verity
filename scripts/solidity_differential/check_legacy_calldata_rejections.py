@@ -44,11 +44,14 @@ CASES = {
         '{ b = c; return b.length; }', 'run(bytes,bytes)', 'calldata assignment is outside'),
     'enum-local': ('enum E { A, B } function run(E e) public pure returns(uint256) { '
         'E c = e; return uint256(c); }', 'run(E)', 'enum locals are outside'),
-    'enum-comparison': ('enum E { A, B } function run(E e) public pure returns(bool) { '
-        'return e == E.A; }', 'run(E)', 'enum comparisons are outside'),
-    'enum-helper': ('enum E { A, B } function h(E e) internal pure returns(uint256) { '
-        'return uint256(e); } function run(E e) public pure returns(uint256) { return h(e); }',
-        'run(E)', 'enum arguments require an unsigned conversion'),
+    # Comparisons and enum helper inputs now have executable positive/INVALID
+    # cases in check_legacy_raw_calls. Keep the adjacent unsupported boundary.
+    'enum-helper-return': ('enum E { A, B } function h(E e) internal pure returns(E) { '
+        'return e; } function run(E e) public pure returns(uint256) { return uint256(h(e)); }',
+        'run(E)', 'enum helper returns are outside'),
+    'enum-external-argument': ('enum E { A, B } function h(E e) external pure returns(uint256) { '
+        'return uint256(e); } function run(E e) public view returns(uint256) { return this.h(e); }',
+        'run(E)', 'enum arguments require an internal helper'),
     'enum-named-return': ('enum E { A, B } function run(E e) public pure returns(E r) { '
         'r = e; }', 'run(E)', 'enum returns require one unnamed scalar result'),
     'enum-multiple-returns': ('enum E { A, B } function run(E e) public pure returns(E,uint256) { '

@@ -26,6 +26,12 @@ namespace Compiler.CompilationModel.SolidityImport
 
 open Compiler.CompilationModel
 
+/-- Closed raw calls are state-changing interactions, including delegated writes. -/
+def isClosedRawCall (mod : Compiler.ECM.ExternalCallModule) : Bool :=
+  match mod.byteTransport with
+  | some (.rawCall result delegated) => mod == Compiler.ECM.SolidityRawCall.module result delegated
+  | _ => false
+
 /-- The closed optional-bool low-level call transport emitted by the importer. -/
 def isClosedLowLevelCall (mod : Compiler.ECM.ExternalCallModule) : Bool :=
   match mod.byteTransport with
@@ -178,10 +184,12 @@ partial def stmtAfterTrailingCall : Stmt → Bool
   | .requireError condition _ args => exprStorageFree condition && args.all exprStorageFree
   | .ite condition yes no =>
       exprStorageFree condition && yes.all stmtAfterTrailingCall && no.all stmtAfterTrailingCall
-  | .ecm mod args => (isClosedLowLevelCall mod || isClosedExtCodeSize mod) && args.all exprStorageFree
+  | .ecm mod args => (isClosedLowLevelCall mod || isClosedRawCall mod || isClosedExtCodeSize mod ||
+      mod == Compiler.ECM.SolidityInvalid.module) &&
+      args.all exprStorageFree
   | .return value => exprStorageFree value
   | .returnValues values => values.all exprStorageFree
-  | .revertEmpty | .stop => true
+  | .revertEmpty | .revertReturndata | .stop => true
   | _ => false
 
 abbrev allowedPostCallStmt := stmtAfterTrailingCall
@@ -194,7 +202,8 @@ partial def onlyTrailingLowLevelCallWindows : List Stmt → Bool
       if !Compiler.CompilationModel.stmtOpensReentrancyWindow statement then
         onlyTrailingLowLevelCallWindows rest
       else match statement with
-        | .ecm mod _ => isClosedLowLevelCall mod && rest.all stmtAfterTrailingCall
+        | .ecm mod _ => (isClosedLowLevelCall mod || isClosedRawCall mod) &&
+            rest.all stmtAfterTrailingCall
         | .ite _ yes no =>
             onlyTrailingLowLevelCallWindows yes && onlyTrailingLowLevelCallWindows no &&
               rest.all stmtAfterTrailingCall

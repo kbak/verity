@@ -7,7 +7,7 @@ import re
 from .engine import HarnessError, command, write_json
 from .identity import ImplementationIdentity
 from .stateful import _bytes, validate_observation
-from .deployment import validate_accounts
+from .deployment import validate_accounts, initial_balances as validate_balances
 
 
 def _uint(value):
@@ -34,7 +34,7 @@ def _calldata(tx):
 class SequenceAdapter:
     def __init__(self, directory, driver, account, initial_storage=(), identity=None, byte_call_environment=None,
                  lean_command=('lake', 'env', 'lean', '--run'), account_nonce=None, timeout=600,
-                 account_code=()):
+                 account_code=(), initial_balances=(), account_nonces=()):
         self.directory = Path(directory).resolve()
         self.driver = Path(driver).resolve()
         if not isinstance(lean_command, (list, tuple)) or not lean_command or any(
@@ -49,6 +49,16 @@ class SequenceAdapter:
         self.byte_call_environment = json.loads(json.dumps(byte_call_environment))
         if account_nonce is not None and (type(account_nonce) is not int or not 0 <= account_nonce < 1 << 64):
             raise HarnessError('model account nonce must be a 64-bit integer')
+        self.initial_balances = [[str(int(owner, 16)), str(value)]
+                                 for owner, value in validate_balances(initial_balances)]
+        self.account_nonces = []
+        for owner, nonce in account_nonces:
+            owner = _bytes(owner, 20)
+            if owner == self.account or type(nonce) is not int or not 0 <= nonce < 1 << 64:
+                raise HarnessError('foreign account nonce requires a foreign address and 64-bit integer')
+            self.account_nonces.append([str(int(owner, 16)), str(nonce)])
+        if len({row[0] for row in self.account_nonces}) != len(self.account_nonces):
+            raise HarnessError('duplicate foreign account nonce')
         self.account_nonce = account_nonce
         self.timeout = timeout
         # Foreign runtime code as deployed on the EVM routes (observed by code-length reads).
@@ -109,6 +119,8 @@ class SequenceAdapter:
                 converted[-1]['observeAccounts'] = [str(int(_bytes(a, 20), 16)) for a in tx['observeAccounts']]
         payload = {'account': str(int(self.account, 16)),
                    'storage': self.initial_storage, 'transactions': converted}
+        payload['initialBalances'] = self.initial_balances
+        payload['accountNonces'] = self.account_nonces
         if self.account_nonce is not None:
             payload['accountNonce'] = str(self.account_nonce)
         if self.byte_call_environment is not None:

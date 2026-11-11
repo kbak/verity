@@ -256,8 +256,9 @@ therefore observes truncated out-of-range ordinals. Explicit unsigned-to-enum
 conversions clean the source width and check the member bound; enum-to-unsigned
 conversions and single unnamed enum returns also check the bound at use. These
 checks execute `INVALID`, not a modern panic or empty revert. Enum locals,
-assignments, comparisons, conditionals, direct mapping keys, helper arguments, named/multiple enum
-returns and enum storage remain rejected.
+assignments, conditionals, direct mapping keys, helper returns, named/multiple enum
+returns and enum storage remain rejected. Comparisons and internal-helper inputs
+are admitted by the raw-call extension below.
 
 Straight-line assembly may copy calldata, read/write words and hash bytes at
 the free-memory pointer or a constant nonnegative displacement of at most
@@ -1697,3 +1698,57 @@ as detections. Zero-address acceptance is recorded separately and cannot substit
 for a duplicate witness. The campaign is also registered as the
 `ordered-signature-duplicate` task in `scripts/solidity_import_mutations.py`.
 Generated campaign JSON, Yul and proof/build artifacts stay under ignored `.lake/`.
+
+
+### Legacy raw CALL and DELEGATECALL (experimental)
+
+The explicit 0.7.6 profile admits whole Yul assignment/declaration values
+`call(gas, target, value, offset, size, 0, 0)` and
+`delegatecall(gas, target, offset, size, 0, 0)`. Operands must be effect-free;
+the output memory region must be literally `(0, 0)`. The target is truncated to
+160 bits by the opcode. A direct address-typed helper operand is consequently
+safe here; this does not permit other dirty narrow assembly reads. Success is
+an explicit boolean, without a code-existence check or automatic failure bubbling.
+
+Enum inputs may pass to resolved internal helpers. Six scalar comparisons check
+the member bound at use and execute INVALID on invalid ordinals. ABI-v1 entry
+still cleans to uint8 without checking the member bound. Enum storage, locals,
+helper returns, external enum arguments and assembly assignments remain rejected.
+
+The closed `SolidityRawCall` transport reads exact physical input bytes. `RawCalls`
+debits and credits CALL value before the child; insufficient funds return false
+with an empty buffer. DELEGATECALL transfers nothing and inherits the parent's
+address, sender and value. An explicit external environment supplies child
+execution. Failed children restore the entry world while retaining accesses and
+revert bytes; exceptional children leave an empty buffer. Successful children
+commit persistent effects while restoring parent context and memory.
+
+`returndatasize()` reads the latest complete byte buffer. The exact terminal
+block `let p := mload(64); returndatacopy(p,0,returndatasize());
+revert(p,returndatasize())` forwards those bytes. Other return-data copies and
+nonempty output areas remain rejected. Raw calls require a trailing continuation:
+local computations, checks, further closed calls, and returns/reverts are allowed;
+later storage reads/writes and logs are rejected, including inside branches.
+The checked continuation justifies the compiler's CEI/reentrancy opt-outs;
+it does not assume that a delegated or reentrant child leaves caller state intact.
+
+`check_legacy_raw_calls.py` compares original 0.7.6 bytecode, executable Denote,
+and emitted Yul on the EVM. An independently specified child program records
+calldata hashes, sender/address/value, balance, origin and a persistent counter,
+and returns, reverts or halts exceptionally. Independent Python expectations
+check every route's bytes, balances and storage. Cases include unaligned payload
+lengths, empty accounts, value failures, consecutive calls, outer rollback and
+invalid enum ordinals. Five compiler/model mutations and adjacent rejection
+controls exercise the boundary. `RawCallProofs` proves universal failure rollback,
+delegate context and caller-context restoration; these are model properties,
+not a Solidity-to-EVM equivalence theorem.
+
+Gas metering (including memory expansion, stipend and EIP-150 caps), call-depth
+limits, arbitrary external bytecode, payable entry, general reentrancy reasoning,
+and arbitrary external logs remain outside this finite validation. Request gas
+is the supplied opcode operand; the external environment must specify how gas
+and call depth affect its response. The fixture uses ample fixed gas and emits
+no external logs. Top-level nonzero transaction values remain rejected.
+Semantic references: [EIP-7](https://eips.ethereum.org/EIPS/eip-7),
+[EIP-211](https://eips.ethereum.org/EIPS/eip-211), and the
+[pinned enum cleanup implementation](https://github.com/ethereum/solidity/blob/v0.7.6/libsolidity/codegen/CompilerUtils.cpp).

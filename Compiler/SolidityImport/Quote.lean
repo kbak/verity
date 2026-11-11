@@ -27,6 +27,7 @@ private def optNat : Option Nat → m Term
 
 partial def quoteExpr : Expr → m Term
   | .calldatasize => `(Compiler.CompilationModel.Expr.calldatasize)
+  | .returndataSize => `(Compiler.CompilationModel.Expr.returndataSize)
   | .shl shift value => do `(Compiler.CompilationModel.Expr.shl $(← quoteExpr shift) $(← quoteExpr value))
   | .shr shift value => do `(Compiler.CompilationModel.Expr.shr $(← quoteExpr shift) $(← quoteExpr value))
   | .keccak256 offset size => do
@@ -89,6 +90,11 @@ partial def quoteStmt : Stmt → m Term
   | .ecm module args => do
       let quotedArgs ← list (← args.mapM quoteExpr)
       match module.byteTransport with
+      | some (.rawCall resultVar delegated) =>
+          unless module == Compiler.ECM.SolidityRawCall.module resultVar delegated do
+            throwError "internal: closed raw call metadata differs"
+          `(Compiler.CompilationModel.Stmt.ecm
+            (Compiler.ECM.SolidityRawCall.module $(quote resultVar) $(quote delegated)) $quotedArgs)
       | some (.legacyRecover resultVar) =>
           unless module == Compiler.ECM.LegacySignatureCall.recoverModule resultVar do
             throwError "internal: closed legacy recovery metadata differs"

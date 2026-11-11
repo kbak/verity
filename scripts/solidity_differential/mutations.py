@@ -8,6 +8,19 @@ import sys
 from .engine import ROOT, WORKSPACE, MUTANT_BUILD_TIMEOUT, HarnessError, command, write_json
 
 MUTANTS = {
+    'raw-call-input-offset': ('Verity/Core/Model/Denote.lean',
+        'UInt8.ofNat (state.world.physicalByte (pointer + i)).val }',
+        'UInt8.ofNat (state.world.physicalByte (pointer + i + 1)).val }'),
+    'raw-call-value': ('Verity/Core/Model/Denote.lean',
+        'value := if delegated then state.world.msgValue.val else values[2]!',
+        'value := if delegated then state.world.msgValue.val else 0'),
+    'raw-call-rollback': ('Verity/Core/Model/RawCalls.lean',
+        'world := if observed.success then', 'world := if true then'),
+    'raw-call-delegate-opcode': ('Verity/Core/Model/ECM.lean',
+        '(.call (if delegated then "delegatecall" else "call")',
+        '(.call (if delegated then "staticcall" else "call")'),
+    'raw-call-enum-comparison': ('Compiler/SolidityImport/Import.lean',
+        'left ← LegacyMemory.checkedEnum leftNode common left', 'pure ()'),
     'import-legacy-calldata-source': ('Compiler/SolidityImport/LegacyMemory.lean',
         'copyCalldata destination source count)',
         'copyCalldata destination (.add source (.literal 1)) count)'),
@@ -240,6 +253,11 @@ def mutation_campaign(output, selected=None):
                 argv = [sys.executable, "-c",
                         "import sys; sys.path.insert(0, 'scripts'); "
                         "from solidity_differential.check_legacy_calldata_hash import main; sys.exit(main())",
+                        "--output", str(directory / ".lake/campaign")]
+            if name.startswith("raw-call-"):
+                argv = [sys.executable, "-c",
+                        "import sys; sys.path.insert(0, 'scripts'); "
+                        "from solidity_differential.check_legacy_raw_calls import main; sys.exit(main())",
                         "--output", str(directory / ".lake/campaign")]
             # A pre-existing fixture divergence is not evidence that a mutation was
             # detected. Run the identical inputs in the private snapshot first.

@@ -138,13 +138,15 @@ class SequenceAdapter:
     emitted events are observed without normalization.
     """
     def __init__(self, directory, bytecodes, initial_storage=(), calldata_key='data', observer=None,
-                 impersonated_senders=()):
+                 impersonated_senders=(), initial_balances=()):
         self.directory = Path(directory)
         self.bytecodes = tuple(bytecodes)
         self.initial_storage = tuple(tuple(row) for row in initial_storage)
         self.calldata_key = calldata_key
         self.observer = observer
         self.impersonated_senders = tuple(impersonated_senders)
+        from .deployment import initial_balances as validate_balances
+        self.initial_balances = validate_balances(initial_balances)
         self.runs = 0
 
     def __call__(self, transactions, plan):
@@ -166,6 +168,8 @@ class SequenceAdapter:
             for sender in self.impersonated_senders:
                 node.rpc('anvil_impersonateAccount', sender)
                 node.rpc('anvil_setBalance', sender, hex(10**24))
+            for account, balance in self.initial_balances:
+                node.rpc('anvil_setBalance', account, hex(balance))
             for transaction, slots in zip(transactions, plan):
                 # Require exact environments. Silently filling these from the
                 # host clock would make block-dependent imports incomparable.
@@ -195,6 +199,7 @@ class SequenceAdapter:
                 receipts.append({'id': transaction['id'], 'transactionHash': result['receipt']['transactionHash']})
         (directory / 'sequence.json').write_text(json.dumps(
             {'bytecodes': self.bytecodes, 'initialStorage': self.initial_storage,
+             'initialBalances': self.initial_balances,
              'calldataKey': self.calldata_key, 'node': node.provenance,
              'impersonatedSenders': self.impersonated_senders,
              'transactions': transactions, 'receipts': receipts,

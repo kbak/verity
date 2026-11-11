@@ -2,6 +2,7 @@ import Compiler.SolidityImport.LegacyControlFlow
 import Compiler.SolidityImport.LegacyAbi
 import Compiler.SolidityImport.LegacyArrays
 import Compiler.SolidityImport.LegacyMemory
+import Compiler.SolidityImport.LegacyCalls
 
 /-! Conservative admission for the initial Solidity 0.7.6 scalar slice.
 The existing lowering remains responsible for admitting individual constructs.
@@ -29,7 +30,8 @@ private partial def validateLegacyYul (memoryRevert : Bool) (node : Json) : M Un
           let name := (field? node "functionName").bind (optStr · "name")
           let builtins := if memoryRevert then
             #[some "mload", some "mstore", some "add", some "revert"]
-            else #[some "mload", some "add", some "sub", some "mul", some "byte", some "chainid"]
+            else #[some "mload", some "add", some "sub", some "mul", some "byte", some "chainid",
+              some "call", some "delegatecall", some "returndatasize"]
           unless builtins.contains name do
             failAt node (if memoryRevert then
               "Solidity 0.7.6 memory-revert assembly builtin is unsupported"
@@ -63,6 +65,7 @@ def validateLegacyAssemblyReads (node : Json) : M Unit := do
       (((field? stmt "expression").bind (field? · "functionName")).bind
         (optStr · "name")) == some "revert") then return
   let reads := yulReadPositions ast
+  let masked := LegacyCalls.maskedTargets ast
   let env ← get
   for ref in (← mArr (← mField node "externalReferences")) do
     if reads.contains (← mStr (← mField ref "src")) then
@@ -71,7 +74,8 @@ def validateLegacyAssemblyReads (node : Json) : M Unit := do
         failAt node "Solidity 0.7.6 assembly array references are outside the guarded-read slice"
       if let some ty := env.scalarTy.find? id then
         unless isFullWordYulScalar ty do
-          unless env.legacyCleanParams.contains id ||
+          unless (ty == .address && masked.contains (← mStr (← mField ref "src"))) ||
+              env.legacyCleanParams.contains id ||
               (env.values.find? id).any (fun | .literal _ => true | _ => false) do
             failAt node "Solidity 0.7.6 assembly reads require full-word or literal scalars"
 
@@ -89,6 +93,7 @@ partial def validateLegacyDeclaration (node : Json) (encodingInput : Bool := fal
   | .arr children => children.forM (validateLegacyDeclaration · encodingInput)
   | .obj fields =>
     if optStr node "nodeType" == some "InlineAssembly" then
+      if LegacyCalls.forwardingRevert node then return
       let ast ← mField node "AST"
       let stmts ← mArr (← mField ast "statements")
       if stmts.back?.any (fun stmt =>
@@ -132,11 +137,10 @@ partial def validateLegacyDeclaration (node : Json) (encodingInput : Bool := fal
             ty.startsWith "string " then
           failAt node s!"Solidity 0.7.6 scalar slice does not support type {ty}"
       if kind == "FunctionDefinition" then
-        let params ← mArr (← mField (← mField node "parameters") "parameters")
         let returns ← mArr (← mField (← mField node "returnParameters") "parameters")
-        let hasEnum ← (params ++ returns).anyM fun p => return (← mType p).startsWith "enum "
+        let hasEnum ← returns.anyM fun p => return (← mType p).startsWith "enum "
         if hasEnum && !#[some "public", some "external"].contains (optStr node "visibility") then
-          failAt node "Solidity 0.7.6 enum helpers are outside the scalar enum slice"
+          failAt node "Solidity 0.7.6 enum helper returns are outside the scalar enum slice"
         for ret in returns do
           if (← mType ret).startsWith "enum " &&
               (returns.size != 1 || optStr ret "name" != some "") then
@@ -167,7 +171,9 @@ partial def validateLegacyDeclaration (node : Json) (encodingInput : Bool := fal
       if kind == "BinaryOperation" then
         for key in #["leftExpression", "rightExpression"] do
           if (← mType (← mField node key)).startsWith "enum " then
-            failAt node "Solidity 0.7.6 enum comparisons are outside the scalar enum slice"
+            unless (optStr node "operator").any
+                (#["==", "!=", "<", "<=", ">", ">="].contains ·) do
+              failAt node "Solidity 0.7.6 enum operands require a comparison"
       if kind == "Conditional" then
         if (← mType node).startsWith "enum " then
           failAt node "Solidity 0.7.6 enum conditionals are outside the scalar enum slice"
@@ -175,11 +181,19 @@ partial def validateLegacyDeclaration (node : Json) (encodingInput : Bool := fal
         if (← mType (← mField node "subExpression")).startsWith "enum " then
           failAt node "Solidity 0.7.6 enum mutations are outside the scalar enum slice"
       if kind == "FunctionCall" then
+        let callee := (field? node "expression").getD Json.null
+        let resolved := (field? callee "referencedDeclaration").bind (·.getNat?.toOption)
+        let calleeType := (optStr ((field? callee "typeDescriptions").getD Json.null)
+          "typeString").getD ""
+        let internalCall := optStr node "kind" == some "functionCall" &&
+          resolved.any (← get).funs.contains && (calleeType.splitOn " external").length == 1
+        if internalCall && (← mType node).startsWith "enum " then
+          failAt node "Solidity 0.7.6 enum helper returns are outside the scalar enum slice"
         for arg in (← mArr (← mField node "arguments")) do
-          if (← mType arg).startsWith "enum " &&
+          if (← mType arg).startsWith "enum " && !internalCall &&
               !(optStr node "kind" == some "typeConversion" &&
                 (← mType node).startsWith "uint") then
-            failAt arg "Solidity 0.7.6 enum arguments require an unsigned conversion"
+            failAt arg "Solidity 0.7.6 enum arguments require an internal helper or conversion"
           if (← mType arg) == "bytes calldata" then
             failAt arg "Solidity 0.7.6 calldata call arguments are outside the copying slice"
         if (← mType node) == "bytes memory" && !(encodingInput &&
