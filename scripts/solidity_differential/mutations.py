@@ -8,6 +8,15 @@ import sys
 from .engine import ROOT, WORKSPACE, MUTANT_BUILD_TIMEOUT, HarnessError, command, write_json
 
 MUTANTS = {
+    'void-call-offset': ('Verity/Core/Model/LegacyVoidCalls.lean', 'store head (.call "sub" [tail, add ptr 4])', 'store head (.call "sub" [tail, ptr])'),
+    'void-call-code': ('Verity/Core/Model/LegacyVoidCalls.lean', '.if_ (.call "iszero" [.call "extcodesize" [target]])', '.if_ (.lit 0)'),
+    'void-call-failure': ('Verity/Core/Model/LegacyVoidCalls.lean', '.if_ (.call "iszero" [ident "success"])', '.if_ (.lit 0)'),
+    'void-call-pre': ('Verity/Core/Model/LegacyVoidCalls.lean', 'return [.block body]', 'return if layout.any (· != .word) then [] else [.block body]'),
+    'void-call-post': ('Verity/Core/Model/LegacyVoidCalls.lean', 'return [.block body]', 'return if layout.all (· == .word) then [] else [.block body]'),
+    'void-call-return-decoder': ('Verity/Core/Model/LegacyVoidCalls.lean', 'return [.block body]', 'return [.block (body ++ [.if_ (.call "lt" [.call "returndatasize" [], .lit 32]) [.exprStmt (.call "revert" [.lit 0, .lit 0])]])]'),
+    'void-call-length-reload': ('Verity/Core/Model/LegacyVoidCalls.lean', 'body := body ++ [.assign (name ("size" ++ toString index)) length]', 'body := body'),
+    'void-call-stored-address': ('Compiler/SolidityImport/Legacy.lean', 'LegacyMemory.cleanScalar .address value.expr', '.bitAnd value.expr (.literal (2^159-1))'),
+    'void-call-head-order': ('Verity/Core/Model/LegacyVoidCalls.lean', '  let mut operand := 1\n  -- Legacy ABI-v1 fills every scalar head before any dynamic offset or payload.\n  for (kind, index) in layout.zipIdx do\n    if kind == .word then\n      body := body ++ [store (add ptr (4 + 32 * index)) (values.getD operand (.lit 0))]\n    operand := operand + (if kind == .calldataBytes then 2 else 1)\n  operand := 1\n  for (kind, index) in layout.zipIdx do\n    let head := add ptr (4 + 32 * index)\n    let data := values.getD operand (.lit 0)\n    if kind != .word then\n', '  let mut operand := 1\n  -- Legacy ABI-v1 fills every scalar head before any dynamic offset or payload.\n  for (kind, index) in layout.zipIdx do\n    if kind == .word && index != 5 then\n      body := body ++ [store (add ptr (4 + 32 * index)) (values.getD operand (.lit 0))]\n    operand := operand + (if kind == .calldataBytes then 2 else 1)\n  operand := 1\n  for (kind, index) in layout.zipIdx do\n    let head := add ptr (4 + 32 * index)\n    let data := values.getD operand (.lit 0)\n    if kind == .word && index == 5 then\n      body := body ++ [store head data]\n    if kind != .word then\n'),
     'post-log-emitter': ('Verity/Core/Model/EventLogs.lean',
         'rawLog := some entry',
         'rawLog := some { entry with emitter := world.thisAddress }'),
@@ -292,6 +301,9 @@ def mutation_campaign(output, selected=None):
                 argv = [sys.executable, "-c",
                         "import sys; sys.path.insert(0, 'scripts'); "
                         "from solidity_differential.check_legacy_calldata_hash import main; sys.exit(main())",
+                        "--output", str(directory / ".lake/campaign")]
+            if name.startswith("void-call-"):
+                argv = [sys.executable, "-m", "solidity_differential.check_legacy_void_callbacks",
                         "--output", str(directory / ".lake/campaign")]
             if name.startswith("post-log-"):
                 argv = [sys.executable, "-m", "solidity_differential.check_legacy_post_call_events",

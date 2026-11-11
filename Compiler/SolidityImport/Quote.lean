@@ -90,6 +90,16 @@ partial def quoteStmt : Stmt → m Term
   | .ecm module args => do
       let quotedArgs ← list (← args.mapM quoteExpr)
       match module.byteTransport with
+      | some (.legacyVoid selector layout) => do
+          unless module == Compiler.ECM.LegacyVoidCall.module selector layout do
+            throwError "closed legacy void call metadata differs"
+          let kinds ← layout.mapM fun kind => match kind with
+            | .word => `(Compiler.Yul.LegacyVoidCalls.Argument.word)
+            | .memoryBytes => `(Compiler.Yul.LegacyVoidCalls.Argument.memoryBytes)
+            | .calldataBytes => `(Compiler.Yul.LegacyVoidCalls.Argument.calldataBytes)
+          let descriptor ← list kinds
+          `(Compiler.CompilationModel.Stmt.ecm
+            (Compiler.ECM.LegacyVoidCall.module $(quote selector) $descriptor) $quotedArgs)
       | some (.rawCall resultVar delegated) =>
           unless module == Compiler.ECM.SolidityRawCall.module resultVar delegated do
             throwError "internal: closed raw call metadata differs"

@@ -162,6 +162,9 @@ low-level `call`, `<address>.code.length`, `<address>.code` and the memory
 canonical module. -/
 def closedTransportCovered (mod : Compiler.ECM.ExternalCallModule) (args : List Expr) : Bool :=
   match mod.byteTransport with
+  | some (.legacyVoid selector layout) =>
+      mod == Compiler.ECM.LegacyVoidCall.module selector layout && decide (selector < 2^32) &&
+        args.length == Compiler.Yul.LegacyVoidCalls.arity layout && exprListCovered args
   | some (.rawCall resultVar delegated) =>
       mod == Compiler.ECM.SolidityRawCall.module resultVar delegated &&
         args.length == (if delegated then 4 else 5) && exprListCovered args
@@ -237,6 +240,17 @@ theorem execStmt_ecm_rawCall_arm (oracle : DenoteOracle) (fields : List Field)
         (.ecm (Compiler.ECM.SolidityRawCall.module resultVar delegated) args) =
       (match executeRawCall oracle fields state
           (Compiler.ECM.SolidityRawCall.module resultVar delegated) resultVar delegated args with
+       | .ok (outcome, _) => outcome
+       | .error _ => .revert) := rfl
+
+/-- Pin the canonical void-call arm, including instrumentation error handling. -/
+theorem execStmt_ecm_legacyVoid_arm (oracle : DenoteOracle) (fields : List Field)
+    (state : DenoteState) (selector : Nat)
+    (layout : List Compiler.Yul.LegacyVoidCalls.Argument) (args : List Expr) :
+    execStmt oracle fields state
+        (.ecm (Compiler.ECM.LegacyVoidCall.module selector layout) args) =
+      (match executeLegacyVoidCall oracle fields state
+          (Compiler.ECM.LegacyVoidCall.module selector layout) selector layout args with
        | .ok (outcome, _) => outcome
        | .error _ => .revert) := rfl
 
