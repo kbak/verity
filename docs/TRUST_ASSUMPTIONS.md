@@ -2434,3 +2434,31 @@ journal implementation and proofs remain included. Three-route runtime checks,
 independent expectations, six runtime mutations and nine boundary controls test
 the scoped behavior. External program correspondence, gas/call-depth adequacy,
 source/compiler equivalence and full application execution are not proved.
+
+
+### Legacy void callback boundary (experimental)
+
+`LegacyVoidCall.module` adds an assumed, data-described ABI-v1 CALL transport.
+Canonical metadata, selector range and operand arity are checked independently in
+compilation, executable coverage, quotation and traced evaluation. Missing call
+environments or malformed metadata are instrumentation errors. A typed call checks
+code existence, sends zero value, ignores successful return bytes, and forwards
+failure bytes exactly. It reuses `RawCalls.execute` for account/context restoration,
+failed-child rollback and append-only external logs; outer settlement retains the
+existing full rollback and reserved-sender-nonce rules.
+
+The ABI encoder preserves physical memory ordering: scalar heads precede dynamic
+encoding, memory headers are read after preceding stores and reloaded after the
+outgoing length store, and overlapping copies read the current memory. It does not
+advance the free pointer. Constant-slot assembly address reads clean to 160 bits;
+unsupported dirty assembly reads stay rejected. Post-interaction storage access,
+effectful argument expressions and internal calldata-to-memory helper conversions
+remain outside admission.
+
+Three-route comparisons, independent expectations, boundary controls and compilable
+runtime mutations provide finite evidence. The coverage equation is a kernel-checked
+model dispatch law, not compiler/source equivalence. The closed transport remains
+assumed; gas/resource/depth adequacy and external-program correspondence belong to
+the supplied environment. `VoidCallMocks` is a finite validation program, excluded
+from the verified population consistently with the other external mocks. All new
+core encoder, transport and coverage modules remain in the generated axiom inventory.

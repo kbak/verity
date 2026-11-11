@@ -3,6 +3,8 @@ import Compiler.SolidityImport.LegacyAbi
 import Compiler.SolidityImport.LegacyArrays
 import Compiler.SolidityImport.LegacyMemory
 import Compiler.SolidityImport.LegacyCalls
+import Compiler.SolidityImport.LegacyVoidCalls
+import Compiler.SolidityImport.StorageLayout
 
 /-! Conservative admission for the initial Solidity 0.7.6 scalar slice.
 The existing lowering remains responsible for admitting individual constructs.
@@ -31,7 +33,7 @@ private partial def validateLegacyYul (memoryRevert : Bool) (node : Json) : M Un
           let builtins := if memoryRevert then
             #[some "mload", some "mstore", some "add", some "revert"]
             else #[some "mload", some "add", some "sub", some "mul", some "byte", some "chainid",
-              some "call", some "delegatecall", some "returndatasize"]
+              some "call", some "delegatecall", some "returndatasize", some "sload"]
           unless builtins.contains name do
             failAt node (if memoryRevert then
               "Solidity 0.7.6 memory-revert assembly builtin is unsupported"
@@ -78,6 +80,16 @@ def validateLegacyAssemblyReads (node : Json) : M Unit := do
               env.legacyCleanParams.contains id ||
               (env.values.find? id).any (fun | .literal _ => true | _ => false) do
             failAt node "Solidity 0.7.6 assembly reads require full-word or literal scalars"
+
+/-- A constant-slot address load is cleaned at the Solidity boundary. Later
+assembly reads of narrow locals still require the existing dirty-bit checks. -/
+def cleanLegacyStorageAddress (ty : ParamType) (value : Val) : Val :=
+  match ty, value.expr with
+  | .address, .storageArrayElement field (.literal _) =>
+      if field == rawStorageFieldName then
+        { value with expr := LegacyMemory.cleanScalar .address value.expr }
+      else value
+  | _, _ => value
 
 /-- Narrow assignment results need an explicit bound in the legacy assembly
 slice; enforce it for named results as well as ordinary writable locals. -/
@@ -185,16 +197,17 @@ partial def validateLegacyDeclaration (node : Json) (encodingInput : Bool := fal
         let resolved := (field? callee "referencedDeclaration").bind (·.getNat?.toOption)
         let calleeType := (optStr ((field? callee "typeDescriptions").getD Json.null)
           "typeString").getD ""
+        let voidCall := LegacyVoidCalls.applies node (← get)
         let internalCall := optStr node "kind" == some "functionCall" &&
           resolved.any (← get).funs.contains && (calleeType.splitOn " external").length == 1
         if internalCall && (← mType node).startsWith "enum " then
           failAt node "Solidity 0.7.6 enum helper returns are outside the scalar enum slice"
         for arg in (← mArr (← mField node "arguments")) do
-          if (← mType arg).startsWith "enum " && !internalCall &&
+          if (← mType arg).startsWith "enum " && !internalCall && !voidCall &&
               !(optStr node "kind" == some "typeConversion" &&
                 (← mType node).startsWith "uint") then
             failAt arg "Solidity 0.7.6 enum arguments require an internal helper or conversion"
-          if (← mType arg) == "bytes calldata" then
+          if (← mType arg) == "bytes calldata" && !voidCall then
             failAt arg "Solidity 0.7.6 calldata call arguments are outside the copying slice"
         if (← mType node) == "bytes memory" && !(encodingInput &&
             (LegacyPacked.isEncoding node || LegacyAbi.isEncoding node)) then
@@ -240,7 +253,8 @@ partial def validateLegacyDeclaration (node : Json) (encodingInput : Bool := fal
         if (ty.splitOn " external").length > 1 then
           -- The lowering independently resolves and validates the declaration,
           -- receiver, argument types and ABI-v1 bytes4 return transport.
-          unless ty == "function (bytes32,bytes memory) view external returns (bytes4)" do
+          unless ty == "function (bytes32,bytes memory) view external returns (bytes4)" ||
+              LegacyVoidCalls.applies node (← get) do
             failAt node "Solidity 0.7.6 external calls require the ABI-v1 bytes4 view slice"
         if optStr callee "nodeType" == some "Identifier" then
           -- Legacy builtins retain duplicate negative overloadedDeclarations.

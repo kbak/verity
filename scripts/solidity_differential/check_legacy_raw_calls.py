@@ -138,7 +138,8 @@ def transactions(seed, caller, accounts, random_cases, *, methods=('run', 'forwa
 def campaign(directory, *, optimized=False, seed=7401, random_cases=24,
              fixture=FIXTURE, driver_template=DRIVER, extra_sources=None,
              make_transactions=transactions, value_transactions=False, contract_name=None,
-             oracle_fixture=ORACLE, mock_module="RawCallMocks", mock_program="raw-context-echo-v1"):
+             oracle_fixture=ORACLE, mock_module="RawCallMocks", mock_program="raw-context-echo-v1",
+             initial_storage=(), extra_environment=None):
     directory = Path(directory).resolve()
     directory.mkdir(parents=True, exist_ok=False)
     command(['turbo-lean', '--json', 'build', 'Compiler.SolidityImport.Import',
@@ -196,7 +197,7 @@ def campaign(directory, *, optimized=False, seed=7401, random_cases=24,
     write_json(directory / 'transactions.json', calls)
     write_json(directory / 'expectations.json', expected)
     environment = {'program': mock_program, 'accounts': [str(int(a, 16)) for a in accounts],
-                   'emptyAccounts': [str(int(EMPTY, 16))]}
+                   'emptyAccounts': [str(int(EMPTY, 16))], **(extra_environment or {})}
     plan = sorted([*accounts, EMPTY, *([SENDER] if value_transactions else [])])
     deployment_rows = {}
 
@@ -210,7 +211,7 @@ def campaign(directory, *, optimized=False, seed=7401, random_cases=24,
     denote = Denote(directory / 'B', driver, caller, byte_call_environment=environment,
         account_code=[(a, '0x' + mock['deployedBytecode']['object']) for a in accounts],
         account_nonce=1, account_nonces=[(a, 1) for a in accounts] + ([(SENDER, 3)] if value_transactions else []),
-        initial_balances=balances,
+        initial_balances=balances, initial_storage=initial_storage,
         timeout=1800, value_transactions=value_transactions)
 
     def model_adapter(txs, slots):
@@ -223,10 +224,12 @@ def campaign(directory, *, optimized=False, seed=7401, random_cases=24,
 
     adapters = {
         'source': EVM(directory / 'A', ['0x' + source_contract['evm']['bytecode']['object'],
-            *deployments], observer=observe('source'), initial_balances=balances, zero_fee=value_transactions),
+            *deployments], observer=observe('source'), initial_balances=balances,
+            initial_storage=initial_storage, zero_fee=value_transactions),
         'model': model_adapter,
         'compiled': EVM(directory / 'C', ['0x' + next(iter(model.values()))['evm']['bytecode']['object'],
-            *deployments], observer=observe('compiled'), initial_balances=balances, zero_fee=value_transactions)}
+            *deployments], observer=observe('compiled'), initial_balances=balances,
+            initial_storage=initial_storage, zero_fee=value_transactions)}
     result = replay_three_routes(calls, adapters)
     observations = {route: [{**row, 'deployment': deployment_rows[route][row['id']]} for row in rows]
                     for route, rows in result['observations'].items()}

@@ -15,6 +15,7 @@ import Verity.Core.Model.Constants
 import Verity.Core.Model.ProofStatus
 import Verity.Core.Model.Yul.Ast
 import Verity.Core.Model.LegacySignatureCalls
+import Verity.Core.Model.LegacyVoidCalls
 
 namespace Compiler.ECM
 
@@ -125,6 +126,8 @@ inductive ByteTransport where
   | rawCall (resultVar : String) (delegated : Bool)
   /-- ABI v1 view call `(bytes32, bytes) returns (bytes4)`. -/
   | legacyBytes4 (resultVar : String) (selector : Nat)
+  /-- Value-free ABI-v1 interface CALL with no return-value decoder. -/
+  | legacyVoid (selector : Nat) (layout : List LegacyVoidCalls.Argument)
   | staticUint256 (resultVar : String) (selector numStaticArgs : Nat)
   | staticBool (resultVar : String) (selector numStaticArgs : Nat)
   | staticBytesUint256 (resultVar : String) (selector : Nat)
@@ -979,6 +982,24 @@ def module (resultVar : String) (delegated : Bool) : ExternalCallModule where
 
 end SolidityRawCall
 
+namespace LegacyVoidCall
+
+/-- A closed, state-changing interface call. The environment owns callee semantics;
+legacy code-existence checks and exact failure forwarding are part of the transport. -/
+def module (selector : Nat) (layout : List LegacyVoidCalls.Argument) : ExternalCallModule where
+  name := "solidityLegacyVoidCall"
+  numArgs := LegacyVoidCalls.arity layout
+  writesState := true
+  readsState := true
+  compile := fun _ args => LegacyVoidCalls.compile selector layout args
+  byteTransport := some (.legacyVoid selector layout)
+  proofStatus := .assumed
+  summaryName := "legacy_void_byte_response"
+  summaryMutability := .call
+  summarySelector := some selector
+
+end LegacyVoidCall
+
 namespace LegacySignatureCall
 
 /-- Closed legacy recovery transport. The external byte world supplies the
@@ -1019,6 +1040,10 @@ def compileCanonical (module : ExternalCallModule) (context : CompilationContext
     (args : List YulExpr) : Except String (List YulStmt) := do
   match module.byteTransport with
   | none => module.compile context args
+  | some (.legacyVoid selector layout) =>
+      unless module == LegacyVoidCall.module selector layout do
+        throw "closed legacy void call metadata differs"
+      LegacyVoidCalls.compile selector layout args
   | some (.rawCall resultVar delegated) =>
       unless module == SolidityRawCall.module resultVar delegated do
         throw "closed raw call metadata differs"

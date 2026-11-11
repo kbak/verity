@@ -32,6 +32,12 @@ def isClosedRawCall (mod : Compiler.ECM.ExternalCallModule) : Bool :=
   | some (.rawCall result delegated) => mod == Compiler.ECM.SolidityRawCall.module result delegated
   | _ => false
 
+/-- A code-checked ABI-v1 interface call with no return-value decoder. -/
+def isClosedVoidCall (mod : Compiler.ECM.ExternalCallModule) : Bool :=
+  match mod.byteTransport with
+  | some (.legacyVoid selector layout) => mod == Compiler.ECM.LegacyVoidCall.module selector layout
+  | _ => false
+
 /-- The closed optional-bool low-level call transport emitted by the importer. -/
 def isClosedLowLevelCall (mod : Compiler.ECM.ExternalCallModule) : Bool :=
   match mod.byteTransport with
@@ -185,7 +191,8 @@ partial def stmtAfterTrailingCall : Stmt → Bool
   | .requireError condition _ args => exprStorageFree condition && args.all exprStorageFree
   | .ite condition yes no =>
       exprStorageFree condition && yes.all stmtAfterTrailingCall && no.all stmtAfterTrailingCall
-  | .ecm mod args => (isClosedLowLevelCall mod || isClosedRawCall mod || isClosedExtCodeSize mod ||
+  | .ecm mod args => (isClosedLowLevelCall mod || isClosedRawCall mod || isClosedVoidCall mod ||
+      isClosedExtCodeSize mod ||
       mod == Compiler.ECM.SolidityInvalid.module) &&
       args.all exprStorageFree
   | .return value => exprStorageFree value
@@ -203,7 +210,7 @@ partial def onlyTrailingLowLevelCallWindows : List Stmt → Bool
       if !Compiler.CompilationModel.stmtOpensReentrancyWindow statement then
         onlyTrailingLowLevelCallWindows rest
       else match statement with
-        | .ecm mod _ => (isClosedLowLevelCall mod || isClosedRawCall mod) &&
+        | .ecm mod _ => (isClosedLowLevelCall mod || isClosedRawCall mod || isClosedVoidCall mod) &&
             rest.all stmtAfterTrailingCall
         | .ite _ yes no =>
             onlyTrailingLowLevelCallWindows yes && onlyTrailingLowLevelCallWindows no &&
