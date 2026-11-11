@@ -578,3 +578,10 @@ in the generated inventory. Only the finite `StaticBoolMocks` validation program
 excluded. The explicit self-call impersonation experiment is test instrumentation,
 not a transaction-reachability proof. These boundaries are synchronized with
 [TRUST_ASSUMPTIONS.md](TRUST_ASSUMPTIONS.md).
+
+
+Legacy internal calldata forwarding and calldata-to-memory helper conversion add no
+project axiom or external transport. They lower to existing memory and loop model
+statements. Differential and mutation evidence does not establish a compiler/source
+equivalence theorem; the remaining translation and resource assumptions are recorded
+in [TRUST_ASSUMPTIONS.md](TRUST_ASSUMPTIONS.md).

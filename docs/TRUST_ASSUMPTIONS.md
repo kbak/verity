@@ -2452,8 +2452,8 @@ encoding, memory headers are read after preceding stores and reloaded after the
 outgoing length store, and overlapping copies read the current memory. It does not
 advance the free pointer. Constant-slot assembly address reads clean to 160 bits;
 unsupported dirty assembly reads stay rejected. Post-interaction storage access,
-effectful argument expressions and internal calldata-to-memory helper conversions
-remain outside admission.
+effectful argument expressions remain outside admission. Internal calldata
+forwarding and memory helper conversions use the separate boundary below.
 
 Three-route comparisons, independent expectations, boundary controls and compilable
 runtime mutations provide finite evidence. The coverage equation is a kernel-checked
@@ -2493,3 +2493,21 @@ must not be presented as complete transaction authorization proofs.
 Only the finite `StaticBoolMocks` validation program is excluded from the verified
 population, consistently with existing external mocks. Core encoding, dispatch and
 storage lowering remain in the generated axiom inventory. No project axiom is added.
+
+
+### Legacy internal byte-helper boundary (experimental)
+
+ABI-v1 internal calldata forwarding retains validated offset/length bindings.
+Calldata-to-memory helper arguments use a fresh physical length-header allocation,
+rounded payload capacity and an exact post-payload zero word. Existing memory
+arguments retain aliases and live header reads. These operations lower to existing
+model memory/loop statements; no new assumed external transport, project axiom or
+compiler correspondence theorem is introduced. The importer change itself remains
+an unproved translation step, tested by three-route comparisons, independent byte
+expectations, negative controls and actual executable mutations.
+
+The admitted source is an existing calldata-bytes identifier at a resolved internal
+call. This does not admit arbitrary slices, returned/reassigned calldata, ABI-v2
+conversion semantics, general effectful argument ordering or storage access after
+state-changing external calls. Finite campaigns assume adequate gas, memory and call
+depth; external interaction cases retain their explicit callee-world obligations.

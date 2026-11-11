@@ -7269,6 +7269,21 @@ private partial def bindHelperParams (params : Array Json) (args : Array CallArg
         let expectedTy := if descriptor.isString then "string" else "bytes"
         unless pty == expectedTy do
           failAt p s!"calldata {expectedTy} argument requires a {expectedTy} parameter"
+        if (← get).legacyWrapping then
+          unless !descriptor.isString && !descriptor.inMemory do
+            failAt p "legacy bytes helpers require a calldata bytes region"
+          if location == "calldata" then
+            pre := pre ++ effects
+            let forwarded := { descriptor with param := pname }
+            modify fun e => { e with calldataBytes := e.calldataBytes.insert pid forwarded }
+          else if location == "memory" then
+            let buffer ← LegacyMemory.materializeBytes
+              (.localVar descriptor.dataBinding) (.localVar descriptor.lengthBinding)
+            pre := pre ++ effects ++ (← LegacyBytePointers.bind pid pname buffer)
+          else
+            failAt p "legacy bytes helpers require calldata or memory parameters"
+          if pname != "" then yul := yul.erase pname
+          continue
         if location == "calldata" && !descriptor.inMemory then
           pre := pre ++ effects
           modify fun e => { e with calldataBytes := e.calldataBytes.insert pid descriptor }

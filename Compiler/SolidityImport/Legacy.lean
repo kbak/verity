@@ -212,7 +212,12 @@ partial def validateLegacyDeclaration (node : Json) (encodingInput : Bool := fal
                 (← mType node).startsWith "uint") then
             failAt arg "Solidity 0.7.6 enum arguments require an internal helper or conversion"
           if (← mType arg) == "bytes calldata" && !voidCall then
-            failAt arg "Solidity 0.7.6 calldata call arguments are outside the copying slice"
+            unless internalCall do
+              failAt arg "Solidity 0.7.6 calldata call arguments are outside the copying slice"
+            unless optStr arg "nodeType" == some "Identifier" do
+              failAt arg "legacy bytes helpers require an existing calldata identifier"
+            if (← get).legacyAbiV2Files.contains (← get).currentFile then
+              failAt arg "legacy bytes helpers require ABI coder v1 at the call site"
         if (← mType node) == "bytes memory" && !(encodingInput &&
             (LegacyPacked.isEncoding node || LegacyAbi.isEncoding node)) then
           failAt node "Solidity 0.7.6 byte construction is outside the decoding slice"

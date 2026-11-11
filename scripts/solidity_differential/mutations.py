@@ -8,6 +8,23 @@ import sys
 from .engine import ROOT, WORKSPACE, MUTANT_BUILD_TIMEOUT, HarnessError, command, write_json
 
 MUTANTS = {
+    'helper-copy-source': ('Compiler/SolidityImport/LegacyMemory.lean',
+        'let copy ← copyCalldata data source length',
+        'let copy ← copyCalldata data (.add source (.literal 1)) length'),
+    'helper-copy-header': ('Compiler/SolidityImport/LegacyMemory.lean',
+        '.mstore (.localVar pointer) length] ++ copy ++',
+        '.mstore (.localVar pointer) (.add length (.literal 1))] ++ copy ++'),
+    'helper-copy-rounding': ('Compiler/SolidityImport/LegacyMemory.lean',
+        '.mstore (.literal 64) (.add data rounded)',
+        '.mstore (.literal 64) (.add data length)'),
+    'helper-copy-reuse': ('Compiler/SolidityImport/LegacyMemory.lean',
+        '.mstore (.literal 64) (.add data rounded)',
+        '.mstore (.literal 64) (.localVar pointer)'),
+    'helper-copy-padding': ('Compiler/SolidityImport/LegacyMemory.lean',
+        '#[.mstore (.add data length) (.literal 0)]', '#[]'),
+    'helper-forward-offset': ('Compiler/SolidityImport/Import.lean',
+        'let forwarded := { descriptor with param := pname }',
+        'let forwarded := { descriptor with param := pname, dataBinding := descriptor.headerBinding }'),
     'legacy-bool-code': ('Verity/Core/Model/LegacyBoolCalls.lean', '.if_ (.call "iszero" [.call "extcodesize" [target]])', '.if_ (.lit 0)'),
     'legacy-bool-truth': ('Verity/Core/Model/LegacyBoolCalls.lean', '.assign result (.call "iszero" [.call "iszero" [.call "mload" [ptr]]])', '.assign result (.call "eq" [.call "mload" [ptr], .lit 1])'),
     'legacy-bool-short': ('Verity/Core/Model/LegacyBoolCalls.lean', '.if_ (.call "lt" [.call "returndatasize" [], .lit 32])', '.if_ (.call "lt" [.call "returndatasize" [], .lit 1])'),
@@ -309,6 +326,9 @@ def mutation_campaign(output, selected=None):
                 argv = [sys.executable, "-c",
                         "import sys; sys.path.insert(0, 'scripts'); "
                         "from solidity_differential.check_legacy_calldata_hash import main; sys.exit(main())",
+                        "--output", str(directory / ".lake/campaign")]
+            if name.startswith(("helper-copy-", "helper-forward-")):
+                argv = [sys.executable, "-m", "solidity_differential.check_legacy_calldata_helpers",
                         "--output", str(directory / ".lake/campaign")]
             if name.startswith(("legacy-bool-", "legacy-store-")):
                 argv = [sys.executable, "-m", "solidity_differential.check_legacy_static_installation",

@@ -14,7 +14,7 @@ CASES = {
     'internal-calldata-copy': ('',
         'function h(bytes memory b) internal pure returns(uint256) { return b.length; } '
         'function run(bytes calldata b) external pure returns(uint256) { return h(b); }',
-        'run(bytes)', 'calldata call arguments are outside'),
+        'run(bytes)', None),
     'scalar-call': (INTERFACE, FUNCTION + CALL + '}', 'run(address,uint256)', None),
     'post-write': (INTERFACE, FUNCTION + CALL + 'stored=n; }', 'run(address,uint256)',
                    'storage-free trailing continuation'),

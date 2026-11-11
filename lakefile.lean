@@ -76,6 +76,8 @@ lean_lib «SolidityImportSmoke» where
     .one `Contracts.SolidityImportSmoke.LegacyStateTransitionsModel,
     .one `Contracts.SolidityImportSmoke.LegacyStaticAbiHashModel,
     .one `Contracts.SolidityImportSmoke.LegacyCalldataHashModel,
+    .one `Contracts.SolidityImportSmoke.LegacyCalldataHelpersModel,
+    .one `Contracts.SolidityImportSmoke.LegacyCalldataExecutionModel,
     .one `Contracts.SolidityImportSmoke.LegacyPayableModel,
     .one `Contracts.SolidityImportSmoke.LegacyPostCallEventsModel,
     .one `Contracts.SolidityImportSmoke.LegacyVoidCallbacksModel,
