@@ -93,7 +93,8 @@ particular a wrap-then-`require` idiom must evaluate the wrapped result before
 its explicit guard. The additional declaration gate is conservative and runs
 on roots and reached helpers; existing construct checks still apply. Functions
 may be `pure`, `view`, or `nonpayable`; the state-transition extension below
-adds scoped write/modifier/event evidence. Payable functions remain rejected.
+adds scoped write/modifier/event evidence. Named payable entrypoints are covered by
+the explicit value-transaction extension below.
 
 ### Legacy state transitions
 
@@ -103,7 +104,7 @@ compound assignments, and scalar events through the existing lowering. Reached
 modifier declarations receive the same legacy AST and division-path checks as
 functions; internal calls restore the legacy arithmetic default. `address(this)`
 retains the current contract address when converted from its contract type.
-Payable entry points, arbitrary external writes, raw `sstore` assembly, general arrays,
+Arbitrary external writes, raw `sstore` assembly, general arrays,
 assertions and unguarded division remain rejected. This is a supported construct
 subset, not general 0.7.6 support.
 
@@ -117,9 +118,10 @@ helper modifiers and post-body modifier writes. Dirty packed-word preservation a
 maximum-count initial worlds are primitive-semantics checks; those worlds need
 not satisfy a downstream invariant.
 
-These sequence experiments use zero-value calls: the existing runner rejects
-value transfers before executing Denote. Payable legacy declarations are covered
-by rejection controls, not by a value-transfer model. Self-sender experiments
+These state-transition experiments use zero-value call frames. The default runner
+still rejects nonzero value without the explicit envelope below. Former payable
+rejection fixtures now require successful admission; value behavior has its own
+independent runtime campaign. Self-sender experiments
 explicitly impersonate the contract only on local test nodes. They check a supplied call frame; they do not prove that an authorized
 transaction reaches that frame. Deployment initialization, signatures and proxy
 reachability require downstream evidence. Finite observations do not prove
@@ -1745,10 +1747,63 @@ not a Solidity-to-EVM equivalence theorem.
 
 Gas metering (including memory expansion, stipend and EIP-150 caps), call-depth
 limits, arbitrary external bytecode, payable entry, general reentrancy reasoning,
-and arbitrary external logs remain outside this finite validation. Request gas
+and arbitrary external logs remain outside this raw-call validation. Named payable
+entrypoints have the separate zero-fee envelope below. Request gas
 is the supplied opcode operand; the external environment must specify how gas
 and call depth affect its response. The fixture uses ample fixed gas and emits
-no external logs. Top-level nonzero transaction values remain rejected.
+no external logs. Nonzero transaction values require the explicit envelope below.
 Semantic references: [EIP-7](https://eips.ethereum.org/EIPS/eip-7),
 [EIP-211](https://eips.ethereum.org/EIPS/eip-211), and the
 [pinned enum cleanup implementation](https://github.com/ethereum/solidity/blob/v0.7.6/libsolidity/codegen/CompilerUtils.cpp).
+
+
+### Named payable entrypoints and value transactions (experimental)
+
+Legacy named public/external payable roots preserve `isPayable` through import
+and quotation into compiler dispatch. Internal helper calls do not acquire an
+external nonpayable guard. Receive/fallback dispatch, payable constructors and
+the complete transaction-execution flow remain separate work.
+
+`ValueTransactions.prepare` supplies an explicit **zero-fee EOA envelope**. It
+checks a distinct code-free sender, sufficient funds, the 64-bit nonce limit,
+coherent recipient balance, and nonwrapping balance credit. It reserves the
+sender's next nonce, then debits the sender and credits the executing contract
+before ABI decoding or body execution. `msg.value` and `address(this).balance`
+therefore include the incoming value. The prepared balance is available to raw
+CALL, and DELEGATECALL inherits the nonzero value without a second transfer.
+
+`settle` preserves success effects. Nonpayable rejection, ABI failure, explicit
+REVERT and INVALID restore the complete pre-transfer world, retaining the
+reserved sender nonce. Child failure alone does not revert the incoming payment;
+an outer revert rolls back both that payment and all child effects. Envelope
+admission failure is an instrumentation error, not a fabricated Solidity revert.
+`denotePrepared` adds the external payability check around public function
+Denote. `denoteFunction` and `Transactions.executeBody` retain their documented
+body/frame semantics and do not silently debit an unprovided sender world.
+
+The JSON runner opts in with `valueTransactions: true`; the Python Denote adapter
+uses `value_transactions=True`. Replay supplies explicit balances and account
+nonces. The EVM adapter's `zero_fee=True` mode sets the next block's base fee and
+transaction gas price to zero and checks the actual receipt. Sender balances and
+nonces are compared exactly, without subtracting gas charges from observations.
+The default call-frame mode still rejects nonzero value.
+
+`check_legacy_payable.py` checks stateful and stateless contracts against original
+0.7.6 EVM bytecode, executable Denote and generated EVM bytecode. Independent
+Python expectations cover complete return/revert bytes, balances, nonces,
+storage, logs, truncated ABI words, helper value inheritance, incoming funds
+spent by CALL, delegate context, child failure and outer rollback. Six actual
+mutations target credit, debit, rollback, nonce persistence, payability guarding
+and payable metadata. Former payable rejection controls now require admission;
+`check_legacy_payable_rejections.py` checks invalid envelopes separately.
+
+`ValueTransactionProofs` proves model-level balance conservation at preparation,
+nonce reservation, external nonpayable guarding, and success/failure settlement.
+It does not prove source/importer/compiler equivalence, gas/resource adequacy,
+transaction signature validity, fee accounting or arbitrary external programs.
+The envelope excludes EIP-7702 sender code and assumes the supplied EOA sender is
+authorized; it is not a full Ethereum transaction-validity model.
+
+References: [Solidity 0.7.6 contract semantics](https://docs.soliditylang.org/en/v0.7.6/contracts.html),
+[EIP-2681 nonce limits](https://eips.ethereum.org/EIPS/eip-2681), and the
+[code-free sender rule](https://eips.ethereum.org/EIPS/eip-3607).

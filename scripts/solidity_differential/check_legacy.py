@@ -25,7 +25,7 @@ def rejection_controls(output):
                          ("helperDivision", "legacy exceptional halt is not modeled"),
                          ("modulo", "legacy exceptional halt is not modeled"),
                          ("assertion", "assert/INVALID is not modeled"),
-                         ("payableMutation", "payable functions are outside")):
+                         ("payableMutation", None)):
         path = output / f"reject-{name}.lean"
         path.write_text('import Compiler.SolidityImport.Import\n'
             'solidity_import rejected from "Contracts/SolidityImportSmoke" entry "LegacyArithmetic.sol"\n'
@@ -36,9 +36,13 @@ def rejection_controls(output):
             cwd=ROOT, text=True, capture_output=True, timeout=180)
         log = proc.stdout + proc.stderr
         path.with_suffix(".log").write_text(log)
-        if proc.returncode == 0 or "[solidity-import:unsupported]" not in log or reason not in log:
+        if reason is None:
+            if proc.returncode != 0:
+                raise HarnessError(f"supported payable mutation did not import: {log}")
+        elif proc.returncode == 0 or "[solidity-import:unsupported]" not in log or reason not in log:
             raise HarnessError(f"missing explicit legacy rejection for {name}: {log}")
-        reports.append({"function": name, "status": "source-rejected", "reason": reason})
+        reports.append({"function": name, "status": "admitted" if reason is None else "source-rejected",
+                        "reason": reason})
     write_json(output / "rejections.json", reports)
     for name, compiler, evm, via_ir, reason in (
         ("compiler-suffix", "0.7.6", "istanbul", "false", "this importer is pinned to solc"),

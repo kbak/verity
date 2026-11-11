@@ -1,4 +1,5 @@
 import Compiler.SolidityImport.TransactionAccess
+import Compiler.SolidityImport.ValueTransactions
 import Compiler.Hex
 import Compiler.Keccak.Sponge
 import Compiler.CompilationModel.AbiHelpers
@@ -171,6 +172,9 @@ def execute (model : CompilationModel) (oracle : DenoteOracle) (input : Json)
     (fn, (KeccakEngine.keccak256_selector (functionSignature fn)).toNat)
   unless (dispatch.map Prod.snd).eraseDups.length == dispatch.length do
     throw "ambiguous model function selectors"
+  let valueTransactions ← match input.getObjVal? "valueTransactions" with
+    | .error _ => pure false
+    | .ok enabled => enabled.getBool?
   let transactions ← (← input.getObjVal? "transactions").getArr?
   let mut rows := #[]
   let mut ids : List String := []
@@ -205,7 +209,8 @@ def execute (model : CompilationModel) (oracle : DenoteOracle) (input : Json)
     let target ← getWord transaction "target"
     unless target == account do throw "foreign model target not supported by scalar adapter"
     let value ← getWord transaction "value"
-    unless value == 0 do throw "model adapter does not yet account for value transfers"
+    unless value == 0 || valueTransactions do
+      throw "nonzero value requires explicit zero-fee value transactions"
     let timestamp ← getWord transaction "timestamp"
     let number ← getWord transaction "blockNumber"
     let observed ← (← (← transaction.getObjVal? "observe").getArr?).toList.mapM pair
@@ -221,13 +226,17 @@ def execute (model : CompilationModel) (oracle : DenoteOracle) (input : Json)
     let context := match exactSize with
       | none => context
       | some size => { context with calldataSize := Uint256.ofNat size }
-    let initial := beginTransaction context
-    let publicResult := denoteFunction oracle model fn tx initial
+    let entry := beginTransaction context
+    let prepared ← if valueTransactions then ValueTransactions.prepare entry
+      else pure ({ rollbackWorld := entry, callWorld := entry } : ValueTransactions.Prepared)
+    let initial := prepared.callWorld
+    let publicResult := ValueTransactions.denotePrepared oracle model fn tx initial
       (byteCalls := byteCalls) (calldataSize := exactSize)
     let bindings := if exactSize.any (· < 4 + 32 * fn.bindingParams.length) then none
       else bindExternalParams selector fn.bindingParams args
     let result : TracedFrameResult ←
-      match bindings with
+      if !ValueTransactions.acceptsValue fn value then pure ⟨⟨false, [], initial, false⟩, []⟩
+      else match bindings with
       | none => pure ⟨⟨false, [], initial, false⟩, []⟩
       | some bindings =>
           executeTracedBody oracle (effectiveFields model) initial
@@ -244,6 +253,7 @@ def execute (model : CompilationModel) (oracle : DenoteOracle) (input : Json)
     if !publicResult.success then
       if let some bytes := publicResult.revertData then
         unless result.frame.data == bytes do throw "traced revert bytes differ from public Denote"
+    let result := { result with frame := ValueTransactions.settle prepared result.frame }
     let emitted ← result.frame.world.events.mapM (encodeEvent account model.events)
     let touched ← result.touched.filterMapM fun key =>
       match key with

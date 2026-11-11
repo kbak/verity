@@ -119,9 +119,9 @@ partial def validateLegacyDeclaration (node : Json) (encodingInput : Bool := fal
         validateLegacyControlFlow node
         LegacyArrays.validateDeclaration node
       if kind == "FunctionDefinition" then
-        unless #[some "pure", some "view", some "nonpayable"].contains
+        unless #[some "pure", some "view", some "nonpayable", some "payable"].contains
             (optStr node "stateMutability") do
-          failAt node "Solidity 0.7.6 payable functions are outside the state-transition slice"
+          failAt node "unsupported Solidity 0.7.6 function mutability"
       if let some ty := (field? node "typeDescriptions").bind (optStr · "typeString") then
         if ty.startsWith "enum " then
           let ref := (field? node "referencedDeclaration").bind (·.getNat?.toOption)

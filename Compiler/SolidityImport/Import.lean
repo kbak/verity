@@ -14675,7 +14675,8 @@ private def lowerRoot (fn : Json) : M (Array Stmt × Array SrcParam) := do
     return ← lowerPublicVarGetter fn
   let rootId ← mNat (← mField fn "id")
   modify fun e => { e with stack := [rootId] }
-  if optStr fn "stateMutability" == some "payable" && (← get).stateVars.isEmpty then
+  if optStr fn "stateMutability" == some "payable" && (← get).stateVars.isEmpty &&
+      !(← get).legacyWrapping then
     failAt fn "payable entry points require value-transfer semantics and are unsupported"
   if (← get).legacyWrapping then
     for key in ["parameters", "returnParameters"] do
@@ -15505,7 +15506,8 @@ private def importSlice
       (failAt fn "raw calls require a storage-free trailing continuation").run' env
     specs := specs.push
       { name := functionName, params := modelParams.toList, returnType := none,
-        returns := returns.toList, isView, body := body.toList,
+        returns := returns.toList, isView,
+        isPayable := optStr fn "stateMutability" == some "payable", body := body.toList,
         abiDecoding := if env.explicitAbi then .explicitPrelude else .standard,
         allowPostInteractionWrites := onlyStaticCallCEIBarriers body.toList ||
           onlyClosedTransportCEIBarriers body.toList ||

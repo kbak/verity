@@ -36,7 +36,7 @@ CASES = {
         'function run(E e) public pure returns(uint256) { return uint256(h(e)); }',
         'run(E)', 'enum helper returns are outside'),
     'payable-entry': (FUNCTION.replace('public returns', 'public payable returns') + CALL + '}',
-                       SIGNATURE, 'payable'),
+                       SIGNATURE, None),
 }
 
 
@@ -58,11 +58,14 @@ def run(output, prepared=False):
         proc = run_bounded(['lake', 'env', 'lean', driver], timeout=180)
         log = proc.stdout + proc.stderr
         driver.with_suffix('.log').write_text(log)
-        if proc.returncode == 0 or '[solidity-import:unsupported]' not in log or reason not in log:
+        if reason is None:
+            if proc.returncode != 0:
+                raise HarnessError(f'{name}: supported payable root did not import: {log}')
+        elif proc.returncode == 0 or '[solidity-import:unsupported]' not in log or reason not in log:
             raise HarnessError(f'{name}: missing located rejection: {log}')
-        reports.append({'case': name, 'diagnostic': reason})
+        reports.append({'case': name, 'status': 'admitted' if reason is None else 'rejected', 'diagnostic': reason})
     write_json(output / 'results.json', {'passed': True, 'rejections': reports})
-    print(f'{len(reports)} raw-call rejection controls passed', flush=True)
+    print(f'{len(reports)} raw-call admission/rejection controls passed', flush=True)
 
 
 if __name__ == '__main__':

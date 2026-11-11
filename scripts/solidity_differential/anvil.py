@@ -138,7 +138,7 @@ class SequenceAdapter:
     emitted events are observed without normalization.
     """
     def __init__(self, directory, bytecodes, initial_storage=(), calldata_key='data', observer=None,
-                 impersonated_senders=(), initial_balances=()):
+                 impersonated_senders=(), initial_balances=(), zero_fee=False):
         self.directory = Path(directory)
         self.bytecodes = tuple(bytecodes)
         self.initial_storage = tuple(tuple(row) for row in initial_storage)
@@ -147,6 +147,9 @@ class SequenceAdapter:
         self.impersonated_senders = tuple(impersonated_senders)
         from .deployment import initial_balances as validate_balances
         self.initial_balances = validate_balances(initial_balances)
+        if type(zero_fee) is not bool:
+            raise HarnessError('zero-fee transaction mode must be boolean')
+        self.zero_fee = zero_fee
         self.runs = 0
 
     def __call__(self, transactions, plan):
@@ -190,7 +193,12 @@ class SequenceAdapter:
                 request = {'from': transaction['sender'], 'to': transaction['target'],
                            'data': transaction[self.calldata_key], 'value': transaction['value'],
                            'gas': hex(10000000)}
+                if self.zero_fee:
+                    node.rpc('anvil_setNextBlockBaseFeePerGas', '0x0')
+                    request['gasPrice'] = '0x0'
                 result = node.transact(request)
+                if self.zero_fee and int(result['receipt']['effectiveGasPrice'], 16) != 0:
+                    raise HarnessError('zero-fee transaction charged gas')
                 block = node.rpc('eth_getBlockByHash', result['receipt']['blockHash'], False)
                 if int(block['timestamp'], 16) != timestamp or int(block['number'], 16) != number:
                     raise HarnessError('mined transaction environment changed')
@@ -199,7 +207,7 @@ class SequenceAdapter:
                 receipts.append({'id': transaction['id'], 'transactionHash': result['receipt']['transactionHash']})
         (directory / 'sequence.json').write_text(json.dumps(
             {'bytecodes': self.bytecodes, 'initialStorage': self.initial_storage,
-             'initialBalances': self.initial_balances,
+             'initialBalances': self.initial_balances, 'zeroFee': self.zero_fee,
              'calldataKey': self.calldata_key, 'node': node.provenance,
              'impersonatedSenders': self.impersonated_senders,
              'transactions': transactions, 'receipts': receipts,

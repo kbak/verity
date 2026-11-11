@@ -300,6 +300,7 @@ def quoteFunction (f : FunctionSpec) : m Term := do
          proofStatus := $status } : Compiler.CompilationModel.LocalObligation))
   `(({ name := $(quote f.name), params := $(← list params), abiDecoding := $abiDecoding, returnType := none,
        returns := $(← list (← f.returns.mapM quoteParamType)), isView := $(quote f.isView),
+       isPayable := $(quote f.isPayable),
        allowPostInteractionWrites := $(quote f.allowPostInteractionWrites),
        reentrancyTrusted := $(quote f.reentrancyTrusted),
        body := $(← list (← f.body.mapM quoteStmt)), localObligations := $(← list obligations) } : Compiler.CompilationModel.FunctionSpec))

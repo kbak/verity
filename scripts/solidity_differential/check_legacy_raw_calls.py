@@ -137,7 +137,7 @@ def transactions(seed, caller, accounts, random_cases, *, methods=('run', 'forwa
 
 def campaign(directory, *, optimized=False, seed=7401, random_cases=24,
              fixture=FIXTURE, driver_template=DRIVER, extra_sources=None,
-             make_transactions=transactions):
+             make_transactions=transactions, value_transactions=False, contract_name=None):
     directory = Path(directory).resolve()
     directory.mkdir(parents=True, exist_ok=False)
     command(['turbo-lean', '--json', 'build', 'Compiler.SolidityImport.Import',
@@ -168,7 +168,7 @@ def campaign(directory, *, optimized=False, seed=7401, random_cases=24,
             'metadata': {'bytecodeHash': 'none'}, 'outputSelection': {'*': {'*': [
                 'evm.bytecode.object', 'evm.methodIdentifiers']}}}}, directory,
         directory / 'source-solc', solc=Path.cwd() / '.lake/solidity-import/solc-0.7.6'
-        )['contracts']['Sequence.sol'][fixture.stem]
+        )['contracts']['Sequence.sol'][contract_name or fixture.stem]
     identifiers = source_contract['evm']['methodIdentifiers']
     write_json(directory / 'selectors.json', [int(identifiers[s.replace("Enum.Operation", "uint8").replace("Operation", "uint8")], 16)
         for s in roots(template)])
@@ -188,13 +188,15 @@ def campaign(directory, *, optimized=False, seed=7401, random_cases=24,
         directory, directory / 'oracle-solc', solc=SOLC)['contracts'][ORACLE.name]['RawCallOracle']['evm']
     caller, accounts = address(0), [address(1), address(2)]
     balances = [(caller, FUNDS), (accounts[0], 5), (accounts[1], 17), (EMPTY, 0)]
+    if value_transactions:
+        balances.append((SENDER, 1 << 200))
     deployments = ['0x' + mock['bytecode']['object']] * 2
     calls, expected = make_transactions(seed, caller, accounts, random_cases)
     write_json(directory / 'transactions.json', calls)
     write_json(directory / 'expectations.json', expected)
     environment = {'program': 'raw-context-echo-v1', 'accounts': [str(int(a, 16)) for a in accounts],
                    'emptyAccounts': [str(int(EMPTY, 16))]}
-    plan = sorted([*accounts, EMPTY])
+    plan = sorted([*accounts, EMPTY, *([SENDER] if value_transactions else [])])
     deployment_rows = {}
 
     def observe(route):
@@ -206,8 +208,9 @@ def campaign(directory, *, optimized=False, seed=7401, random_cases=24,
 
     denote = Denote(directory / 'B', driver, caller, byte_call_environment=environment,
         account_code=[(a, '0x' + mock['deployedBytecode']['object']) for a in accounts],
-        account_nonce=1, account_nonces=[(a, 1) for a in accounts], initial_balances=balances,
-        timeout=1800)
+        account_nonce=1, account_nonces=[(a, 1) for a in accounts] + ([(SENDER, 3)] if value_transactions else []),
+        initial_balances=balances,
+        timeout=1800, value_transactions=value_transactions)
 
     def model_adapter(txs, slots):
         copied = copy.deepcopy(txs)
@@ -219,10 +222,10 @@ def campaign(directory, *, optimized=False, seed=7401, random_cases=24,
 
     adapters = {
         'source': EVM(directory / 'A', ['0x' + source_contract['evm']['bytecode']['object'],
-            *deployments], observer=observe('source'), initial_balances=balances),
+            *deployments], observer=observe('source'), initial_balances=balances, zero_fee=value_transactions),
         'model': model_adapter,
         'compiled': EVM(directory / 'C', ['0x' + next(iter(model.values()))['evm']['bytecode']['object'],
-            *deployments], observer=observe('compiled'), initial_balances=balances)}
+            *deployments], observer=observe('compiled'), initial_balances=balances, zero_fee=value_transactions)}
     result = replay_three_routes(calls, adapters)
     observations = {route: [{**row, 'deployment': deployment_rows[route][row['id']]} for row in rows]
                     for route, rows in result['observations'].items()}
@@ -239,7 +242,11 @@ def campaign(directory, *, optimized=False, seed=7401, random_cases=24,
             wanted = {(a, slot): value for a, slot, value in exp['storage']}
             correct_storage = all(seen.get(k) == v for k, v in wanted.items()) and all(
                 wanted.get(k, 0) == v for k, v in seen.items())
-            if row['status'] != exp['status'] or row['data'] != exp['data'] or not correct_storage or \
+            accounts_seen = [row['deployment']['creator'], *row['deployment']['accounts']]
+            nonces = {a['address']: a['nonce'] for a in accounts_seen}
+            extra_match = ('events' not in exp or row['events'] == exp['events']) and (
+                'nonces' not in exp or nonces == exp['nonces'])
+            if not extra_match or row['status'] != exp['status'] or row['data'] != exp['data'] or not correct_storage or \
                     observed_balances != exp['balances']:
                 mismatches.append({'route': route, 'id': row['id'], 'actual': row,
                                    'expected': exp})

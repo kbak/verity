@@ -2388,3 +2388,22 @@ an independently specified echo/context child and explicit account balances;
 mutation controls require runtime divergences, not compilation failures. External
 log fidelity is not tested by that fixture. See `docs/SOLIDITY_IMPORT.md` for the
 admitted syntax and remaining limits.
+
+
+### Explicit payable transaction envelope (experimental)
+
+Named legacy payable entrypoints now preserve source payability in the model and
+compiler. The `ValueTransactions` layer assumes an authorized, code-free EOA and
+zero gas fees; it checks funds, nonce capacity and balance coherence before
+execution. It advances the sender nonce outside the reversible value transfer.
+Failed execution restores incoming funds and all body/child effects while keeping
+that nonce. This is distinct from the existing body-only Denote API.
+
+The envelope is opt-in in sequence replay. Differential checks set real EVM
+transaction gas prices and block base fees to zero and compare sender/recipient
+balances and nonces exactly. Independent expectations and six runtime mutations
+validate the finite scenarios; no failed build counts as a mutation detection.
+Kernel proofs establish balance conservation at preparation, nonce reservation
+and settlement projections. No new project axiom is added. Gas exhaustion,
+fee/reward accounting, signature validity, EIP-7702, receive/fallback dispatch,
+constructors and complete application execution remain outside this slice.

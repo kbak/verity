@@ -34,7 +34,7 @@ def _calldata(tx):
 class SequenceAdapter:
     def __init__(self, directory, driver, account, initial_storage=(), identity=None, byte_call_environment=None,
                  lean_command=('lake', 'env', 'lean', '--run'), account_nonce=None, timeout=600,
-                 account_code=(), initial_balances=(), account_nonces=()):
+                 account_code=(), initial_balances=(), account_nonces=(), value_transactions=False):
         self.directory = Path(directory).resolve()
         self.driver = Path(driver).resolve()
         if not isinstance(lean_command, (list, tuple)) or not lean_command or any(
@@ -61,6 +61,9 @@ class SequenceAdapter:
             raise HarnessError('duplicate foreign account nonce')
         self.account_nonce = account_nonce
         self.timeout = timeout
+        if type(value_transactions) is not bool:
+            raise HarnessError('value transaction mode must be boolean')
+        self.value_transactions = value_transactions
         # Foreign runtime code as deployed on the EVM routes (observed by code-length reads).
         self.account_code = []
         for owner, code in account_code:
@@ -119,6 +122,7 @@ class SequenceAdapter:
                 converted[-1]['observeAccounts'] = [str(int(_bytes(a, 20), 16)) for a in tx['observeAccounts']]
         payload = {'account': str(int(self.account, 16)),
                    'storage': self.initial_storage, 'transactions': converted}
+        payload['valueTransactions'] = self.value_transactions
         payload['initialBalances'] = self.initial_balances
         payload['accountNonces'] = self.account_nonces
         if self.account_nonce is not None:
