@@ -2357,3 +2357,80 @@ equivalence. Those account inputs, complete gas/memory integration and the
 remaining source-admission obligations still have to be implemented.
 
 `Compiler.SolidityImport.AdversarialEntryPointInvariants` lifts explicit per-entry-point invariants to finite sequences with a separately selected permitted Denote oracle at each call. Permission and context preservation are hypotheses, not trusted axioms or claims that arbitrary external behavior preserves an invariant. The execution relation is the real `Transactions.executeBody`; unobserved instrumentation failures cannot form steps. This is a frame-level rule, with ABI/dispatch/value-transfer obligations left explicit.
+
+
+### Legacy raw-call boundary (experimental)
+
+`SolidityRawCall.module` is an assumed closed ECM: metadata, argument count and
+transport identity must match exactly. No new project axiom is introduced.
+`RawCalls.execute` implements functional CALL value transfer and failed-child
+rollback around an explicit `ByteExternalCall.Adversary`; it supplies no EVM
+interpreter or implicit external program. Its environment must provide a coherent
+complete account/storage/balance world, execution of the target's code (including
+reentrancy or delegated writes), and the specified gas/depth behavior. Unknown
+requests fail the traced validation instrument instead of fabricating a response.
+`CallWorld.commitCalleeWorld` is the extracted existing commit projection, shared
+with typed calls; its execution-context restoration behavior is unchanged.
+
+Raw calls are admitted only when every continuation after interaction is free
+of caller storage reads/writes; scalar events with storage-free arguments are
+allowed. Consecutive calls may themselves change any account. The CEI and reentrancy opt-outs are checked syntactically, not proved.
+Enum helper inputs and comparisons retain ABI-v1 cleaning and use-site INVALID
+checks. Full-buffer terminal revert forwarding uses exact bytes; arbitrary
+return-data copies and nonzero output areas remain outside admission.
+
+`RawCallProofs.execute_failure_world` proves that any successful model evaluation
+which reports child failure restores the entire entry world. The context lemmas
+prove inherited delegate fields and parent context restoration. They do not prove
+the value-transfer implementation, arbitrary callee correctness, gas equivalence,
+or source/importer/compiler equivalence. Three-route differential campaigns use
+an independently specified echo/context child and explicit account balances;
+mutation controls require runtime divergences, not compilation failures. External
+log fidelity is not tested by that fixture. See `docs/SOLIDITY_IMPORT.md` for the
+admitted syntax and remaining limits.
+
+
+### Explicit payable transaction envelope (experimental)
+
+Named legacy payable entrypoints now preserve source payability in the model and
+compiler. The `ValueTransactions` layer assumes an authorized, code-free EOA and
+zero gas fees; it checks funds, nonce capacity and balance coherence before
+execution. It advances the sender nonce outside the reversible value transfer.
+Failed execution restores incoming funds and all body/child effects while keeping
+that nonce. This is distinct from the existing body-only Denote API.
+
+The envelope is opt-in in sequence replay. Differential checks set real EVM
+transaction gas prices and block base fees to zero and compare sender/recipient
+balances and nonces exactly. Independent expectations and six runtime mutations
+validate the finite scenarios; no failed build counts as a mutation detection.
+Kernel proofs establish balance conservation at preparation, nonce reservation
+and settlement projections. No new project axiom is added. Gas exhaustion,
+fee/reward accounting, signature validity, EIP-7702, receive/fallback dispatch,
+constructors and complete application execution remain outside this slice.
+
+
+### Ordered external logs and rollback (experimental)
+
+The event journal now distinguishes legacy typed ABI records from complete opcode
+observations (`EncodedLog`: execution address, topics, arbitrary bytes). External
+raw-call success must preserve the exact pre-call prefix and append complete logs
+with at most four topics. This guard does not prove that a supplied external
+program emitted those logs: the external environment still owns that obligation.
+The sequence runner never interprets foreign logs using the caller's ABI. Public
+Denote exposes the full journal through `eventTrace`; its older `events` projection
+is only a compatibility word view.
+
+Post-call scalar events are admitted only with storage-free arguments. This
+syntactic extension creates no new interaction and does not permit post-call
+storage access. Child failure retains earlier logs; outer failure rolls back the
+whole body journal with account effects and value transfers. Eight model laws in
+`EventLogProofs` cover journal append/order, unchanged accounts, prefix checking,
+child commit/failure and outer settlement. They introduce no project axioms and
+are included in both generated axiom inventories.
+
+The finite `PostCallLogMocks` external program is validation support and is excluded
+from the verified-module population, like the existing external mocks. The core
+journal implementation and proofs remain included. Three-route runtime checks,
+independent expectations, six runtime mutations and nine boundary controls test
+the scoped behavior. External program correspondence, gas/call-depth adequacy,
+source/compiler equivalence and full application execution are not proved.

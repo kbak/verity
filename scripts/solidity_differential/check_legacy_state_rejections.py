@@ -5,7 +5,7 @@ from pathlib import Path
 from .engine import HarnessError, command, run_bounded, write_json
 
 CASES = {
-    'payable': ('function run(uint256 x) public payable { stored = x; }', 'payable functions are outside'),
+    'payable': ('function run(uint256 x) public payable { stored = x; }', None),
     'modifier-assert': ('modifier guard(uint256 x) { assert(x != 0); _; } '
         'function run(uint256 x) public guard(x) { stored = x; }', 'assert/INVALID is not modeled'),
     'modifier-division': ('modifier guard(uint256 x) { stored = 12 / x; _; } '
@@ -40,9 +40,12 @@ def run(output):
         proc = run_bounded(['lake', 'env', 'lean', driver], timeout=180)
         log = proc.stdout + proc.stderr
         driver.with_suffix('.log').write_text(log)
-        if proc.returncode == 0 or '[solidity-import:unsupported]' not in log or reason not in log:
+        if reason is None:
+            if proc.returncode != 0:
+                raise HarnessError(f'{name}: supported payable root did not import: {log}')
+        elif proc.returncode == 0 or '[solidity-import:unsupported]' not in log or reason not in log:
             raise HarnessError(f'{name}: missing located rejection: {log}')
-        reports.append({'case': name, 'diagnostic': reason})
+        reports.append({'case': name, 'status': 'admitted' if reason is None else 'rejected', 'diagnostic': reason})
     write_json(output / 'results.json', {'passed': True, 'rejections': reports})
 
 

@@ -1253,6 +1253,8 @@ private partial def lowerYul (j : Json) : M Val := do
           if let some v ← yulByteBufferLoad? args[0]! lowerYul then
             return v
         failAt j "unsupported Yul builtin mload"
+      if fname == "returndatasize" && args.isEmpty && (← get).legacyWrapping then
+        return { pre := #[], expr := .returndataSize }
       if fname == "create2" then
         failAt j "Yul create2 must be the whole value of a Yul assignment or variable declaration"
       let expectedArity? : Option Nat := match fname with
@@ -1463,6 +1465,7 @@ private def lowerYulCreate2? (node : Json) (lowerYulFn : Json → M Val) : M (Op
 
 /-- A Yul assignment or declaration value; `create2` is admitted only here. -/
 private def lowerYulValue (node : Json) : M Val := do
+  if let some value ← LegacyCalls.lower? node lowerYul then return value
   if let some value ← lowerYulCreate2? node lowerYul then return value
   lowerYul node
 
@@ -1976,6 +1979,8 @@ private partial def lowerYulStmtSlice (j : Json) (stmts refs : Array Json) (retN
   pure out
 
 private partial def lowerAssemblyStmts (j : Json) (retName : String) : M (Array Stmt) := do
+  if (← get).legacyWrapping && LegacyCalls.forwardingRevert j then
+    return #[.revertReturndata]
   if (← get).legacyWrapping then validateLegacyAssemblyReads j
   let assignedInAsm := bodyAssignedIds j
   if !assignedInAsm.isEmpty then
@@ -3679,6 +3684,9 @@ private partial def lowerBinary (j : Json) : M Val := do
     let targetId := resolveInContracts env env.linearizedBases.toList fnId |>.getD fnId
     return ← inlineFn targetId #[.scalar left, .scalar right] j
   let common ← mStr (← mField (← mField j "commonType") "typeString")
+  if env.legacyWrapping && common.startsWith "enum " then
+    left ← LegacyMemory.checkedEnum leftNode common left
+    right ← LegacyMemory.checkedEnum rightNode common right
   -- Solidity folds literal sums in unbounded integer arithmetic. Admit only
   -- exact natural literals whose sum remains representable as an EVM word.
   if common.startsWith "int_const" && op == "+" then
@@ -7026,6 +7034,9 @@ private partial def bindHelperParams (params : Array Json) (args : Array CallArg
     let pid ← mNat (← mField p "id")
     let pty ← mType p
     discard (validateEnumTypeIfNeeded p pty)
+    if pty.startsWith "enum " then
+      let members ← resolveEnumMembers p pty
+      modify fun e => { e with enumBounds := e.enumBounds.insert pid members.size }
     let argNode ← argumentAt at_ i
     let argTy ← mType argNode
     let some rawArg := args[i]? | failAt at_ s!"missing argument {i}"
@@ -14664,7 +14675,8 @@ private def lowerRoot (fn : Json) : M (Array Stmt × Array SrcParam) := do
     return ← lowerPublicVarGetter fn
   let rootId ← mNat (← mField fn "id")
   modify fun e => { e with stack := [rootId] }
-  if optStr fn "stateMutability" == some "payable" && (← get).stateVars.isEmpty then
+  if optStr fn "stateMutability" == some "payable" && (← get).stateVars.isEmpty &&
+      !(← get).legacyWrapping then
     failAt fn "payable entry points require value-transfer semantics and are unsupported"
   if (← get).legacyWrapping then
     for key in ["parameters", "returnParameters"] do
@@ -15487,12 +15499,19 @@ private def importSlice
       else do
         let mutability ← str (← field fn "stateMutability")
         pure (mutability == "view" || mutability == "pure")
+    let rawCalls := Stmt.anyDeepList (fun
+      | .ecm mod _ => isClosedRawCall mod
+      | _ => false) body.toList
+    if rawCalls && !onlyTrailingCallReentrancyWindows body.toList then
+      (failAt fn "raw calls require a storage-free trailing continuation").run' env
     specs := specs.push
       { name := functionName, params := modelParams.toList, returnType := none,
-        returns := returns.toList, isView, body := body.toList,
+        returns := returns.toList, isView,
+        isPayable := optStr fn "stateMutability" == some "payable", body := body.toList,
         abiDecoding := if env.explicitAbi then .explicitPrelude else .standard,
         allowPostInteractionWrites := onlyStaticCallCEIBarriers body.toList ||
-          onlyClosedTransportCEIBarriers body.toList,
+          onlyClosedTransportCEIBarriers body.toList ||
+          (rawCalls && onlyTrailingCallReentrancyWindows body.toList),
         reentrancyTrusted := onlyCreate2ReentrancyWindows body.toList ||
           onlyTrailingCallReentrancyWindows body.toList,
         localObligations := (if abiGuards.isEmpty && !env.rootMsgDataReturn && (collectUnguardedUnsafeBoundaryMechanicsFromStmts body.toList).isEmpty then [] else [{
@@ -15524,9 +15543,10 @@ private def importSlice
             proofStatus := .unchecked }] else []) ++
           (if onlyTrailingCallReentrancyWindows body.toList then [{
             name := "solidity_trailing_low_level_call_reentrancy"
-            obligation := "Every external interaction that can re-enter is a closed value-free " ++
-              "low-level CALL after which the body reads and writes no storage and logs " ++
-              "nothing, so a re-entrant entrypoint observes only the completed state " ++
+            obligation := "Every external interaction that can re-enter is a closed low-level " ++
+              "CALL or DELEGATECALL after which the body reads and writes no storage. " ++
+              "Scalar logs use storage-free arguments and make no call, so a re-entrant " ++
+              "entrypoint observes only the completed state " ++
               "updates. Denote lets the callee's committed world change any account, " ++
               "including this one. The trailing position is checked by the importer, not proved."
             proofStatus := .unchecked }] else []) }
@@ -15629,6 +15649,9 @@ private def importSlice
   let legacyAbiSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyAbi.lean"
   let legacyMemorySrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyMemory.lean"
   let signatureSrc ← moduleText sourceRoot "Verity/Core/Model/LegacySignatureCalls.lean"
+  let rawCallsSrc ← moduleText sourceRoot "Verity/Core/Model/RawCalls.lean"
+  let callWorldSrc ← moduleText sourceRoot "Verity/Core/Model/CallWorld.lean"
+  let legacyCallsSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyCalls.lean"
   let ecmSrc ← moduleText sourceRoot "Verity/Core/Model/ECM.lean"
   let denoteSrc ← moduleText sourceRoot "Verity/Core/Model/Denote.lean"
   -- JSON framing prevents distinct file/signature lists from sharing a
@@ -15653,6 +15676,9 @@ private def importSlice
       ("AbiLowering.lean", Json.str abiLoweringSrc),
       ("ExprHelpers.lean", Json.str exprHelpersSrc),
       ("LegacySignatureCalls.lean", Json.str signatureSrc),
+      ("RawCalls.lean", Json.str rawCallsSrc),
+      ("CallWorld.lean", Json.str callWorldSrc),
+      ("LegacyCalls.lean", Json.str legacyCallsSrc),
       ("ECM.lean", Json.str ecmSrc), ("Denote.lean", Json.str denoteSrc)])]
   let digest := sha256Hex digestInput.compress.toUTF8
   let report : ImportReport :=

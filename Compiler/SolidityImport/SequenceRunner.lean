@@ -1,4 +1,5 @@
 import Compiler.SolidityImport.TransactionAccess
+import Compiler.SolidityImport.ValueTransactions
 import Compiler.Hex
 import Compiler.Keccak.Sponge
 import Compiler.CompilationModel.AbiHelpers
@@ -47,6 +48,11 @@ private def eventWord (ty : ParamType) (value : Nat) : Except String Nat := do
 Denote's legacy eventless executor retains arguments in source order. -/
 private def encodeEvent (account : Nat) (definitions : List EventDef)
     (event : Verity.Event) : Except String Json := do
+  if let some entry := event.rawLog then
+    unless entry.topics.length ≤ 4 do throw "logged event has more than four topics"
+    return Json.mkObj [("address", toJson (hexAddress entry.emitter.val)),
+      ("topics", toJson (entry.topics.map fun topic => hexWord topic.val)),
+      ("data", toJson (hexBytes entry.data))]
   let [definition] := definitions.filter (·.name == event.name)
     | throw s!"observed event must resolve uniquely: {event.name}"
   let topic0 := hexBytes (KeccakEngine.keccak256_str (eventSignature definition)).data.toList
@@ -146,12 +152,34 @@ def execute (model : CompilationModel) (oracle : DenoteOracle) (input : Json)
       | throw "account nonce exceeds 64 bits"
     let current := world.accountWorld (Address.ofNat account)
     world := world.writeAccount (Address.ofNat account) { current with nonce := bounded }
+  if let .ok rows := input.getObjVal? "initialBalances" then
+    let balances ← (← rows.getArr?).toList.mapM pair
+    unless (balances.map Prod.fst).eraseDups.length == balances.length do
+      throw "duplicate initial balance account"
+    for (owner, balance) in balances do
+      unless owner < 2^160 do throw "initial balance account exceeds address width"
+      let address := Address.ofNat owner
+      world := world.writeAccount address
+        { world.accountWorld address with balance := Uint256.ofNat balance }
+  if let .ok rows := input.getObjVal? "accountNonces" then
+    let nonces ← (← rows.getArr?).toList.mapM pair
+    unless (nonces.map Prod.fst).eraseDups.length == nonces.length do
+      throw "duplicate foreign nonce account"
+    for (owner, nonce) in nonces do
+      unless owner < 2^160 && owner != account do throw "invalid foreign nonce account"
+      let some bounded := (if h : nonce < 2^64 then some (⟨nonce, h⟩ : Fin (2^64)) else none)
+        | throw "foreign nonce exceeds 64 bits"
+      let address := Address.ofNat owner
+      world := world.writeAccount address { world.accountWorld address with nonce := bounded }
   let externalFns := model.functions.filter fun fn =>
     !fn.isInternal && !isInteropEntrypointName fn.name
   let dispatch := externalFns.map fun fn =>
     (fn, (KeccakEngine.keccak256_selector (functionSignature fn)).toNat)
   unless (dispatch.map Prod.snd).eraseDups.length == dispatch.length do
     throw "ambiguous model function selectors"
+  let valueTransactions ← match input.getObjVal? "valueTransactions" with
+    | .error _ => pure false
+    | .ok enabled => enabled.getBool?
   let transactions ← (← input.getObjVal? "transactions").getArr?
   let mut rows := #[]
   let mut ids : List String := []
@@ -186,7 +214,8 @@ def execute (model : CompilationModel) (oracle : DenoteOracle) (input : Json)
     let target ← getWord transaction "target"
     unless target == account do throw "foreign model target not supported by scalar adapter"
     let value ← getWord transaction "value"
-    unless value == 0 do throw "model adapter does not yet account for value transfers"
+    unless value == 0 || valueTransactions do
+      throw "nonzero value requires explicit zero-fee value transactions"
     let timestamp ← getWord transaction "timestamp"
     let number ← getWord transaction "blockNumber"
     let observed ← (← (← transaction.getObjVal? "observe").getArr?).toList.mapM pair
@@ -202,13 +231,17 @@ def execute (model : CompilationModel) (oracle : DenoteOracle) (input : Json)
     let context := match exactSize with
       | none => context
       | some size => { context with calldataSize := Uint256.ofNat size }
-    let initial := beginTransaction context
-    let publicResult := denoteFunction oracle model fn tx initial
+    let entry := beginTransaction context
+    let prepared ← if valueTransactions then ValueTransactions.prepare entry
+      else pure ({ rollbackWorld := entry, callWorld := entry } : ValueTransactions.Prepared)
+    let initial := prepared.callWorld
+    let publicResult := ValueTransactions.denotePrepared oracle model fn tx initial
       (byteCalls := byteCalls) (calldataSize := exactSize)
     let bindings := if exactSize.any (· < 4 + 32 * fn.bindingParams.length) then none
       else bindExternalParams selector fn.bindingParams args
     let result : TracedFrameResult ←
-      match bindings with
+      if !ValueTransactions.acceptsValue fn value then pure ⟨⟨false, [], initial, false⟩, []⟩
+      else match bindings with
       | none => pure ⟨⟨false, [], initial, false⟩, []⟩
       | some bindings =>
           executeTracedBody oracle (effectiveFields model) initial
@@ -225,6 +258,9 @@ def execute (model : CompilationModel) (oracle : DenoteOracle) (input : Json)
     if !publicResult.success then
       if let some bytes := publicResult.revertData then
         unless result.frame.data == bytes do throw "traced revert bytes differ from public Denote"
+    unless decide (result.frame.world.events = publicResult.eventTrace) do
+      throw "traced event journal differs from public Denote"
+    let result := { result with frame := ValueTransactions.settle prepared result.frame }
     let emitted ← result.frame.world.events.mapM (encodeEvent account model.events)
     let touched ← result.touched.filterMapM fun key =>
       match key with

@@ -18,6 +18,14 @@ def _word(value):
     return value
 
 
+def initial_balances(rows):
+    """Validate an explicit account/balance prestate shared by all routes."""
+    result = [(_bytes(owner, 20), _word(value)) for owner, value in rows]
+    if len({owner for owner, _ in result}) != len(result):
+        raise HarnessError('duplicate initial balance account')
+    return result
+
+
 def validate_accounts(row):
     if not isinstance(row, dict) or set(row) != {'creator', 'accounts'}:
         raise HarnessError('complete deployment observations required')

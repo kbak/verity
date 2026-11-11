@@ -8,6 +8,58 @@ import sys
 from .engine import ROOT, WORKSPACE, MUTANT_BUILD_TIMEOUT, HarnessError, command, write_json
 
 MUTANTS = {
+    'post-log-emitter': ('Verity/Core/Model/EventLogs.lean',
+        'rawLog := some entry',
+        'rawLog := some { entry with emitter := world.thisAddress }'),
+    'post-log-payload': ('Verity/Core/Model/EventLogs.lean',
+        'rawLog := some entry',
+        'rawLog := some { entry with data := entry.data.drop 1 }'),
+    'post-log-order': ('Verity/Core/Model/RawCalls.lean',
+        'CallWorld.commitCalleeWorld before observed.world else before',
+        'CallWorld.commitCalleeWorld before { observed.world with events := before.events ++ '
+        '(observed.world.events.drop before.events.length).reverse } else before'),
+    'post-log-parent-prefix': ('Verity/Core/Model/RawCalls.lean',
+        'CallWorld.commitCalleeWorld before observed.world else before',
+        'CallWorld.commitCalleeWorld before observed.world else { before with events := [] }'),
+    'post-log-caller': ('Compiler/CompilationModel/Compile.lean',
+        'Stmt.emit eventName args => do\n'
+        '      compileEmit fields events dynamicSource eventName args internalFunctions',
+        'Stmt.emit _ _ => do\n      return []'),
+    'post-log-outer-rollback': ('Compiler/CompilationModel/Compile.lean',
+        'YulStmt.exprStmt (YulExpr.call "revert" [\n          YulExpr.lit 0,\n'
+        '          YulExpr.ident "__returndata_size"',
+        'YulStmt.exprStmt (YulExpr.call "return" [\n          YulExpr.lit 0,\n'
+        '          YulExpr.ident "__returndata_size"'),
+    'payable-credit': ('Compiler/SolidityImport/ValueTransactions.lean',
+        'balance := Uint256.ofNat (recipient.balance.val + amount)',
+        'balance := Uint256.ofNat recipient.balance.val'),
+    'payable-debit': ('Compiler/SolidityImport/ValueTransactions.lean',
+        'balance := Uint256.ofNat (source.balance.val - amount)',
+        'balance := Uint256.ofNat source.balance.val'),
+    'payable-rollback': ('Compiler/SolidityImport/ValueTransactions.lean',
+        'if result.success then result.world else prepared.rollbackWorld',
+        'if result.success then result.world else prepared.callWorld'),
+    'payable-nonce': ('Compiler/SolidityImport/ValueTransactions.lean',
+        'let rollbackWorld := world.writeAccount sender { source with nonce }',
+        'let rollbackWorld := world'),
+    'payable-guard': ('Compiler/SolidityImport/ValueTransactions.lean',
+        'fn.isPayable || value == 0', 'true'),
+    'payable-metadata': ('Compiler/SolidityImport/Import.lean',
+        'isPayable := optStr fn "stateMutability" == some "payable", body := body.toList,',
+        'isPayable := false, body := body.toList,'),
+    'raw-call-input-offset': ('Verity/Core/Model/Denote.lean',
+        'UInt8.ofNat (state.world.physicalByte (pointer + i)).val }',
+        'UInt8.ofNat (state.world.physicalByte (pointer + i + 1)).val }'),
+    'raw-call-value': ('Verity/Core/Model/Denote.lean',
+        'value := if delegated then state.world.msgValue.val else values[2]!',
+        'value := if delegated then state.world.msgValue.val else 0'),
+    'raw-call-rollback': ('Verity/Core/Model/RawCalls.lean',
+        'world := if observed.success then', 'world := if true then'),
+    'raw-call-delegate-opcode': ('Verity/Core/Model/ECM.lean',
+        '(.call (if delegated then "delegatecall" else "call")',
+        '(.call (if delegated then "staticcall" else "call")'),
+    'raw-call-enum-comparison': ('Compiler/SolidityImport/Import.lean',
+        'left ← LegacyMemory.checkedEnum leftNode common left', 'pure ()'),
     'import-legacy-calldata-source': ('Compiler/SolidityImport/LegacyMemory.lean',
         'copyCalldata destination source count)',
         'copyCalldata destination (.add source (.literal 1)) count)'),
@@ -240,6 +292,19 @@ def mutation_campaign(output, selected=None):
                 argv = [sys.executable, "-c",
                         "import sys; sys.path.insert(0, 'scripts'); "
                         "from solidity_differential.check_legacy_calldata_hash import main; sys.exit(main())",
+                        "--output", str(directory / ".lake/campaign")]
+            if name.startswith("post-log-"):
+                argv = [sys.executable, "-m", "solidity_differential.check_legacy_post_call_events",
+                        "--output", str(directory / ".lake/campaign")]
+            if name.startswith("payable-"):
+                argv = [sys.executable, "-c",
+                        "import sys; sys.path.insert(0, 'scripts'); "
+                        "from solidity_differential.check_legacy_payable import main; sys.exit(main())",
+                        "--output", str(directory / ".lake/campaign")]
+            if name.startswith("raw-call-"):
+                argv = [sys.executable, "-c",
+                        "import sys; sys.path.insert(0, 'scripts'); "
+                        "from solidity_differential.check_legacy_raw_calls import main; sys.exit(main())",
                         "--output", str(directory / ".lake/campaign")]
             # A pre-existing fixture divergence is not evidence that a mutation was
             # detected. Run the identical inputs in the private snapshot first.

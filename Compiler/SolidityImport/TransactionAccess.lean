@@ -33,7 +33,7 @@ private def mappingMemberKeys (oracle : DenoteOracle) (fields : List Field)
 def expressionAccesses (oracle : DenoteOracle) (fields : List Field)
     (state : DenoteState) : Expr → Except String (List Verity.StorageKey)
   | .literal _ | .param _ | .localVar _ => .ok []
-  | .caller | .contractAddress | .selfBalance | .txOrigin | .baseFee | .gasPrice | .blockTimestamp | .blockNumber | .chainid | .calldatasize | .returndataSize => .ok []
+  | .msgValue | .caller | .contractAddress | .selfBalance | .txOrigin | .baseFee | .gasPrice | .blockTimestamp | .blockNumber | .chainid | .calldatasize | .returndataSize => .ok []
   | .storage name => do
       let some (field, slot) := findFieldWithResolvedSlot fields name
         | throw s!"unknown observed field {name}"
@@ -92,6 +92,10 @@ def statementAccesses (oracle : DenoteOracle) (fields : List Field)
       return addressReads ++ valueReads ++ [.transient (wordNormalize slot)]
   | .ecm mod args => do
       match mod.byteTransport with
+      | some (.rawCall resultVar delegated) =>
+          let reads ← args.mapM (expressionAccesses oracle fields state)
+          let (_, touched) ← executeRawCall oracle fields state mod resultVar delegated args
+          return reads.flatten ++ touched
       | some (.legacyRecover resultVar) =>
           let reads ← args.mapM (expressionAccesses oracle fields state)
           let (_, touched) ← executeLegacySignatureCall oracle fields state mod resultVar none args

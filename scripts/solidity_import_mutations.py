@@ -490,6 +490,12 @@ solidity_import both from "{WORK / "base"}" entry "Slice.sol"
 # Compile and execute actual Denote mutants: a build failure is invalid,
 # not a detected semantic mutation. These regressions compare EVM bytes.
 DIFFERENTIAL_MUTANTS = (
+    'post-log-emitter', 'post-log-payload', 'post-log-order',
+    'post-log-parent-prefix', 'post-log-caller', 'post-log-outer-rollback',
+    'payable-credit', 'payable-debit', 'payable-rollback',
+    'payable-nonce', 'payable-guard', 'payable-metadata',
+    'raw-call-input-offset', 'raw-call-value', 'raw-call-rollback',
+    'raw-call-delegate-opcode', 'raw-call-enum-comparison',
     'import-legacy-calldata-source', 'import-legacy-calldata-length',
     'import-legacy-calldata-hash', 'import-legacy-calldata-enum-entry',
     'import-legacy-calldata-enum-invalid',
@@ -901,6 +907,15 @@ def tasks(update_golden: bool) -> list:
              ("ordered-signature-duplicate", 1, ordered_signature_mutation),
              ("legacy-state-transitions", 1, legacy_state_mutations),
              ("legacy-state-rejections", 1, legacy_state_rejections),
+             ("post-call-logs-optimized", 1, lambda: module_campaign_output(
+                 "check_legacy_post_call_events", "post-call-logs-optimized", MUTANT_TIMEOUT,
+                 "--optimized")),
+             ("post-call-log-boundary", 1, lambda: module_campaign_output(
+                 "check_post_call_log_boundary", "post-call-log-boundary", MUTANT_TIMEOUT)),
+             ("legacy-payable-rejections", 1, lambda: module_campaign_output(
+                 "check_legacy_payable_rejections", "legacy-payable-rejections", MUTANT_TIMEOUT)),
+             ("legacy-raw-call-rejections", 1, lambda: module_campaign_output(
+                 "check_legacy_raw_call_rejections", "legacy-raw-call-rejections", MUTANT_TIMEOUT)),
              ("legacy-address-arrays", 1, legacy_array_mutations),
              ("legacy-array-rejections", 1, legacy_array_rejections),
              ("legacy-memory-arrays", 1, legacy_memory_array_mutations),

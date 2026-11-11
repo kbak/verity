@@ -21,7 +21,7 @@ def main():
     if rows[0]['status'] != 'ok' or rows[0]['storage'][0][2] != '0x' + format(7, '064x'):
         raise HarnessError('positive Denote rejection-test control failed')
     cases = [
-        ('value-transfer', {'value': '0x1'}, [], 'does not yet account for value transfers'),
+        ('value-transfer', {'value': '0x1'}, [], 'nonzero value requires explicit zero-fee value transactions'),
         ('foreign-target', {'target': foreign}, [], 'foreign model target'),
         ('foreign-observation', {}, [[foreign, slot]], 'foreign storage observation'),
         ('unknown-function', {'function': 'missing'}, [], 'must resolve uniquely'),

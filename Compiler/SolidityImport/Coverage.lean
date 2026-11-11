@@ -38,7 +38,7 @@ constructor (including `paramDynamicMember*`, `paramDynamicStaticComposite`,
 `arrayElementWord`, `mappingChain`, and any future constructor) is rejected. -/
 def exprCovered : Expr → Bool
   | .calldataload offset | .mload offset | .tload offset => exprCovered offset
-  | .calldatasize => true
+  | .calldatasize | .returndataSize => true
   | .literal _ => true
   | .param _ => true
   | .storage _ => true
@@ -162,6 +162,9 @@ low-level `call`, `<address>.code.length`, `<address>.code` and the memory
 canonical module. -/
 def closedTransportCovered (mod : Compiler.ECM.ExternalCallModule) (args : List Expr) : Bool :=
   match mod.byteTransport with
+  | some (.rawCall resultVar delegated) =>
+      mod == Compiler.ECM.SolidityRawCall.module resultVar delegated &&
+        args.length == (if delegated then 4 else 5) && exprListCovered args
   | some (.legacyRecover resultVar) =>
       mod == Compiler.ECM.LegacySignatureCall.recoverModule resultVar &&
         args.length == 4 && exprListCovered args
@@ -221,6 +224,21 @@ mutual
     | [] => true
     | head :: tail => executableStmtCovered head && executableStmtListCovered tail
 end
+
+/-- The admitted return-size read observes the exact byte buffer when present. -/
+theorem evalExpr_returndataSize_arm (oracle : DenoteOracle) (fields : List Field)
+    (state : DenoteState) :
+    evalExpr oracle fields state .returndataSize =
+      some (state.rawReturndata.map List.length |>.getD state.world.returndataSize) := rfl
+/-- Pin the canonical raw-call arm; traced replay reports instrumentation errors. -/
+theorem execStmt_ecm_rawCall_arm (oracle : DenoteOracle) (fields : List Field)
+    (state : DenoteState) (resultVar : String) (delegated : Bool) (args : List Expr) :
+    execStmt oracle fields state
+        (.ecm (Compiler.ECM.SolidityRawCall.module resultVar delegated) args) =
+      (match executeRawCall oracle fields state
+          (Compiler.ECM.SolidityRawCall.module resultVar delegated) resultVar delegated args with
+       | .ok (outcome, _) => outcome
+       | .error _ => .revert) := rfl
 
 theorem evalExpr_calldataload_arm (oracle : DenoteOracle) (fields : List Field)
     (state : DenoteState) (offset : Expr) :

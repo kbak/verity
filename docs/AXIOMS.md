@@ -22,6 +22,12 @@ axiom. Its generated `covered` certificates use the existing coverage check;
 legacy semantics and source correspondence remain frontend trust assumptions.
 Differential and mutation outcomes are execution evidence, not proofs of source
 or deployed-bytecode equivalence.
+The explicit payable-envelope extension adds no project axiom. Kernel proofs
+cover preparation balance conservation, sender nonce reservation, external
+payability checks and settlement. Authorization, fee/gas accounting and
+source/compiler correspondence remain separate assumptions or obligations;
+see the named-payable section of `docs/SOLIDITY_IMPORT.md`.
+
 The nonpayable legacy state-transition extension likewise adds no project axiom
 or universal correctness theorem. Its scalar/mapping writes, modifiers, logs and
 nested rollback checks use the existing executable model. Local self-sender
@@ -509,3 +515,12 @@ The bounded-loop invariant rule and its concrete storage/panic checks in
 `Compiler/SolidityImport/LoopInvariants.lean` and
 `Contracts/SolidityImportSmoke/LoopInvariantChecks.lean` are included in the
 generated axiom inventory. They introduce no project axioms.
+
+
+The post-call log extension adds no project-level axiom. The eight journal laws in
+`Compiler/SolidityImport/EventLogProofs.lean` and the core `EventLogs` implementation
+are included in the generated axiom inventory. They establish model properties;
+external program correspondence and gas/depth adequacy remain environment
+obligations, as detailed in [TRUST_ASSUMPTIONS.md](TRUST_ASSUMPTIONS.md). The finite
+`PostCallLogMocks` validation program is excluded on the same basis as existing
+external mocks; no proof or core journal module is excluded.
