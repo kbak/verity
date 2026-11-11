@@ -7,27 +7,27 @@ namespace Compiler.CompilationModel.SolidityImport.LegacyPacked
 open Lean Compiler.CompilationModel
 
 /-- Recognize the resolved builtin, independently of user-defined member names. -/
-def isEncoding (node : Json) : Bool := Id.run do
+def isEncoding (node : Json) (member : String := "encodePacked") : Bool := Id.run do
   unless optStr node "nodeType" == some "FunctionCall" &&
       optStr node "kind" == some "functionCall" do return false
   let callee := field? node "expression" |>.getD Json.null
   unless optStr callee "nodeType" == some "MemberAccess" &&
-      optStr callee "memberName" == some "encodePacked" do return false
+      optStr callee "memberName" == some member do return false
   let base := field? callee "expression" |>.getD Json.null
   return optStr base "nodeType" == some "Identifier" && optStr base "name" == some "abi" &&
     ((field? base "referencedDeclaration").bind (·.getInt?.toOption)) == some (-1)
 
 /-- Reject allocations, calls, assignments and other expressions whose evaluation
 order or dirty-bit behavior needs additional legacy evidence. -/
-private partial def checkScalar (node : Json) : M Unit := do
+partial def checkScalar (node : Json) (encoding : String := "packed") : M Unit := do
   match ← mKind node with
   | "Identifier" | "Literal" => pure ()
-  | "MemberAccess" => checkScalar (← mField node "expression")
+  | "MemberAccess" => checkScalar (← mField node "expression") encoding
   | "FunctionCall" =>
       unless optStr node "kind" == some "typeConversion" do
-        failAt node "legacy packed arguments require scalar values or conversions"
-      for arg in (← mArr (← mField node "arguments")) do checkScalar arg
-  | _ => failAt node "legacy packed arguments require scalar values or conversions"
+        failAt node s!"legacy {encoding} arguments require scalar values or conversions"
+      for arg in (← mArr (← mField node "arguments")) do checkScalar arg encoding
+  | _ => failAt node s!"legacy {encoding} arguments require scalar values or conversions"
 
 /-- Parse literal payload words without allocating intermediate buffers. -/
 private def literalWords (node : Json) : M (Nat × Array Expr) := do

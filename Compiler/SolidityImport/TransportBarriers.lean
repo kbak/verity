@@ -119,7 +119,8 @@ partial def eraseClosedTransports : Stmt → Stmt
         .letVar (mod.resultVars.headD "") (.literal 0)
       else if isClosedLog mod then .ite (.literal 0) [] []
       else if isClosedReturnMemory mod then .stop
-      else if isClosedRevertMemory mod then .revertEmpty
+      else if isClosedRevertMemory mod ||
+          (mod.byteTransport == some .invalid && mod == Compiler.ECM.SolidityInvalid.module) then .revertEmpty
       else .ecm mod args
   | .ite cond yes no => .ite cond (yes.map eraseClosedTransports) (no.map eraseClosedTransports)
   | .forEach name count body => .forEach name count (body.map eraseClosedTransports)

@@ -17,6 +17,7 @@ theorem stop_prefix (o : DenoteOracle) (fields : List Field) (state final : Deno
   | «return» value middle => simp [h, BindingFrame] at frame
   | revert => simp [h] at executed
   | revertWithData bytes => simp [h] at executed
+  | invalid => simp [h] at executed
 
 /-- Successful assignment followed by a suffix exposes the exact evaluated value. -/
 theorem let_continue (o : DenoteOracle) (fields : List Field) (state final : DenoteState)

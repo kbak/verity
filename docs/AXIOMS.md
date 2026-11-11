@@ -27,14 +27,22 @@ or universal correctness theorem. Its scalar/mapping writes, modifiers, logs and
 nested rollback checks use the existing executable model. Local self-sender
 impersonation supplies a call frame and does not establish authorization.
 
-The guarded legacy address-array input extension adds no project axiom or
-interpreter operation. Its static bounds admission and ABI-v1 decoding remain
-frontend trust assumptions, tested against pinned source bytecode and independent
-byte/list requirements. Finite tests and source mutation witnesses are not a
-universal equivalence proof. Array allocation, unguarded reads, sentinel traversal,
-and exceptional-halt semantics remain excluded. The Python oracle tests require
-the pinned external ABI/hash packages installed by CI; this test environment adds
-no project axiom and does not alter the kernel-checked proof boundary.
+The legacy address-array extension adds no project axiom. Allocation, indexed
+memory access, raw ABI-v1 returns and bounded address traversal remain frontend
+trust assumptions. The closed `SolidityInvalid` transport adds an explicit
+exceptional-halt outcome to Denote, distinct from REVERT and unsupported
+execution. Model lemmas establish no continuation and complete frame rollback;
+the transport's Yul correspondence remains assumed. Exact opcode/gas-consumption
+observations in finite EVM tests do not add opcode gas semantics to the model.
+Neither sampled agreement nor source-mutation witnesses prove universal frontend
+equivalence or list reachability. The Python oracle tests require the pinned
+external ABI/hash packages installed by CI; those are test prerequisites, not
+proof guarantees.
+
+The legacy static ABI hashing extension adds no project axiom or source-equivalence
+theorem. Its generated coverage certificates and existing Keccak/environment
+semantics are unchanged; scalar encoding and allocation remain frontend trust
+assumptions, checked by finite differential and compiler-mutation campaigns.
 
 ## Policy
 

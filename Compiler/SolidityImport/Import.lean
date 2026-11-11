@@ -3166,7 +3166,10 @@ private partial def lowerRef (j : Json) : M Ref := do
             else pre
             return .expr { pre, expr := value }
           else
-            let pre := (pre ++ key.pre).push (.ite (.lt key.expr (.localVar arr.lengthBinding)) [] [.panicCode (.literal 0x32)])
+            let failure := if (← get).legacyWrapping then LegacyArrays.invalid else
+              Stmt.panicCode (.literal 0x32)
+            let pre := (pre ++ key.pre).push
+              (.ite (.lt key.expr (.localVar arr.lengthBinding)) [] [failure])
             let value := Expr.mload (.add (.add (.localVar arr.memoryPointer) (.literal 32)) (.mul key.expr (.literal 32)))
             let value := if (← get).legacyWrapping && arr.elementType == "address" then
                 Expr.bitAnd value (.literal (2^160 - 1)) else value
@@ -5878,6 +5881,7 @@ private partial def lowerEncodedBytes (j : Json) : M EncodedBytes := do
     return ← encodeSelectorAndWords selBuffer pre words
   unless optStr callee "memberName" == some "encode" do
     failAt callee "unsupported ABI encoding builtin"
+  if (← get).legacyWrapping then return ← LegacyAbi.lower j lowerExpr
   lowerAbiEncodeArgs args
 
 /-- `abi.encode(args...)` into a fresh aligned memory buffer. -/
@@ -6886,8 +6890,9 @@ private partial def lowerCall (j : Json) : M Val := do
         let args ← mArr (← mField j "arguments")
         unless args.size == 1 do failAt j "keccak256 requires one byte buffer"
         if (← get).legacyWrapping then
-          unless LegacyPacked.isEncoding args[0]! do
-            failAt args[0]! "legacy hashing requires abi.encodePacked with static arguments"
+          unless LegacyPacked.isEncoding args[0]! || LegacyAbi.isEncoding args[0]! do
+            failAt args[0]!
+              "legacy hashing requires abi.encodePacked or abi.encode with static arguments"
         let bytes ← lowerEncodedBytes args[0]!
         return { pre := bytes.pre, expr := .keccak256 bytes.pointer bytes.size }
       if calleeId == -2 || calleeId == -16 then
@@ -9764,6 +9769,8 @@ private partial def boundedRangePopBounds? (fn sdecl : Json) : M (Option (String
     3. `while (true)` do-while style loops (`Strings.toString`) where the penult statement divides an unsigned local `v`
        by a constant `d ≥ 2` (or right-shifts by `k ≥ 1`) and the final statement is `if (v == 0) break;`. -/
 private partial def lowerWhile (s : Json) (lowerBody : Json → M (Array Stmt)) : M (Array Stmt) := do
+  if (← get).legacyWrapping && LegacyArrayLoops.candidate s then
+    return ← LegacyArrayLoops.lower s lowerExpr lowerBody
   let cond ← mField s "condition"
   if (← mKind cond) == "Literal" && optStr cond "kind" == some "bool" && optStr cond "value" == some "true" then
     let body ← mField s "body"
@@ -11650,11 +11657,15 @@ private partial def lowerEffectCore (statement : Json) : M (Array Stmt) := do
             let right ← mField expression "rightHandSide"
             atom (← convert arr.elementType (← mType right) (← lowerExpr right) right)
           let key ← atom (← lowerExpr indexExpression)
-          let stored := if arr.elementType == "bool" && !deleting then
+          let stored := if (← get).legacyWrapping && arr.elementType == "address" then
+            Expr.bitAnd value.expr (.literal (2^160 - 1))
+          else if arr.elementType == "bool" && !deleting then
             Expr.logicalNot (.logicalNot value.expr)
           else value.expr
+          let failure := if (← get).legacyWrapping then LegacyArrays.invalid else
+            Stmt.panicCode (.literal 0x32)
           return (value.pre ++ key.pre).push (.ite (.lt key.expr (.localVar arr.lengthBinding))
-            [] [.panicCode (.literal 0x32)]) |>.push
+            [] [failure]) |>.push
             (.mstore (.add (.add (.localVar arr.memoryPointer) (.literal 32)) (.mul key.expr (.literal 32))) stored)
         let baseName ← mStr (← mField baseNode "name")
         if let some buf := (← get).byteBuffers.find? baseId.toNat then
@@ -13252,7 +13263,10 @@ private partial def lowerLocalCore (s : Json) : M (Array Stmt) := do
     let arrayPtr ← freshFor name
     let nextFree ← fresh
     let zeroIdx ← fresh
-    let allocStmts : Array Stmt := lenVal.pre ++ #[
+    let allocStmts : Array Stmt := if (← get).legacyWrapping then
+      lenVal.pre ++ #[.letVar lenBinding lenVal.expr] ++
+        (LegacyArrays.allocate lenBinding arrayPtr nextFree zeroIdx).toArray
+    else lenVal.pre ++ #[
       .letVar lenBinding lenVal.expr,
       .ite (.le (.localVar lenBinding) (.literal (2^64 - 1))) [] [.panicCode (.literal 0x41)],
       .letVar arrayPtr (.mload (.literal 64)),
@@ -14135,6 +14149,17 @@ private partial def lowerRootStatements (stmts : Array Json) (isTail : Bool := f
             out := out ++ env.rootPost ++ #[.returnValues env.rootReturns.toList]
           else
             failAt s "bare return requires a void or named-return root function"
+        else if env.legacyWrapping && env.rootReturnTypes == #["address[]"] then
+          let .scalarArray id pre ← lowerRef expr
+            | failAt expr "Solidity 0.7.6 array return requires a memory array reference"
+          let some array := (← get).scalarArrays.find? id
+            | failAt expr "missing returned memory array"
+          unless array.inMemory && array.elementType == "address" do
+            failAt expr "Solidity 0.7.6 array return requires address[] memory"
+          let output ← fresh
+          let index ← fresh
+          modify fun e => { e with encodingMemory := true }
+          out := out ++ pre ++ env.rootPost ++ (LegacyArrays.returnMemory array output index).toArray
         else if let some (elemTy, _, length) := env.rootFixedArrayReturn then
           let isInlineArr ← if (← mKind expr) == "TupleExpression" then
             mBool (← mField expr "isInlineArray")
@@ -14650,7 +14675,8 @@ private def lowerRoot (fn : Json) : M (Array Stmt × Array SrcParam) := do
   let mut rootRetExprs : Array Expr := #[]
   let mut rootNamedReturn? : Option (Nat × String × String × String) := none
   let mut rootFlatStructState? : Option (Nat × String × Array (String × String × String) × Bool) := none
-  let isRootScalarArrayRet := (← get).stateVars.size > 1 && returns.size == 1 &&
+  let isRootScalarArrayRet := ((← get).legacyWrapping || (← get).stateVars.size > 1) &&
+    returns.size == 1 &&
     (scalarArrayElement? (rootReturnTypes.getD 0 "")).isSome
   let mut allNamedScalar := !returns.isEmpty && emptyBodyArrayRet?.isNone && fixedArrayRet?.isNone && flatStructRet?.isNone && !msgDataRet && dynamicBytesRet?.isNone && !isRootScalarArrayRet
   if let some (retSid, retStructName, rname, rid, memberSpecs) := flatStructRet? then
@@ -15275,6 +15301,8 @@ private def importSlice
     -- since the model parameter loader has already masked/normalized it.
     -- Every legacy entry starts with Solidity's free-memory prologue. A raw
     -- reconstructed pointer can observe it even without a dynamic parameter.
+    if legacy && strictAbi && env.rootReturnTypes.contains "address[]" then
+      (failAt fn "Solidity 0.7.6 address arrays require ABI coder v1").run' env
     let needsPrologue := env.legacyWrapping || env.explicitAbi || env.encodingMemory ||
       stmtListRequiresFreePointerInit body.toList
     let mut abiGuards : Array Stmt :=
@@ -15557,10 +15585,13 @@ private def importSlice
   let profileSrc ← moduleText sourceRoot "Compiler/SolidityImport/Profile.lean"
   let legacySrc ← moduleText sourceRoot "Compiler/SolidityImport/Legacy.lean"
   let legacyFlowSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyControlFlow.lean"
+  let legacyArraysSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyArrays.lean"
+  let legacyArrayLoopsSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyArrayLoops.lean"
   let abiLoweringSrc ← moduleText sourceRoot "Compiler/SolidityImport/AbiLowering.lean"
   let exprHelpersSrc ← moduleText sourceRoot "Compiler/SolidityImport/ExprHelpers.lean"
   let bytePointersSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyBytePointers.lean"
   let packedSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyPacked.lean"
+  let legacyAbiSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyAbi.lean"
   let signatureSrc ← moduleText sourceRoot "Verity/Core/Model/LegacySignatureCalls.lean"
   let ecmSrc ← moduleText sourceRoot "Verity/Core/Model/ECM.lean"
   let denoteSrc ← moduleText sourceRoot "Verity/Core/Model/Denote.lean"
@@ -15577,8 +15608,11 @@ private def importSlice
       ("Report.lean", Json.str reportSrc), ("Quote.lean", Json.str quoteSrc),
       ("Profile.lean", Json.str profileSrc), ("Legacy.lean", Json.str legacySrc),
       ("LegacyControlFlow.lean", Json.str legacyFlowSrc),
+      ("LegacyArrays.lean", Json.str legacyArraysSrc),
+      ("LegacyArrayLoops.lean", Json.str legacyArrayLoopsSrc),
       ("LegacyBytePointers.lean", Json.str bytePointersSrc),
       ("LegacyPacked.lean", Json.str packedSrc),
+      ("LegacyAbi.lean", Json.str legacyAbiSrc),
       ("AbiLowering.lean", Json.str abiLoweringSrc),
       ("ExprHelpers.lean", Json.str exprHelpersSrc),
       ("LegacySignatureCalls.lean", Json.str signatureSrc),

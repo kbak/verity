@@ -63,6 +63,7 @@ theorem loop_authorized (indexVar previous : String) (runBody : DenoteState → 
       | «return» value next => simp [execForEachLoop, bodyStep] at executed
       | revert => simp [execForEachLoop, bodyStep] at executed
       | revertWithData bytes => simp [execForEachLoop, bodyStep] at executed
+      | invalid => simp [execForEachLoop, bodyStep] at executed
 
 /-- Strict ordering implies distinctness, without assuming distinct signatures. -/
 theorem ordered_nodup (member : Nat → Prop) (sentinel lower : Nat) (used : List Nat)

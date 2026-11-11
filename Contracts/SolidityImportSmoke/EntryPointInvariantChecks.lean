@@ -30,17 +30,19 @@ def invariant (world : Verity.ContractState) : Prop :=
 
 theorem zero_exec (oracle : DenoteOracle) (before : Verity.ContractState) (bindings : Env) :
     executeBody oracle fields before bindings zeroEntry.body [] =
-      .ok ⟨true, [], writeUintFieldSlots fields "stored" (beginTransaction before) [0] 0⟩ := by
+      .ok ⟨true, [], writeUintFieldSlots fields "stored"
+        (beginTransaction before) [0] 0, false⟩ := by
   rfl
 
 theorem one_exec (oracle : DenoteOracle) (before : Verity.ContractState) (bindings : Env) :
     executeBody oracle fields before bindings oneEntry.body [] =
-      .ok ⟨true, [], writeUintFieldSlots fields "stored" (beginTransaction before) [0] 1⟩ := by
+      .ok ⟨true, [], writeUintFieldSlots fields "stored"
+        (beginTransaction before) [0] 1, false⟩ := by
   rfl
 
 theorem failed_exec (oracle : DenoteOracle) (before : Verity.ContractState) (bindings : Env) :
     executeBody oracle fields before bindings failedEntry.body [] =
-      .ok ⟨false, panicBytes 1, beginTransaction before⟩ := by
+      .ok ⟨false, panicBytes 1, beginTransaction before, false⟩ := by
   rfl
 
 theorem every_entry_preserves (oracle : DenoteOracle) :

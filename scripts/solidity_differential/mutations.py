@@ -8,6 +8,16 @@ import sys
 from .engine import ROOT, WORKSPACE, MUTANT_BUILD_TIMEOUT, HarnessError, command, write_json
 
 MUTANTS = {
+    'import-legacy-static-header': ('Compiler/SolidityImport/LegacyAbi.lean',
+        '.mstore header (.literal size)', '.mstore header (.literal (size + 1))'),
+    'import-legacy-static-stride': ('Compiler/SolidityImport/LegacyAbi.lean',
+        '.literal (32 * index)', '.literal (31 * index)'),
+    'import-legacy-static-rounding': ('Compiler/SolidityImport/LegacyAbi.lean',
+        '.letVar headerName (.mload (.literal 64))',
+        '.letVar headerName (.bitAnd (.add (.mload (.literal 64)) (.literal 31)) (.bitNot (.literal 31)))'),
+    'import-legacy-static-chainid': ('Compiler/SolidityImport/Import.lean',
+        '| "chainid", #[] => pure { pre, expr := .chainid }',
+        '| "chainid", #[] => pure { pre, expr := .literal 0 }'),
     'import-legacy-packed-rounding': ('Compiler/SolidityImport/LegacyPacked.lean',
         '.mstore (.literal 64) (.add data (.literal size))',
         '.mstore (.literal 64) (.add data (.literal ((size + 31) / 32 * 32)))'),
@@ -207,6 +217,11 @@ def mutation_campaign(output, selected=None):
                         "import sys; sys.path.insert(0, 'scripts'); "
                         "from solidity_differential.check_legacy_packed_hash import main; sys.exit(main())",
                         "--output", str(directory / ".lake/campaign"), "--random-cases", "0"]
+            if name.startswith("import-legacy-static-"):
+                argv = [sys.executable, "-c",
+                        "import sys; sys.path.insert(0, 'scripts'); "
+                        "from solidity_differential.check_legacy_static_abi import main; sys.exit(main())",
+                        "--output", str(directory / ".lake/campaign")]
             # A pre-existing fixture divergence is not evidence that a mutation was
             # detected. Run the identical inputs in the private snapshot first.
             baseline_argv = [str(directory / ".lake/baseline") if arg == str(directory / ".lake/campaign")
@@ -217,7 +232,7 @@ def mutation_campaign(output, selected=None):
             baseline_file = directory / ".lake/baseline/results.json"
             baseline_report = json.loads(baseline_file.read_text()) if baseline_file.exists() else {}
             if (baseline.returncode != 0 or baseline_report.get("divergences") != [] or
-                    baseline_report.get("cases", 0) <= 0):
+                    baseline_report.get("cases", baseline_report.get("count", 0)) <= 0):
                 raise HarnessError(
                     f"mutation positive control failed: {name} (exit {baseline.returncode}); "
                     f"inspect {directory / 'baseline.log'}\n"

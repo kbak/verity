@@ -1,4 +1,5 @@
 import Compiler.SolidityImport.ExprHelpers
+import Compiler.SolidityImport.LegacyArrayLoops
 
 /-! Conservative path evidence for legacy division and bounded loop admission.
 Facts concern unsigned local declarations that are never assigned in the reached
@@ -113,6 +114,7 @@ def validateLegacyLoop (node : Json) : M Unit := do
   let lhs := child cond "leftExpression"
   let rhs := child cond "rightExpression"
   if optStr node "nodeType" == some "WhileStatement" then
+    if LegacyArrayLoops.candidate node then return
     unless ((op == "!=" || op == ">") && naturalLiteral? rhs == some 0 &&
         (identifier? lhs).isSome) ||
         ((op == "!=" || op == "<") && naturalLiteral? lhs == some 0 &&

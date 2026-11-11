@@ -86,6 +86,9 @@ class Anvil:
         call = self.rpc('debug_traceTransaction', txhash, {'tracer': 'callTracer'})
         prestate = self.rpc('debug_traceTransaction', txhash, {'tracer': 'prestateTracer'})
         record = {'transaction': transaction, 'receipt': receipt, 'call': call, 'prestate': prestate}
+        if call.get('error') == 'invalid opcode: INVALID':
+            record['exceptionalTrace'] = self.rpc('debug_traceTransaction', txhash,
+                {'disableMemory': True, 'disableStack': True, 'disableStorage': True})
         (self.directory / f'{txhash}.json').write_text(json.dumps(record, indent=2) + '\n')
         return record
 
@@ -95,8 +98,15 @@ class Anvil:
         status = receipt.get('status')
         if status not in ('0x0', '0x1') or not isinstance(call, dict) or not isinstance(prestate, dict):
             raise HarnessError('invalid execution trace')
+        outcome = 'ok' if status == '0x1' else 'revert'
         if status == '0x0' and call.get('error') != 'execution reverted':
-            raise HarnessError('exceptional halt or resource failure is not a Solidity revert')
+            trace = record.get('exceptionalTrace', {})
+            steps = trace.get('structLogs', [])
+            if (call.get('error') != 'invalid opcode: INVALID' or trace.get('failed') is not True or
+                    not steps or steps[-1].get('op') != 'INVALID' or steps[-1].get('depth') != 1 or
+                    int(receipt['gasUsed'], 16) != int(record['transaction']['gas'], 16)):
+                raise HarnessError('unclassified exceptional halt or resource failure')
+            outcome = 'invalid'
         if status == '0x1' and 'error' in call:
             raise HarnessError('receipt and trace status disagree')
         touched = set()
@@ -112,7 +122,7 @@ class Anvil:
             if log.get('removed') is not False:
                 raise HarnessError('unconfirmed or removed transaction log')
             events.append({'address': log['address'], 'topics': log['topics'], 'data': log['data']})
-        row = {'id': ident, 'status': 'ok' if status == '0x1' else 'revert',
+        row = {'id': ident, 'status': outcome,
                'data': call.get('output', '0x'), 'touched': [list(k) for k in sorted(touched)],
                'storage': storage, 'events': events}
         validate_observation(row)

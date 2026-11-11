@@ -158,6 +158,16 @@ than interpreting them with 0.8 semantics. Its differential comparisons observe
 execution checks; they establish neither frontend equivalence nor historical
 fork/deployed-bytecode equivalence. See `SOLIDITY_IMPORT.md` for the subset and
 reproduction commands. No proof axiom is added by this importer extension.
+Address-array indexing now has an explicit closed INVALID transport. The model
+and frame runner preserve its identity and rollback, but do not model opcode gas
+or claim compiler simulation for this transport. Allocation uses the legacy
+empty-revert count limit, and ABI-v1 returns preserve raw memory words. Bounded
+traversal relies on checked syntax (a zero-start counter and mandatory indexed
+write), not a presumed well-formed linked list. The extra iteration preserves
+failure on cycles/overlong lists; unused capacity is zero-filled. Array aliases,
+assembly references, and unsupported loop forms fail closed. The source identity
+includes both `LegacyArrays.lean` and `LegacyArrayLoops.lean`.
+
 The nonpayable legacy state-transition extension reuses existing write, modifier,
 event and rollback semantics. Its independent finite oracle checks exact state,
 logs and reverts for zero-value call frames, including nested failure after writes.
@@ -1442,6 +1452,20 @@ Mutations removing this masking, the external-call guard and the location guard
 must first admit the unsupported source, then fail the located rejection suite.
 A compiler or harness error never counts as mutation detection.
 
+
+### Legacy static ABI hashing (experimental)
+
+The 0.7.6 `LegacyAbi.lower` extension uses the existing byte-addressed physical
+memory and Keccak oracle. It emits one cleaned 32-byte word per admitted scalar,
+then the length header and exact end pointer, including unaligned starts after
+packed encoding. The legacy admission guard remains responsible for restricting
+this to direct hash inputs, pure scalar argument trees and ABI-v1 source units.
+`chainid()` reads the existing explicit environment field. The differential
+campaign uses chain ID 31337 and checks outputs, unchanged watched storage and
+empty logs; it is finite execution evidence, not universal source correspondence.
+No new cryptographic assumption or project axiom is introduced. General
+transaction-hash assembly, dynamic encoding and dirty narrow assembly values
+remain separate support obligations.
 
 ### ABI encoding and packed Keccak buffers (experimental)
 

@@ -145,6 +145,8 @@ inductive ByteTransport where
   | returnMemory
   /-- `revert(offset, size)` with the exact physical-memory bytes. -/
   | revertMemory
+  /-- EVM INVALID: exceptional frame termination with no return bytes. -/
+  | invalid
   deriving DecidableEq, Repr
 
 /-- An External Call Module packages a reusable external call pattern.
@@ -925,6 +927,30 @@ def module : ExternalCallModule where
 
 end SolidityRevertMemory
 
+namespace SolidityInvalid
+
+/-- Closed INVALID instruction; unlike REVERT it consumes the frame's remaining gas. -/
+def compile (args : List YulExpr) : Except String (List YulStmt) :=
+  match args with
+  | [] => pure [.exprStmt (.call "invalid" [])]
+  | _ => throw "Solidity invalid expects no arguments"
+
+/-- A non-interacting exceptional halt, with no continuation or committed world. -/
+def module : ExternalCallModule where
+  name := "solidityInvalid"
+  numArgs := 0
+  resultVars := []
+  writesState := false
+  readsState := false
+  compile := fun _ args => compile args
+  byteTransport := some .invalid
+  axioms := []
+  proofStatus := .assumed
+  summaryName := "solidity_invalid"
+  summaryMutability := .staticcall
+
+end SolidityInvalid
+
 namespace LegacySignatureCall
 
 /-- Closed legacy recovery transport. The external byte world supplies the
@@ -1025,6 +1051,10 @@ def compileCanonical (module : ExternalCallModule) (context : CompilationContext
       unless module == SolidityReturnMemory.module do
         throw "closed Solidity memory return transport metadata differs"
       SolidityReturnMemory.compile args
+  | some .invalid =>
+      unless module == SolidityInvalid.module do
+        throw "closed Solidity invalid metadata differs"
+      SolidityInvalid.compile args
   | some .revertMemory =>
       unless module == SolidityRevertMemory.module do
         throw "closed Solidity memory revert transport metadata differs"

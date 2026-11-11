@@ -102,7 +102,7 @@ def statementAccesses (oracle : DenoteOracle) (fields : List Field)
             (some selector) args
           return reads.flatten ++ touched
       | some (.create2 _) | some (.log _ _) | some (.extCodeSize _) | some (.extCodeCopy _)
-      | some .returnMemory | some .revertMemory =>
+      | some .returnMemory | some .revertMemory | some .invalid =>
           -- CREATE2, LOG, EXTCODESIZE, EXTCODECOPY, RETURN and REVERT touch no persistent
           -- slot of any account here: the created account's storage is empty and
           -- only its code is committed; code reads see only the account's code.
@@ -337,6 +337,10 @@ theorem traceStraightLine_agrees (oracle : DenoteOracle) (fields : List Field)
               cases h
               simp [execStmtList, he]
           | revert =>
+              simp [traceStraightLine, ha, he, bind, Except.bind, pure, Except.pure] at h
+              cases h
+              simp [execStmtList, he]
+          | invalid =>
               simp [traceStraightLine, ha, he, bind, Except.bind, pure, Except.pure] at h
               cases h
               simp [execStmtList, he]

@@ -494,6 +494,8 @@ DIFFERENTIAL_MUTANTS = (
     'import-legacy-division-operands',
     'import-legacy-guard-stability',
     'ecm-legacy-recovery-stale', 'ecm-legacy-validator-selector', 'ecm-legacy-code-existence',
+    'import-legacy-static-header', 'import-legacy-static-stride',
+    'import-legacy-static-rounding', 'import-legacy-static-chainid',
     'import-legacy-packed-rounding', 'import-legacy-packed-header',
     'import-legacy-packed-alignment',
     'import-legacy-pointer-encode-order',
@@ -866,6 +868,11 @@ def legacy_array_mutations() -> None:
     print("pass legacy address-array independent source-defect controls", flush=True)
 
 
+def legacy_memory_array_mutations() -> None:
+    module_campaign_output("check_legacy_memory_array_mutations", "legacy-memory-arrays", 2 * MUTANT_TIMEOUT)
+    print("pass legacy memory-array source-defect controls", flush=True)
+
+
 def legacy_array_rejections() -> None:
     module_campaign_output("check_legacy_array_rejections", "legacy-array-rejections", MUTANT_TIMEOUT)
     print("pass legacy array located rejections", flush=True)
@@ -893,6 +900,7 @@ def tasks(update_golden: bool) -> list:
              ("legacy-state-rejections", 1, legacy_state_rejections),
              ("legacy-address-arrays", 1, legacy_array_mutations),
              ("legacy-array-rejections", 1, legacy_array_rejections),
+             ("legacy-memory-arrays", 1, legacy_memory_array_mutations),
              ("deployment-world", 1, deployment_world_mutations),
              ("create2-opcode", 1, create2_opcode_mutations),
              ("account-storage", 1, account_storage_mutations),

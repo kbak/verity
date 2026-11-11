@@ -49,7 +49,7 @@ def runFunction (oracle : DenoteOracle) (model : CompilationModel) (name : Strin
     (world : Verity.ContractState) (args : Env) : Option (List Nat) :=
   match execStmtList oracle model.fields { world, bindings := args, errors := model.errors } (functionBody model name) with
   | .stop state | .continue state | .return _ state => state.observedReturnWords
-  | .revert | .revertWithData _ => none
+  | .revert | .invalid | .revertWithData _ => none
 
 /-- `field[keys].member` in `world`, read exactly as the imported model reads
 it: solc's slot, word offset and packing. `0` if there is no such member. -/
