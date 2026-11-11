@@ -90,6 +90,12 @@ partial def quoteStmt : Stmt → m Term
   | .ecm module args => do
       let quotedArgs ← list (← args.mapM quoteExpr)
       match module.byteTransport with
+      | some (.legacyBool result selector count) => do
+          unless module == Compiler.ECM.LegacyBoolCall.module result selector count do
+            throwError "closed legacy bool call metadata differs"
+          `(Compiler.CompilationModel.Stmt.ecm
+            (Compiler.ECM.LegacyBoolCall.module $(quote result) $(quote selector) $(quote count))
+            $quotedArgs)
       | some (.legacyVoid selector layout) => do
           unless module == Compiler.ECM.LegacyVoidCall.module selector layout do
             throwError "closed legacy void call metadata differs"

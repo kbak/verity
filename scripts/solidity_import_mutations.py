@@ -490,6 +490,14 @@ solidity_import both from "{WORK / "base"}" entry "Slice.sol"
 # Compile and execute actual Denote mutants: a build failure is invalid,
 # not a detected semantic mutation. These regressions compare EVM bytes.
 DIFFERENTIAL_MUTANTS = (
+    'legacy-bool-code',
+    'legacy-bool-truth',
+    'legacy-bool-short',
+    'legacy-bool-failure',
+    'legacy-bool-selector',
+    'legacy-bool-static',
+    'legacy-bool-pointer',
+    'legacy-store-slot',
     'void-call-offset', 'void-call-code', 'void-call-failure', 'void-call-pre', 'void-call-post', 'void-call-return-decoder', 'void-call-length-reload', 'void-call-stored-address', 'void-call-head-order',
     'post-log-emitter', 'post-log-payload', 'post-log-order',
     'post-log-parent-prefix', 'post-log-caller', 'post-log-outer-rollback',
@@ -911,6 +919,13 @@ def tasks(update_golden: bool) -> list:
              ("post-call-logs-optimized", 1, lambda: module_campaign_output(
                  "check_legacy_post_call_events", "post-call-logs-optimized", MUTANT_TIMEOUT,
                  "--optimized")),
+             ("static-installation-optimized", 1, lambda: module_campaign_output(
+                 "check_legacy_static_installation", "static-installation-optimized", MUTANT_TIMEOUT,
+                 "--optimized")),
+             ("legacy-bool-boundary", 1, lambda: module_campaign_output(
+                 "check_legacy_bool_boundary", "legacy-bool-boundary", MUTANT_TIMEOUT)),
+             ("legacy-static-rejections", 1, lambda: module_campaign_output(
+                 "check_legacy_static_rejections", "legacy-static-rejections", MUTANT_TIMEOUT)),
              ("void-callbacks-optimized", 1, lambda: module_campaign_output(
                  "check_legacy_void_callbacks", "void-callbacks-optimized", MUTANT_TIMEOUT,
                  "--optimized")),

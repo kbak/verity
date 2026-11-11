@@ -4,6 +4,8 @@ import Compiler.SolidityImport.LegacyArrays
 import Compiler.SolidityImport.LegacyMemory
 import Compiler.SolidityImport.LegacyCalls
 import Compiler.SolidityImport.LegacyVoidCalls
+import Compiler.SolidityImport.LegacyBoolCalls
+import Compiler.SolidityImport.LegacyStorage
 import Compiler.SolidityImport.StorageLayout
 
 /-! Conservative admission for the initial Solidity 0.7.6 scalar slice.
@@ -104,10 +106,12 @@ partial def validateLegacyDeclaration (node : Json) (encodingInput : Bool := fal
   match node with
   | .arr children => children.forM (validateLegacyDeclaration · encodingInput)
   | .obj fields =>
+    if LegacyBoolCalls.interfaceId node (← get) then return
     if optStr node "nodeType" == some "InlineAssembly" then
       if LegacyCalls.forwardingRevert node then return
       let ast ← mField node "AST"
       let stmts ← mArr (← mField ast "statements")
+      if LegacyStorage.writes ast then return
       if stmts.back?.any (fun stmt =>
           (((field? stmt "expression").bind (field? · "functionName")).bind
             (optStr · "name")) == some "revert") then
@@ -254,7 +258,7 @@ partial def validateLegacyDeclaration (node : Json) (encodingInput : Bool := fal
           -- The lowering independently resolves and validates the declaration,
           -- receiver, argument types and ABI-v1 bytes4 return transport.
           unless ty == "function (bytes32,bytes memory) view external returns (bytes4)" ||
-              LegacyVoidCalls.applies node (← get) do
+              LegacyVoidCalls.applies node (← get) || LegacyBoolCalls.applies node (← get) do
             failAt node "Solidity 0.7.6 external calls require the ABI-v1 bytes4 view slice"
         if optStr callee "nodeType" == some "Identifier" then
           -- Legacy builtins retain duplicate negative overloadedDeclarations.

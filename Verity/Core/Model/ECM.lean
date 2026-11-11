@@ -16,6 +16,7 @@ import Verity.Core.Model.ProofStatus
 import Verity.Core.Model.Yul.Ast
 import Verity.Core.Model.LegacySignatureCalls
 import Verity.Core.Model.LegacyVoidCalls
+import Verity.Core.Model.LegacyBoolCalls
 
 namespace Compiler.ECM
 
@@ -126,6 +127,8 @@ inductive ByteTransport where
   | rawCall (resultVar : String) (delegated : Bool)
   /-- ABI v1 view call `(bytes32, bytes) returns (bytes4)`. -/
   | legacyBytes4 (resultVar : String) (selector : Nat)
+  /-- ABI-v1 scalar STATICCALL with nonzero-word bool decoding. -/
+  | legacyBool (resultVar : String) (selector numStaticArgs : Nat)
   /-- Value-free ABI-v1 interface CALL with no return-value decoder. -/
   | legacyVoid (selector : Nat) (layout : List LegacyVoidCalls.Argument)
   | staticUint256 (resultVar : String) (selector numStaticArgs : Nat)
@@ -982,6 +985,25 @@ def module (resultVar : String) (delegated : Bool) : ExternalCallModule where
 
 end SolidityRawCall
 
+namespace LegacyBoolCall
+
+/-- ABI-v1 bool static call with code existence and truthiness cleanup.
+The child program is supplied by the explicit byte-call environment. -/
+def module (result : String) (selector count : Nat) : ExternalCallModule where
+  name := "solidityLegacyBoolCall"
+  numArgs := count + 1
+  resultVars := [result]
+  readsState := true
+  writesState := false
+  compile := fun _ args => LegacyBoolCalls.compile result selector count args
+  byteTransport := some (.legacyBool result selector count)
+  proofStatus := .assumed
+  summaryName := "legacy_bool_byte_response"
+  summaryMutability := .staticcall
+  summarySelector := some selector
+
+end LegacyBoolCall
+
 namespace LegacyVoidCall
 
 /-- A closed, state-changing interface call. The environment owns callee semantics;
@@ -1040,6 +1062,10 @@ def compileCanonical (module : ExternalCallModule) (context : CompilationContext
     (args : List YulExpr) : Except String (List YulStmt) := do
   match module.byteTransport with
   | none => module.compile context args
+  | some (.legacyBool result selector count) =>
+      unless module == LegacyBoolCall.module result selector count do
+        throw "closed legacy bool call metadata differs"
+      LegacyBoolCalls.compile result selector count args
   | some (.legacyVoid selector layout) =>
       unless module == LegacyVoidCall.module selector layout do
         throw "closed legacy void call metadata differs"

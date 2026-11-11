@@ -1879,7 +1879,7 @@ Failure forwards the complete revert buffer. Exact returndata remains observable
 
 Constant-slot assembly `sload` is also admitted. Address results are cleaned to
 160 bits at the Solidity boundary; later unmasked narrow assembly reads remain
-rejected. Dynamic-slot reads and assembly storage writes are not added. This permits
+rejected. Dynamic-slot reads remain rejected. Constant-slot writes are described below. This permits
 reading a callback address from a fixed storage slot before entering the interaction
 window. After the first callback, continuations still require storage-free
 expressions and admit only the existing closed calls, scalar events and termination
@@ -1902,5 +1902,55 @@ a mutation kill. The kernel-checked coverage equation pins the canonical dispatc
 arm; the existing raw-call and event-journal laws supply model rollback properties.
 These are not Solidity/importer/compiler correspondence proofs. Gas, memory-resource
 and call-depth adequacy and arbitrary callback implementation correspondence remain
-explicit external-environment obligations. Complete application execution, callback
-installation and refund accounting require additional work.
+explicit external-environment obligations. Complete application execution and refund accounting require additional work.
+Callback installation uses the separately described static-query/storage slice below.
+
+
+### ABI-v1 bool static calls and constant-slot stores (experimental)
+
+Solidity 0.7.6 admits resolved view/pure interface calls returning one bool. The
+call site must use ABI coder v1, an explicit interface conversion of an address,
+and effect-free receiver/argument expressions. Argument types are exact declared
+`uint256`, address/payable-address, bool or fixed bytes. Fixed bytes are left aligned
+and truncated to their declared width; narrow fixed-byte root ABI remains rejected.
+Resolved `type(I).interfaceId` uses only the interface's own selectors, excluding
+inherited functions. Other `type` builtins are not admitted by this extension.
+
+The closed `LegacyBoolCall` transport captures operands before encoding at the
+current free pointer. It requires code at the cleaned target address, uses STATICCALL
+with a 32-byte output area, forwards failed-call bytes exactly, and rejects successful
+responses shorter than 32 bytes. ABI-v1 bool decoding treats every nonzero word as
+true. Only the decoded binding is cleaned: physical memory preserves the raw response
+word and the free pointer is unchanged. Extra response bytes remain in returndata.
+A successful static call permits subsequent caller storage operations; it does not
+relax the storage-free continuation restriction after state-changing callbacks.
+
+Assembly blocks consisting only of `sstore` statements accept literal/identifier
+operands with a resolved constant slot and existing safe scalar reads. Full words
+and cleaned external address arguments are supported. Dynamic slots, compound value
+expressions, assembly loops and untracked narrow values in internal helpers remain
+rejected. The existing dirty-narrow-assembly-read rejection also remains in force.
+
+`check_legacy_static_installation` compares original Solidity EVM, public/traced
+Denote and generated EVM against independent state, ABI, event, balance and nonce
+expectations. Cases include inherited interface IDs, false/noncanonical true words,
+short/long responses, repeated queries preserving separate results, exact revert
+bytes, static write attempts, empty code (including
+precompiles), dirty address/bool/fixed-byte inputs, installation/replacement/disabling,
+authorization rejection and rollback after a later revert. The finite external
+`StaticBoolOracle` is independently compiled and modeled by `StaticBoolMocks`.
+Model boundary checks reject malformed metadata and missing instrumentation. Runtime
+mutants alter code checks, truth decoding, short-response rejection, failure bytes,
+selector encoding, call kind, free-pointer behavior and the stored slot; each must
+first pass an unchanged control.
+
+Self-authorized entrypoints are tested using an explicit `selfCallExperiment` mode
+mirroring Anvil impersonation. It permits only zero-value self calls, advances the
+synthetic envelope nonce and retains rollback behavior. Ordinary transaction mode
+still requires a distinct, code-free EOA. This experiment supplies an inner call
+context; it does not establish that a full application transaction can reach it.
+
+The transport remains assumed. The kernel-checked canonical dispatch equation is
+a model law, not Solidity/importer/compiler equivalence. External-program
+correspondence and adequate gas, memory resources and call depth remain obligations;
+full application execution and refund accounting are not established by this slice.

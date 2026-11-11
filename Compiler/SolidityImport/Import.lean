@@ -1938,6 +1938,10 @@ private partial def lowerYulStmtSlice (j : Json) (stmts refs : Array Json) (retN
           unless args.size == 2 do failAt expr "sstore requires two arguments"
           let slotVal ← lowerYul args[0]!
           let valVal ← lowerYul args[1]!
+          if (← get).legacyWrapping then
+            unless slotVal.pre.isEmpty && valVal.pre.isEmpty &&
+                (match slotVal.expr with | .literal _ => true | _ => false) do
+              failAt expr "legacy assembly storage writes require a constant slot and pure operands"
           modify fun e => { e with usedRawStorage := true }
           out := out ++ slotVal.pre ++ valVal.pre |>.push (.setStorageArrayElement rawStorageFieldName slotVal.expr valVal.expr)
         else if fname == "mstore" then
@@ -6557,6 +6561,8 @@ private partial def lowerInterfaceStaticCall (j : Json) : M Val := do
     pure (ps, ← rs.mapM mType)
   let rawParamTypes ← params.mapM mType
   if env.legacyWrapping then
+    if LegacyBoolCalls.applies j env then
+      return ← LegacyBoolCalls.lower j decl lowerExpr
     if LegacyVoidCalls.applies j env then
       return ← LegacyVoidCalls.lower j decl lowerExpr
     if env.legacyAbiV2Files.contains env.currentFile then
@@ -15661,6 +15667,9 @@ private def importSlice
   let legacyMemorySrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyMemory.lean"
   let signatureSrc ← moduleText sourceRoot "Verity/Core/Model/LegacySignatureCalls.lean"
   let rawCallsSrc ← moduleText sourceRoot "Verity/Core/Model/RawCalls.lean"
+  let boolLoweringSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyBoolCalls.lean"
+  let boolCompilerSrc ← moduleText sourceRoot "Verity/Core/Model/LegacyBoolCalls.lean"
+  let legacyStorageSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyStorage.lean"
   let voidLoweringSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyVoidCalls.lean"
   let voidCompilerSrc ← moduleText sourceRoot "Verity/Core/Model/LegacyVoidCalls.lean"
   let voidModelSrc ← moduleText sourceRoot "Verity/Core/Model/VoidCalls.lean"
@@ -15692,6 +15701,9 @@ private def importSlice
       ("ExprHelpers.lean", Json.str exprHelpersSrc),
       ("LegacySignatureCalls.lean", Json.str signatureSrc),
       ("RawCalls.lean", Json.str rawCallsSrc),
+      ("SolidityImport/LegacyBoolCalls.lean", Json.str boolLoweringSrc),
+      ("Model/LegacyBoolCalls.lean", Json.str boolCompilerSrc),
+      ("LegacyStorage.lean", Json.str legacyStorageSrc),
       ("SolidityImport/LegacyVoidCalls.lean", Json.str voidLoweringSrc),
       ("Model/LegacyVoidCalls.lean", Json.str voidCompilerSrc),
       ("VoidCalls.lean", Json.str voidModelSrc),

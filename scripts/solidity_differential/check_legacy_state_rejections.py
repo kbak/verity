@@ -15,7 +15,9 @@ CASES = {
     'helper-division': ('function helper(uint256 x) internal { stored = 12 / x; } '
         'function run(uint256 x) public { helper(x); }', 'legacy exceptional halt is not modeled'),
     'assembly-write': ('function run(uint256 x) public { assembly { sstore(0, x) } }',
-        'assembly requires a terminal memory revert or read-only decoding'),
+        None),
+    'dynamic-assembly-write': ('function run(uint256 x) public { assembly { sstore(x, 1) } }',
+        'storage writes require a constant slot'),
     'external-write': ('function run(uint256 x) public { this.other(x); } '
         'function other(uint256 x) external { stored = x; }', 'external calls require the ABI-v1 bytes4 view slice'),
     'array-write': ('uint256[] private items; function run(uint256 x) public { items.push(x); }',
