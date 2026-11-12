@@ -2144,7 +2144,7 @@ parser alone does not authenticate provenance. A downstream proof must assume or
 separately establish that its evidence describes the intended bytecode, input,
 fork and prestate, and that its callee model describes the deployed child.
 
-Typed/static external transports (including signature precompiles), CREATE2,
+Typed calls with return values, static transports (including signature precompiles), CREATE2,
 nested account access/warmth journals, access-list transactions, EIP-7702 trace
 reconstruction, root OOG, and transaction refund/fee accounting are not covered by this adapter. Unmetered
 transports fail closed in `SourceGasRunner`; the ordinary functional mode
@@ -2216,7 +2216,7 @@ boundary. SequenceRunner accepts an explicit per-transaction `gasPrice` word for
 `tx.gasprice` observations (zero when omitted for older fixtures). This does not
 add transaction-fee settlement or EVM refund-counter semantics. The payment
 campaign normalizes sender fees and envelope nonce before comparing frame state.
-Gas-sensitive recompilation remains unavailable; typed/static-call gas adapters
+Gas-sensitive recompilation remains unavailable; typed return/static-call gas adapters
 and other limitations above still apply. Import admission and finite differential
 evidence are not full contract verification or a frontend equivalence theorem.
 
@@ -2263,11 +2263,49 @@ The differential fixture composes callback, calldata copy, CALL/DELEGATECALL,
 fixed native payment and final callback. Original bytecode, Denote and generated
 bytecode are compared on exact return/revert bytes, logs, storage and balances,
 including final-callback rollback. The finite callback oracle and gas-free
-compilation limits remain explicit. Source-gas adapters for typed/static calls
+compilation limits remain explicit. Source-gas adapters for static calls
 are still required for whole-transaction gas validation.
 
 ```sh
 python3 -m solidity_differential.check_post_call_memory_loops --output .lake/post-call-memory
 python3 -m solidity_differential.check_post_call_memory_loops --optimized --output .lake/post-call-memory-opt
 python3 -m solidity_differential.check_post_call_memory_boundaries --output .lake/post-call-memory-boundaries
+```
+
+### Original-bytecode gas for typed callbacks (development)
+
+The explicit 0.7.6 `sourceGas` profile attaches the Solidity call site's source
+location to ABI-v1, nonpayable interface calls with no return decoder. This
+includes scalar and memory/calldata-byte arguments. The normal profile keeps its
+existing explicit gas environment. Metered callbacks cannot be recompiled, even
+when their root function has no explicit `gasleft()`.
+
+Encoding and the code-existence check precede the implicit GAS observation.
+An empty-code target reverts without consuming a nonexistent GAS/CALL boundary.
+Otherwise the same original-bytecode meter checks the GAS charge, source call
+operand, EIP-150 allowance, child outcome/returndata and returned gas. The
+functional and observing adapters share one execution result. Five kernel lemmas
+pin this execution arm and the completion behavior: success installs the consumed
+cursor, and failure retains it while forwarding exact revert bytes. Transaction
+rollback remains the existing whole-frame operation; remaining frame gas is not
+transaction receipt gas or fee accounting.
+
+The generic fixture composes before/after callbacks, bytes, a native payment,
+events and an outer failure. It also includes an amount/amount/bytes settlement
+callback. Original solc execution and Denote compare gas, exact return/revert
+bytes, logs, storage and balances in both optimizer modes. Fixed child runtimes
+return/revert their observed entry gas, halt exceptionally, or have no code.
+Malformed-evidence controls and executable accounting mutants must fail for their
+intended reasons; compiler/instrumentation errors do not count as detections.
+
+The original-bytecode span meter, access/memory context and child gas consumption
+remain trusted evidence. Typed/static calls with returned values, signature
+precompiles, arbitrary callback code/reentrancy and nested account-access journals
+remain separate work. No full-contract or compiler-equivalence claim is made.
+
+```sh
+python3 -m solidity_differential.check_typed_callback_gas --output .lake/typed-callback-gas
+python3 -m solidity_differential.check_typed_callback_gas --optimized --output .lake/typed-callback-gas-opt
+python3 -m solidity_differential.check_source_gas_mutations --source-campaign .lake/typed-callback-gas --fixture Contracts/SolidityImportSmoke/LegacyTypedCallGas.sol --output .lake/typed-callback-gas-mutants
+python3 -m solidity_differential.check_typed_callback_gas_boundaries --output .lake/typed-callback-gas-boundaries
 ```

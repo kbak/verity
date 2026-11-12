@@ -35,7 +35,8 @@ def isClosedRawCall (mod : Compiler.ECM.ExternalCallModule) : Bool :=
 /-- A code-checked ABI-v1 interface call with no return-value decoder. -/
 def isClosedVoidCall (mod : Compiler.ECM.ExternalCallModule) : Bool :=
   match mod.byteTransport with
-  | some (.legacyVoid selector layout) => mod == Compiler.ECM.LegacyVoidCall.module selector layout
+  | some (.legacyVoid selector layout gasSite) =>
+      mod == Compiler.ECM.LegacyVoidCall.module selector layout gasSite
   | _ => false
 
 /-- The closed optional-bool low-level call transport emitted by the importer. -/
