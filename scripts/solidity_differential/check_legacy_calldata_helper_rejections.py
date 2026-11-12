@@ -43,7 +43,7 @@ CASES = {
         'assignment expression in multi-argument call'),
     'post-call-write': ('interface I { function hook() external; }',
         MEMORY+'function run(bytes calldata b,address t) external { I(t).hook(); stored=h(b); }',
-        'run(bytes,address)', 'storage-free trailing continuation'),
+        'run(bytes,address)', None),
 }
 
 if __name__ == '__main__':

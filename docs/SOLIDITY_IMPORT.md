@@ -2208,7 +2208,8 @@ empty returndata or an exact 32-byte nonzero word can be accepted without ABI
 bool decoding, while short/long returndata, zero words and failed children can
 be rejected. The importer neither inserts that policy nor substitutes a strict
 `0`/`1` decoder. Post-call memory stores/copies and terminal memory reverts are allowed when their operands
-read no storage; the ban on direct post-call persistent/transient reads/writes remains.
+read no storage. Direct storage reads remain rejected; the scalar-write extension
+below admits selected assignments after callbacks.
 
 With `sourceGas := true`, the native call's compiler-inserted GAS is identified
 by the original call's source site, followed by the existing checked CALL gas
@@ -2488,7 +2489,7 @@ and [compiler output](https://docs.soliditylang.org/en/v0.7.6/using-the-compiler
 
 ### Static balance observations after callbacks (development)
 
-Closed STATICCALL transports are admitted in the storage-free continuation of
+Closed STATICCALL transports are admitted with storage-free operands after
 closed state-changing calls and ABI-v1 void callbacks. This supports the pattern
 `before = query(); callback(...); after = query(); require(before + due <= after)`
 with the source's explicit checked-add helper. The importer preserves each query
@@ -2511,8 +2512,8 @@ Earlier local snapshots can be stale after reentrancy. The unchecked
 it is not a general reentrancy-safety certificate.
 
 Only canonical closed descriptors and storage-free operands pass. Direct parent
-persistent/transient reads or writes after the first state-changing interaction,
-including lock restoration, remain rejected. Bounded post-call memory loops still
+persistent/transient reads after the first state-changing interaction remain
+rejected. The scalar-write extension below admits lock restoration. Bounded post-call memory loops still
 exclude external calls. Existing gas-evidence assumptions and generated-code gas
 limitations are unchanged; this functional campaign assumes adequate child gas.
 
@@ -2522,7 +2523,8 @@ updated balances, sequential callbacks, underpayment, checked-add overflow,
 short/extra returndata, child reverts, forbidden static writes, exact logs and
 whole-frame rollback. Stale-balance and omitted-payment-check mutations require
 completed behavioral counterexamples on every route. Boundary checks keep direct
-storage effects, calls in loops and forged descriptors rejected.
+storage reads, writes with storage-dependent values, calls in loops and forged
+descriptors rejected.
 
 Semantic references: [EIP-214](https://eips.ethereum.org/EIPS/eip-214) and
 [Solidity 0.7.6 exceptions](https://docs.soliditylang.org/en/v0.7.6/control-structures.html#error-handling-assert-require-revert-and-exceptions).
@@ -2576,9 +2578,8 @@ range. Writes reuse existing scalar storage lowering, including read/modify/writ
 for packed fields. Unaccessed signed neighbors may remain in the layout, but
 reading or writing a signed member still rejects. Whole-struct values and copies,
 storage aliases, nested member paths, struct arrays/mappings and other member
-types remain outside this slice. The existing post-callback storage restriction
-is unchanged: a modifier's restoration can execute in call-free bodies but does
-not yet admit restoration after a state-changing callback.
+types remain outside this slice. The post-callback scalar-write extension below
+allows modifier restoration after a state-changing callback.
 
 Generic sequences compare original bytecode, canonical Denote and generated
 bytecode for dirty narrow inputs, wrapping updates, bool cleanup, distinct struct
@@ -2592,3 +2593,44 @@ finite tests, not established as a new end-to-end theorem.
 
 Semantic references: [Solidity 0.7.6 storage layout](https://docs.soliditylang.org/en/v0.7.6/internals/layout_in_storage.html)
 and [function modifiers](https://docs.soliditylang.org/en/v0.7.6/contracts.html#function-modifiers).
+
+
+### Scalar storage writes after callbacks (development)
+
+Closed state-changing calls may now be followed by named scalar `setStorage`
+assignments whose values read no storage and make no call. This includes packed
+scalar struct members; raw assembly stores use a different constructor and remain
+rejected after callbacks.
+A modifier may therefore close a packed bool before its body and restore it after
+callbacks, static balance checks and events, on normal fallthrough or early return.
+Existing modifier lowering supplies the postlude; no contract-specific rule is used.
+
+Every write uses the current callback world. Packed stores read/modify/write the
+current physical word, preserving neighboring bits changed by reentry. Direct
+post-call storage reads, address-channel `setStorageAddr`, mapping/array writes,
+explicit transient operations and writes inside bounded memory loops remain
+rejected. The existing field-descriptor semantics of `setStorage` are unchanged;
+legacy transient declarations are not added. A value saved before the callback
+can still be stale, and intentionally assigning it can overwrite newer state.
+
+`PostCallStorageFrames` proves current-world composition for actual scalar writes,
+the packed-updater reduction and preservation of other parent slots. The existing
+`PostCallStaticFrames.failed_post_call_check_rollback` also applies after writes:
+a later failed check rolls back the entire entry frame, not only the final store.
+These are conditional model laws. They do not establish callee correspondence,
+frontend/compiler equivalence, the complete packed-bit algebra or a general
+reentrancy invariant. The importer records an unchecked trailing-call obligation.
+
+`check_post_call_storage` runs independent original-bytecode, Denote and generated
+bytecode executions with a payer/ledger child program. The payer observes the closed
+lock, attempts guarded reentry, then changes a neighboring packed field through an
+unguarded setter. The campaign compares complete words (including opaque padding),
+exact events/errors, a subsequent full-word assignment, modifier restoration,
+normal/early exits and late rollback after restoration. Missing-restoration and
+stale-neighbor mutations must produce completed behavioral counterexamples on all
+routes. Both source optimizer settings are covered. Adequate gas is assumed;
+this does not extend generated-code gas equivalence or prove an entire application.
+
+Semantic references: [Solidity 0.7.6 storage layout](https://docs.soliditylang.org/en/v0.7.6/internals/layout_in_storage.html),
+[modifier execution](https://docs.soliditylang.org/en/v0.7.6/contracts.html#function-modifiers)
+and [exceptions](https://docs.soliditylang.org/en/v0.7.6/control-structures.html#error-handling-assert-require-revert-and-exceptions).

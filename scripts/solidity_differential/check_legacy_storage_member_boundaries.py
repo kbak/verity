@@ -65,8 +65,9 @@ CASES = {
     'signed-read': (SIMPLE, 'return value.signedCanary==0 ? 1 : 0;', 'does not support type int24'),
     'signed-write': (SIMPLE, 'value.signedCanary=int24(n); return 0;', 'does not support type int24'),
     'fixed-bytes': (HEADER, 'value.tag=bytes4(uint32(n)); return 0;', 'does not support type struct'),
-    'post-callback': (SIMPLE, 'I(address(1)).touch(); value.x=n; return 0;',
-                     'storage-free trailing continuation'),
+    'post-callback': (SIMPLE, 'I(address(1)).touch(); value.x=n; return 0;', None),
+    'post-callback-read': (SIMPLE, 'I(address(1)).touch(); value.x+=n; return 0;',
+                          'closed trailing continuation with storage-free operands'),
 }
 
 

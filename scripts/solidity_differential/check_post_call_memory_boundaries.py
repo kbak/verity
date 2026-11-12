@@ -46,14 +46,14 @@ BODY = ('function run(address a,bytes calldata data) external returns(uint256) {
 CASES = {
     'copy': (BODY, None),
     'storage-after-copy': (BODY.replace('return size(data);', 'uint256 n=size(data); return n+stored;'),
-                           'storage-free trailing continuation'),
+                           'closed trailing continuation with storage-free operands'),
     'loop-storage-write': ('function run(address a,bytes calldata data) external returns(uint256) { ' +
         CALL + 'for(uint256 i=0;i<2;i++) { stored=i; } return data.length; }',
-        'storage-free trailing continuation'),
+        'closed trailing continuation with storage-free operands'),
     'loop-call': ('function run(address a,bytes calldata data) external returns(uint256) { ' +
         CALL + 'for(uint256 i=0;i<2;i++) { bool success; '
         'assembly { success := call(1000000,a,0,0,0,0,0) } } return data.length; }',
-        'storage-free trailing continuation'),
+        'closed trailing continuation with storage-free operands'),
 }
 
 
