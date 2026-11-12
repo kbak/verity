@@ -60,6 +60,19 @@ private partial def yulReadPositions (node : Json)
       return positions
   | _ => return positions
 
+/-- Only immutable identifier copies preserve the ABI decoder's clean-width fact.
+This is not enum validity: ABI-v1 accepts out-of-range enum words. Casts and
+computed expressions can retain dirty bits in solc 0.7.6 even when their model
+value is cleaned. Bound library receivers also have different cleanup rules. -/
+def legacyCleanHelperArgument (caller : Env) (argument : Json)
+    (parameterType : String) : M Bool := do
+  unless optStr argument "nodeType" == some "Identifier" do return false
+  let id ← refInt argument
+  unless id >= 0 && caller.legacyCleanParams.contains id.toNat do return false
+  let argumentType ← mType argument
+  return argumentType == parameterType ||
+    (paramType argumentType == some .address && paramType parameterType == some .address)
+
 /-- Reject dirty narrow reads at both scalar and statement assembly entry points. -/
 def validateLegacyAssemblyReads (node : Json) : M Unit := do
   let ast ← mField node "AST"

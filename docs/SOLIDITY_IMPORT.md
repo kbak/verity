@@ -2060,3 +2060,41 @@ narrow locals, wraparound, nested calls and calldata forwarding/copying.
 Executable mutations pass the new value, write twice, omit the write or pass the
 new local value; each must compile and fail runtime checks after a passing control.
 No new primitive, axiom, transport or source-equivalence theorem is introduced.
+
+
+### Immutable scalar forwarding into assembly (experimental)
+
+The 0.7.6 profile preserves the ABI decoder's clean-width information through
+internal helper calls when an argument is a direct, immutable scalar parameter
+identifier and the parameter has the same source type (or both are address,
+payable-address or contract types). Nested scalar, tuple and void helpers can
+therefore read these values in assembly, including scratch-memory hashing.
+The information is scoped to each invocation and restored on return. A parameter
+written anywhere in the declaration, including modifier arguments, is excluded.
+
+This tracks the assembly word, not merely the high-level Solidity value.
+[Solidity 0.7.6 warns that narrow values may retain dirty bits in assembly](https://docs.soliditylang.org/en/v0.7.6/assembly.html#access-to-external-variables-functions-and-libraries).
+External ABI-v1 address words are masked to 160 bits and enum words to eight bits.
+Enum words outside the declared member range remain observable in assembly;
+converting an enum to an integer retains the existing use-site `INVALID` check.
+Internal forwarding does not introduce a new enum range check. The pinned
+[compiler's conversion logic](https://github.com/ethereum/solidity/blob/v0.7.6/libsolidity/codegen/CompilerUtils.cpp)
+distinguishes conversion from forced cleanup.
+
+Casts, computed expressions, local copies without tracked provenance and modified
+parameters still fail the raw narrow assembly-read gate. Bound `using for`
+receivers remain excluded from this new propagation because their cleanup rules
+differ from ordinary positional arguments. Existing full-word, literal and
+explicitly masked-address paths retain their boundaries. Modern admission is
+unchanged.
+
+`check_legacy_helper_assembly_scalars` compares source EVM, public/traced Denote
+and generated EVM against independent raw-word, hash, event, nonce and rollback
+expectations. It includes dirty ABI inputs, enum boundaries, nested and repeated
+calls, payable-address forwarding and optimizer on/off. The adjacent
+`check_legacy_helper_scalar_rejections` checks unknown provenance and writes,
+including a clean call followed by a dirty call to the same helper. Executable
+mutations corrupt the forwarded address or enum word, or add an incorrect early
+enum range check; each requires a passing control and runtime divergence.
+These are finite translation checks; no new primitive, axiom or source-equivalence
+theorem is introduced. Gas-sensitive execution remains outside this slice.
