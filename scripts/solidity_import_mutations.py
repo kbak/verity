@@ -490,6 +490,7 @@ solidity_import both from "{WORK / "base"}" entry "Slice.sol"
 # Compile and execute actual Denote mutants: a build failure is invalid,
 # not a detected semantic mutation. These regressions compare EVM bytes.
 DIFFERENTIAL_MUTANTS = (
+    "helper-scalar-address-word", "helper-scalar-enum-word", "helper-scalar-enum-check",
     "postincrement-new-value", "postincrement-double-write", "postincrement-missing-write",
     "postincrement-local-new-value",
     "conditional-invert", "conditional-eager-true", "conditional-eager-false",
@@ -910,6 +911,13 @@ def tasks(update_golden: bool) -> list:
     """
     items = [("prefix-checks", 2, lambda: prefix_checks(update_golden)),
              ("reference-boundary", 2, reference_boundary_mutations)]
+    items += [("legacy-helper-scalar-rejections", 1, lambda: module_campaign_output(
+        "check_legacy_helper_scalar_rejections", "legacy-helper-scalar-rejections", 900))]
+    items += [(f"legacy-helper-scalars-opt{int(optimized)}", 1,
+               lambda optimized=optimized: module_campaign_output(
+                   "check_legacy_helper_assembly_scalars", "legacy-helper-scalars",
+                   1800, *(["--optimized"] if optimized else [])))
+              for optimized in (False, True)]
     items += [("legacy-postincrement-rejections", 1, lambda: module_campaign_output(
         "check_legacy_postincrement_rejections", "legacy-postincrement-rejections", 900))]
     items += [(f"legacy-postincrement-opt{int(optimized)}", 1,

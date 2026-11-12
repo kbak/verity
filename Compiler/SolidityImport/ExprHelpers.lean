@@ -159,7 +159,8 @@ structure Env where
   bytes4Params : Array Nat := #[]
   writableLocals : RBMap Nat String compare := RBMap.empty
   zeroInitLocals : Array Nat := #[]
-  /-- Unassigned external scalar parameters cleaned by the legacy ABI decoder. -/
+  /-- Immutable scalar parameters cleaned by the legacy ABI decoder, including
+  representation-preserving identifier copies through internal helpers. -/
   legacyCleanParams : List Nat := []
   rawBindings : RBMap Nat String compare := RBMap.empty
   encodingMemory : Bool := false

@@ -22,7 +22,27 @@ CONDITIONAL_LOWERING = """private partial def lowerConditional (j : Json) : M Va
 POSTINCREMENT_STORAGE = '  let stmts := pre.push (.letVar oldVar (.storage name)) ++ combined.pre |>.push (.letVar newVar combined.expr) |>.push (.setStorage name (.localVar newVar))\n  return { pre := stmts, expr := if isPrefix then .localVar newVar else .localVar oldVar }\n'
 POSTINCREMENT_LOCAL = '        unless isSupportedIncDecTy ty do\n          failAt target s!"unsupported scalar local increment/decrement type {ty}"\n        let oldVar ← fresh\n        let combined ← combineCompound compoundOp ty (.localVar oldVar) (.literal 1) j\n        let stmts := #[Stmt.letVar oldVar (.localVar binding)] ++ combined.pre |>.push (.assignVar binding combined.expr)\n        return { pre := stmts, expr := if isPrefix then .localVar binding else .localVar oldVar }\n'
 
+# Narrow parameters must preserve the incoming assembly word at helper binding.
+HELPER_SCALAR_BINDING = """    | .scalar value =>
+        let converted ← convert pty argTy value argNode
+        if (bodyCompoundAssignedIds body).contains pid"""
+
 MUTANTS = {
+    'helper-scalar-address-word': ('Compiler/SolidityImport/Import.lean', HELPER_SCALAR_BINDING,
+        HELPER_SCALAR_BINDING.replace('        if (bodyCompoundAssignedIds',
+            '        let converted := if paramType pty == some .address then\n'
+            '          { converted with expr := .bitAnd converted.expr (.literal (2^128-1)) }\n'
+            '          else converted\n        if (bodyCompoundAssignedIds')),
+    'helper-scalar-enum-word': ('Compiler/SolidityImport/Import.lean', HELPER_SCALAR_BINDING,
+        HELPER_SCALAR_BINDING.replace('        if (bodyCompoundAssignedIds',
+            '        let converted := if pty.startsWith "enum " then\n'
+            '          { converted with expr := .add converted.expr (.literal 1) }\n'
+            '          else converted\n        if (bodyCompoundAssignedIds')),
+    'helper-scalar-enum-check': ('Compiler/SolidityImport/Import.lean', HELPER_SCALAR_BINDING,
+        HELPER_SCALAR_BINDING.replace('        if (bodyCompoundAssignedIds',
+            '        let converted ← if pty.startsWith "enum " then\n'
+            '          LegacyMemory.checkedEnum argNode pty converted else pure converted\n'
+            '        if (bodyCompoundAssignedIds')),
     'postincrement-new-value': ('Compiler/SolidityImport/Import.lean', POSTINCREMENT_STORAGE,
         POSTINCREMENT_STORAGE.replace('else .localVar oldVar', 'else .localVar newVar')),
     'postincrement-double-write': ('Compiler/SolidityImport/Import.lean', POSTINCREMENT_STORAGE,
@@ -367,6 +387,9 @@ def mutation_campaign(output, selected=None):
                 argv = [sys.executable, "-c",
                         "import sys; sys.path.insert(0, 'scripts'); "
                         "from solidity_differential.check_legacy_calldata_hash import main; sys.exit(main())",
+                        "--output", str(directory / ".lake/campaign")]
+            if name.startswith("helper-scalar-"):
+                argv = [sys.executable, "-m", "solidity_differential.check_legacy_helper_assembly_scalars",
                         "--output", str(directory / ".lake/campaign")]
             if name.startswith("postincrement-"):
                 argv = [sys.executable, "-m", "solidity_differential.check_legacy_postincrement_arguments",

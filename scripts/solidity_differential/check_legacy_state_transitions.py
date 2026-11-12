@@ -213,7 +213,8 @@ def campaign(output, *, kind='links', context=0, optimized=False, initial_count=
         output, output / 'source-solc', solc=Path.cwd() / '.lake/solidity-import/solc-0.7.6')['contracts']['Sequence.sol'][contract]
     # Import selection uses source enum names; selectors use their canonical ABI types.
     selected = [f.replace('«', '').replace('»', '') for f in roots(template)]
-    if selected != list(import_functions or functions):
+    requested = [f.replace('«', '').replace('»', '') for f in (import_functions or functions)]
+    if selected != requested:
         raise HarnessError('driver roots differ from the requested source signatures')
     if [f.split('(')[0] for f in selected] != [f.split('(')[0] for f in functions]:
         raise HarnessError('import roots and canonical function selectors differ')
