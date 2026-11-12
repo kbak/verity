@@ -478,6 +478,20 @@ generated-EVM correspondence, and gas/memory-size equality remain unproved by
 this bridge. Importer admission and all independent expectations remain
 unchanged; see `TAIL_CLEANUP_LIVENESS.md` and `AXIOMS.md`.
 
+The parameter/local-variable store bridge extends that proof to explicit
+store-only witnesses with literals, present parameter/local bindings and bounded
+constant additions. Agreement on referenced bindings derives identical evaluated
+writes; unrelated bindings may differ. Canonical execution, non-memory runtime
+preservation and subsequent load/hash agreement reuse the literal bridge under
+its existing bounds and coherence/byte-agreement hypotheses. No new hash premise
+is introduced. Binding agreement is assumed explicitly: the proof does not infer
+provenance or make previously captured dirty scalars equal. Missing bindings,
+overflowing additions, memory-dependent operands and other statement effects are
+outside the witness. Alias/liveness analysis, ABI return/allocator behavior,
+source/compiler and generated-EVM correspondence, and gas/memory-size equality
+remain outside this slice. Importer admission and independent expectations remain
+unchanged; see `TAIL_CLEANUP_LIVENESS.md` and `AXIOMS.md`.
+
 ## Compilation Pipeline
 
 ```
