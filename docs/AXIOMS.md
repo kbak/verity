@@ -14,10 +14,39 @@ See the corresponding scope in `TRUST_ASSUMPTIONS.md`.
 
 Removing the name-selected packed-hash replacement adds no axiom or proof shortcut.
 The inline-assembly registry's exact count changes from 18 to 17 with the removed
-entry; its metadata theorems do not prove source-body equivalence. Unsupported
-packed-memory bodies are rejected. The independent byte/hash expectations and
-existing hash premises are unchanged; see `TRUST_ASSUMPTIONS.md` and
-`PACKED_MEMORY_HASH_REPRODUCER.md`.
+entry; its metadata theorems do not prove source-body equivalence. The subsequent
+bounded-memory lowering adds no theorem or axiom: its byte-wise dirty-bit and root
+address audits are trusted frontend checks, with located rejection outside their
+supported fragment. Existing memory lemmas retain their explicit hypotheses;
+finite three-route tests do not discharge source/compiler correspondence or the
+existing hash premises. Independent byte/hash expectations remain unchanged; see
+`TRUST_ASSUMPTIONS.md` and `PACKED_MEMORY_HASH_REPRODUCER.md`.
+
+Storage-reference regression preparation adds no theorem, axiom or importer
+admission. Its independent slot/state oracle and source-EVM mutation campaign
+are finite test evidence only. The CI preparation explicitly reports missing
+Denote/generated-EVM sequence routes and cannot satisfy the Stage 5 milestone
+gate. Existing packed expectations and hash premises remain unchanged.
+
+The explicit-key storage control now runs the actual imported Denote sequence
+and Verity-generated Cancun bytecode against those unchanged state expectations.
+Denote-only and generated-code-only event-deletion mutants establish finite
+instrument sensitivity. This adds no axiom or compiler-correctness theorem;
+packed-reference roots still require separate admission and execution evidence.
+
+The full-cleanup storage-read slice admits complete generated mapping scratch
+sequences and scalar storage reads within the bounded-memory root audit. It adds
+no axiom or theorem: recognition remains trusted frontend code. Existing physical
+scratch-frame lemmas retain their assumptions; combined source/Denote/generated
+execution against the frozen expectations is finite regression evidence, not
+source/importer or compiler correspondence. Tail-only cleanup and writes remain
+excluded; see `PACKED_STORAGE_READ_DESIGN.md` and `TRUST_ASSUMPTIONS.md`.
+
+The tail-only caller-liveness preparation adds no axiom, theorem or admission.
+Controlled upper-bit perturbations provide finite source-EVM sensitivity evidence
+against unchanged packed hashes. All tail-only roots still reject; no Denote or
+generated-EVM agreement is claimed. The relational caller argument in
+`TAIL_CLEANUP_LIVENESS.md` remains a design obligation.
 
 `smoke.covered` and `smoke_step_credit` are ordinary theorems. The import
 path adds no project axiom, `sorry`, or `native_decide`. `covered` is
@@ -651,7 +680,6 @@ external-program correspondence remain separate obligations. Differential and
 mutation checks cover finite callback/copy/execution/payment/rollback sequences.
 No axiom or gas-accounting assumption is added.
 
-
 Metered ABI-v1 void callbacks expose the assumed summary
 `legacy_void_original_bytecode_gas_evidence`, carry their implicit GAS site and retain
 the consumed source-gas cursor even when the callback reverts. Five kernel lemmas
@@ -696,3 +724,42 @@ frontend's existing multi-immutable caller-address substitution. Supporting
 actual deployed immutable values requires a separate, explicit binding/provenance
 adapter. Unchanged helper bodies in a parameterized harness do not validate the
 original deployment context or the full application.
+
+The separate CI Turbo-Lean builder adds no project axiom or proof coverage.
+The established verifier/evaluator and narrow axiom allowlist remain unchanged.
+Declarative Solidity file inputs remain tracked by Lake and cache identity,
+with unsupported dynamic configuration rejected. The operational boundary is
+recorded in [TRUST_ASSUMPTIONS.md](TRUST_ASSUMPTIONS.md).
+
+The scratch-memory composition proofs add no axiom or proof shortcut. They relate
+physical word writes to the existing ordered mapping ABI preimage and prove
+byte/word/non-memory frames with explicit coherence and nonwrapping hypotheses
+where needed. They do not discharge existing hash/collision premises or admit
+combined importer roots. `TRUST_ASSUMPTIONS.md` records the same limited scope.
+
+The caller-memory composition modules add eleven ordinary theorems and no axiom
+or proof shortcut. A common sequence of physical word writes removes byte
+observation differences exactly where it overwrites them; remaining bytes in a
+read range must agree. Exact slice, coherent word and bounded proof-IR hash
+observations follow. This does not establish caller liveness analysis, equality
+of memory sizes/gas, source/importer correspondence, or admission. Existing hash
+premises remain unchanged; see `TAIL_CLEANUP_LIVENESS.md` and
+`TRUST_ASSUMPTIONS.md` for the explicit two-run hypotheses.
+
+The bounded literal-store execution bridge adds eleven ordinary theorems and no
+axiom or proof shortcut. It proves canonical source execution equals the common
+physical-write fold and preserves the full runtime frame outside memory. Its
+subsequent canonical load/hash equality uses explicit coherence, byte-agreement
+and nonwrapping/literal-normalization bounds. It does not prove arbitrary caller
+operands, source/compiler correspondence, generated-EVM equivalence, ABI return
+behavior or admission. Existing hash premises are unchanged; the matching scope
+is recorded in `TRUST_ASSUMPTIONS.md` and `TAIL_CLEANUP_LIVENESS.md`.
+
+The parameter/local-variable store bridge adds no axiom or proof shortcut.
+Explicit witnesses require present, word-bounded
+bindings, nonwrapping constant additions and full word-footprint bounds. Equal
+referenced bindings derive the same resolved writes; canonical execution and
+load/hash observations then reuse the bounded literal bridge. Binding agreement
+is a premise, not inferred provenance, and earlier captured scalars are not
+erased. Existing hash premises, expectations and importer admission are unchanged.
+`TRUST_ASSUMPTIONS.md` and `TAIL_CLEANUP_LIVENESS.md` record the same limited scope.

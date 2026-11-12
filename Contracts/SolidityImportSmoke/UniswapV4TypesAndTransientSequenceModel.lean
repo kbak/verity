@@ -19,13 +19,16 @@ solidity_import imported from "Contracts/SolidityImportSmoke" entry "UniswapV4Ty
   function setPoolFee(PoolKey, uint24)
   function accountPoolBalanceDelta(PoolKey, int128, int128)
 
--- Keep the packed-memory root as an explicit rejection regression until its
--- source body can be translated. It must never receive a padded replacement.
+-- This storage-dependent root clears only the tail word. The bounded-memory
+-- slice rejects the remaining dirty bytes; their liveness is a later obligation.
 /--
-error: UniswapV4TypesAndTransientSequence.sol:115:13: YulFunctionCall:
-[solidity-import:unsupported] only scratch-space mstore at 0x00 or 0x20 is supported
+error: UniswapV4TypesAndTransientSequence.sol:113:9: InlineAssembly:
+[solidity-import:unsupported] bounded memory leaves dirty scalar bytes visible after assembly
 closure: SequenceFixture.recordPositionLiquidity -> PositionSlice.calculatePositionKey
-mstore(add(fmp, 0x26), salt)
+assembly ("memory-safe") {
+            let fmp := mload(0x40)
+            mstore(add(fmp, 0x26), salt)
+            mstor
 -/
 #guard_msgs (whitespace := lax) in
 solidity_import rejectedPackedHash from "Contracts/SolidityImportSmoke"
