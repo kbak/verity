@@ -54,12 +54,18 @@ computation or admit the still-blocked packed-reference helper. Full initial and
 expected state archives remain unchanged. This is finite execution evidence, not
 constructor, gas, whole-world, importer or compiler correspondence.
 
-The full-cleanup read preparation retains both frozen state archives and the
-packed archive. It executes their unmodified initial-read prefix, but reports
-combined Denote/generated execution as missing. Separate successful hash and
-supplied-key controls do not justify admitting the combined root. The proposed
-scratch/storage effect analysis and frame obligations in
-`PACKED_STORAGE_READ_DESIGN.md` are unimplemented and add no current proof coverage.
+The full-cleanup read slice retains both frozen state archives and the packed
+archive. Its unchanged initial-read prefix must agree across source EVM, actual
+Denote and generated Cancun bytecode, including renamed helpers and shifted
+storage layout. Wrong mapping-base and shortened-hash source mutants must remain
+observable on all routes. The root audit now recognizes complete generated mapping
+scratch sequences using fresh-binding provenance and admits scalar storage reads
+without inferring pointer bounds from their values. This recognition is trusted
+frontend code, not a kernel-certified abstract interpretation. Existing physical
+scratch-frame lemmas supply disjointness and allocator/storage/event frames; no
+source/importer correspondence theorem or new cryptographic premise is claimed.
+Tail-only cleanup, writes and observations of synthetic layouts remain excluded.
+See `PACKED_STORAGE_READ_DESIGN.md` for the precise boundary and remaining work.
 
 The tail-only caller probes compare controlled upper-bit perturbations against
 the unchanged packed hashes. They retain both complete state archives without
