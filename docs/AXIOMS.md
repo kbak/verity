@@ -678,3 +678,12 @@ observations follow. This does not establish caller liveness analysis, equality
 of memory sizes/gas, source/importer correspondence, or admission. Existing hash
 premises remain unchanged; see `TAIL_CLEANUP_LIVENESS.md` and
 `TRUST_ASSUMPTIONS.md` for the explicit two-run hypotheses.
+
+The bounded literal-store execution bridge adds eleven ordinary theorems and no
+axiom or proof shortcut. It proves canonical source execution equals the common
+physical-write fold and preserves the full runtime frame outside memory. Its
+subsequent canonical load/hash equality uses explicit coherence, byte-agreement
+and nonwrapping/literal-normalization bounds. It does not prove arbitrary caller
+operands, source/compiler correspondence, generated-EVM equivalence, ABI return
+behavior or admission. Existing hash premises are unchanged; the matching scope
+is recorded in `TRUST_ASSUMPTIONS.md` and `TAIL_CLEANUP_LIVENESS.md`.

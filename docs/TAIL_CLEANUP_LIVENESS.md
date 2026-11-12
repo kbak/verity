@@ -129,6 +129,38 @@ analysis, ABI-return/allocator reasoning and source/importer correspondence are
 still pending. No importer rule, fixture, independent expectation or current
 rejection changes; the full-cleanup admission slice still comes first after #39.
 
+## Bounded literal execution bridge
+
+`BoundedMstoreExecution.lean` connects a straight-line list of literal `mstore`
+statements to the canonical source interpreter, `execStmtsCanonical`. Execution
+continues with exactly the ordered physical-write fold used above. Every write
+must fit its entire 32-byte footprint below the EVM address modulus, and word
+values are typed `Uint256` literals. These conditions make the evaluated operands
+identical in both runs without assuming equality of their initial memories or
+bindings. Empty lists, overlapping writes and unaligned addresses are included.
+
+The exact poststate also gives a complete runtime frame: after erasing both
+memory views, the initial and final runtime states are equal. This preserves
+bindings, immutable values, external-call bookkeeping and all non-memory world
+fields, including storage and events. It permits memory expansion and does not
+claim that two different initial states have equal non-memory fields.
+
+`BoundedMstoreObservation.lean` then compares actual canonical `mload` and
+`keccak256` expression results after successful executions of that block. Initial
+physical bytes must agree within the observation range wherever every write
+misses. Both initial word views must be coherent. Literal offset and size bounds
+prevent modular truncation, and the existing rounded nonwrapping hash-reader
+bound remains explicit. The load observes all 32 bytes; the hash observes its
+exact selected slice. No hash premise is added or weakened.
+
+This bridge proves source execution and observations for literal blocks. It does
+not derive equal operands for arbitrary expressions, infer aliases or residual
+masks, erase earlier captured scalar values, prove ABI return/allocator behavior,
+or establish source/compiler correspondence or generated-EVM equivalence. The
+existing rejection gates and independent expectations remain unchanged. Importer
+admission still waits for #39, with full-cleanup composition before tail-only
+caller analysis.
+
 ## Subsequent implementation acceptance
 
 After #39 and the preceding full-cleanup slice merge, first prove the minimal

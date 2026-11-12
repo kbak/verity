@@ -464,6 +464,20 @@ inferred safely. Memory-size/gas equality and non-memory world agreement are
 separate obligations. Importer admission and every independent expectation and
 rejection remain unchanged; see `TAIL_CLEANUP_LIVENESS.md`.
 
+The bounded literal-store bridge proves actual canonical source execution of a
+straight-line block equals the existing ordered physical-write fold. Typed word
+literals and bounded 32-byte footprints establish the common evaluated operands.
+The exact poststate preserves all non-memory runtime fields, including bindings,
+immutable values, call bookkeeping, storage and events. It permits memory
+expansion and does not equate non-memory fields of different initial states.
+Subsequent canonical load/hash results agree under explicit initial coherence,
+byte agreement outside the writes, literal-normalization bounds and the existing
+nonwrapping observation bounds. No new hash premise is introduced. Arbitrary
+operand/alias analysis, ABI return and allocator behavior, source/compiler and
+generated-EVM correspondence, and gas/memory-size equality remain unproved by
+this bridge. Importer admission and all independent expectations remain
+unchanged; see `TAIL_CLEANUP_LIVENESS.md` and `AXIOMS.md`.
+
 ## Compilation Pipeline
 
 ```
