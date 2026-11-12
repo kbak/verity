@@ -1149,7 +1149,7 @@ prerequisite for CREATE2 key-derivation helpers, not an implementation of code d
 | --- | --- |
 | Bounded unsigned `while` loops (`WhileStatement`) and `--counter` / `counter -= 1` in `for` loop headers | `lowerWhile` supports `while (v != 0)` / `while (v > 0)` (and `0 != v` / `0 < v`) on a writable unsigned `uintN` local `v` (`bits ≤ 256`) when the body contains no `return`, does not assign `v` before the final statement, and ends with a strictly decreasing bit-clearing or right-shift update: (1) positive constant right shift (`v >>= k` or `v = v >> k`, `1 <= k < 256`), (2) lowest-set-bit clear (`v &= v - 1` or `v = v & (v - 1)`), or (3) MSB bit clear (`uintM b = msb(v); ...; v &= ~(1 << b)` or `v = v.clearBit(b)` where `msb` computes `sub(255, clz(x))` and `b` is not reassigned). Lowered to `Stmt.forEach loopVar (.literal bits) [.ite condVal.expr bodyOut.toList []]`, which executes at most `bits` guarded iterations. `lowerFor` also accepts `--i` and `i -= 1` as `for` loop step expressions so `bodyAssignedIds` detects any counter mutation in loop bodies. |
 | Yul `clz(x)` in single-assignment `InlineAssembly` | `lowerYul` lowers `clz(a)` (EIP-7939 Count Leading Zeros, 256 for `0`) into an unrolled 8-step binary search over `[128, 64, 32, 16, 8, 4, 2, 1]` using `Expr.shr` and `Stmt.ite`, producing a pure `Denote`- and `Yul`-compatible statement prelude without requiring custom EVM opcodes in downstream proofs. |
-| `memory` and `calldata` struct local declarations (`Struct memory s = ...`, `Struct calldata s = ...`) and `calldata`-to-`memory` helper argument conversions | `lowerLocal` supports non-reassigned `memory` and `calldata` struct locals initialized from a root/helper struct reference (`.mem`) or a struct-array element (`m.tranches[i]`, `.abiElement`). Initializing a `memory` struct local or `memory` helper parameter from a `calldata` struct or `calldata` struct-array element materializes the struct into freshly allocated memory (`AbiRootLowering.materializeFromCalldata` / `AbiRootLowering.materializeElementFromCalldata`), validating scalar bounds and array heads at copy time; `memory`-to-`calldata` conversions and reassigned struct locals fail closed with located diagnostics. Referenced `immutable` state variables fail closed with `immutable state variable <name> is outside this slice`. |
+| `memory` and `calldata` struct local declarations (`Struct memory s = ...`, `Struct calldata s = ...`) and `calldata`-to-`memory` helper argument conversions | `lowerLocal` supports non-reassigned `memory` and `calldata` struct locals initialized from a root/helper struct reference (`.mem`) or a struct-array element (`m.tranches[i]`, `.abiElement`). Initializing a `memory` struct local or `memory` helper parameter from a `calldata` struct or `calldata` struct-array element materializes the struct into freshly allocated memory (`AbiRootLowering.materializeFromCalldata` / `AbiRootLowering.materializeElementFromCalldata`), validating scalar bounds and array heads at copy time; `memory`-to-`calldata` conversions and reassigned struct locals fail closed with located diagnostics. Referenced scalar `immutable` state variables require checked deployed bindings (see below). |
 
 ### Development slice: `abi.encodeWithSelector`, `.selector` byte buffers, Yul arithmetic/bitwise/context builtins, and external/ABI rejection diagnostics
 
@@ -2434,9 +2434,8 @@ flag and complete returndata. The receiver is an address; the input is an existi
 memory-bytes local or a static-word `abi.encodeWithSelector` expression. Selectors
 may be literals or type-qualified external/public function selectors. Instance
 selectors and effectful operands reject; their evaluation is never discarded.
-Contracts containing unresolved immutables reject, including constructor-set
-target addresses; the existing frontend shortcut to the caller address is not
-valid evidence for a deployed token binding. Call options, ABI-v2, omitted tuple
+Referenced immutables require explicit deployed bindings, including references
+reached through helpers and modifiers. No caller-address substitution is used. Call options, ABI-v2, omitted tuple
 bindings and other raw call forms remain outside
 this admission path.
 
@@ -2487,3 +2486,59 @@ The mutation runner registers both optimizer modes, ordinary storage contexts
 0/1/2, guard counterexamples and original-bytecode accounting mutants. Runtime
 artifacts stay in ignored campaign directories; the generic fixtures and runners
 are checked in.
+
+
+### Explicit deployed immutable bindings (development)
+
+Set `Profile.deployedImmutables := some "deployment.json"` to import scalar immutable
+reads and public getters. The path is relative to the Solidity source root. The
+JSON object has `version: 1`, a 20-byte `codeAddress`, the complete `runtimeBytecode`
+with a `0x` prefix, and a `bindings` array. Each entry contains `source`, `contract`,
+`name`, `type` (the exact solc type string), and `word` (a 32-byte hex EVM word).
+The source path is its logical standard-JSON name; the contract is the declaring
+contract, including for private inherited members. A binding is specific to that
+declaration, rather than a potentially shadowed variable name.
+
+The importer compiles the collected sources with its pinned compiler and selected
+settings, then checks the submitted runtime against the resulting template and
+`evm.deployedBytecode.immutableReferences`. All compiler reference ranges must have
+bindings; every occurrence must match, and every byte outside those ranges must
+match too, including metadata. Duplicate, foreign, missing, overlapping, out-of-range,
+non-word, incorrectly typed and noncanonical bindings reject. Unresolved link
+placeholders reject. Declarations optimized out of the runtime cannot be supplied
+with invented values; reading one without a runtime reference still rejects.
+Sources that cannot produce runtime bytecode with the selected settings reject.
+
+Patch words are right-aligned for addresses and unsigned integers and left-aligned
+for fixed bytes; booleans must be zero or one. Signed patches may contain either
+a zero-extended narrow bit pattern or its sign extension. The checker compares the
+raw patch bytes and normalizes the scalar model value by sign extension.
+Checking an unused signed binding does not admit legacy signed expressions or
+getters. Enum and function-type immutable bindings remain unsupported. Other
+existing expression/ABI restrictions still apply. The old implicit
+substitution of constructor-set addresses with `address(this)` has been removed.
+Absent deployment evidence, used immutables fail closed, even when an initializer
+appears locally evaluable. Unused immutable declarations need no inferred value.
+
+The model specializes immutable reads to literals. A delegatecall changes the
+execution account used by `address(this)` and storage; it does not change these
+code-bound literals. Generated code is specialized to the same binding, so its
+constructor does not recreate or rebind the original deployment. The report records
+the deployment identity and typed bindings; the import digest includes the complete
+evidence and checker source, preventing different deployments from sharing that
+identity. Re-elaborate the import when deployment evidence changes.
+
+This is a consistency check of submitted evidence, not an authenticated chain query,
+constructor proof, or proof of Solidity/bytecode correspondence. Consumers must tie
+`codeAddress` and runtime to their intended chain, block and code-loading call frame.
+The execution account may differ under delegatecall. Source-gas evidence must refer
+to the same original runtime; generated-code gas equivalence remains unclaimed.
+
+Generic differential checks execute real constructors, capture their runtime, and
+compare source bytecode, Denote and generated bytecode through direct calls and a
+real delegatecall proxy. They exercise getters, inherited/shadowed declarations,
+initializer values, a direct-call guard and a calldata-sensitive static child.
+Malformed-evidence checks are rejection tests, not property proofs.
+
+Semantic references: [Solidity 0.7.6 immutables](https://docs.soliditylang.org/en/v0.7.6/contracts.html#constant-and-immutable-state-variables)
+and [compiler output](https://docs.soliditylang.org/en/v0.7.6/using-the-compiler.html#output-description).

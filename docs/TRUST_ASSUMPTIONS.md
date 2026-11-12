@@ -2766,9 +2766,27 @@ cold raw targets. Spans, memory/access context and child gas consumption remain
 trusted. Generated gas equivalence, arbitrary callee correspondence, nested access
 journals, root OOG and whole-application verification are not established.
 
-This new raw-static path rejects contracts containing unresolved immutables,
-including indirectly referenced targets, rather than inheriting the general
-frontend's existing multi-immutable caller-address substitution. Supporting
-actual deployed immutable values requires a separate, explicit binding/provenance
-adapter. Unchanged helper bodies in a parameterized harness do not validate the
+The raw-static path requires checked deployed bindings for referenced immutables,
+including indirectly referenced targets. The former caller-address substitution
+is removed. The explicit binding adapter below checks runtime consistency;
+unchanged helper bodies in a parameterized harness alone do not validate the
 original deployment context or the full application.
+
+
+Explicit deployed immutable bindings add no project axiom or assumed ECM summary.
+The trusted Solidity frontend checks typed submitted words against a freshly
+compiled runtime template and solc immutable reference ranges, including every
+unpatched byte and repeated occurrence. Signed patch words are normalized by sign
+extension before high-level use; this does not admit legacy signed expressions.
+Reads/getters become literal model words;
+`address(this)` retains the execution account, including under delegatecall. The
+previous implicit constructor-address substitution is removed. Declaration identity
+includes source and defining contract; complete deployment evidence and checker
+source participate in the import digest. The report records the claimed code
+address and bindings. Consumers must authenticate those bytes/address against their
+intended chain and block and establish that the call frame loads that code. This
+check establishes neither constructor reachability nor Solidity-to-bytecode
+correspondence. Generated code keeps the original literals; it does not rerun the
+original constructor. Existing expression restrictions, external-call assumptions
+and original-bytecode gas evidence obligations remain. Finite differential checks
+and malformed-evidence rejection checks are validation, not universal proofs.

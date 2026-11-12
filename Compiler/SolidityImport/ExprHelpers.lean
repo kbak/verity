@@ -120,6 +120,8 @@ structure Env where
   errorDecls : RBMap Nat Json compare
   usedErrors : List ErrorDef
   stateVars : RBMap Nat Json compare
+  /-- Runtime-checked immutable words, independent of the execution account. -/
+  deployedImmutables : RBMap Nat Nat compare := RBMap.empty
   numericConstants : RBMap Nat Json compare := RBMap.empty
   constantStack : List Nat := []
   values : RBMap Nat Expr compare

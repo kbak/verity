@@ -2,6 +2,7 @@ import Lean
 import Compiler.Sha256.Engine
 import Compiler.Hex
 import Compiler.SolidityImport.Access
+import Compiler.SolidityImport.DeployedImmutables
 import Compiler.SolidityImport.Profile
 import Compiler.SolidityImport.Quote
 import Compiler.SolidityImport.Report
@@ -2998,7 +2999,9 @@ private partial def lowerRef (j : Json) : M Ref := do
       else if let some decl := env.stateVars.find? n then
         let name ← mStr (← mField decl "name")
         if optStr decl "mutability" == some "immutable" then
-          failAt j s!"immutable state variable {name} is outside this slice"
+          let some word := env.deployedImmutables.find? n
+            | failAt j s!"immutable {name} requires a checked deployed binding"
+          return .expr { pre := #[], expr := .literal word }
         if env.duplicateLayoutLabels.contains name then
           failAt j s!"shadowed storage declaration {name} is outside this slice"
         if let some item := env.layoutItems.find? name then
@@ -3326,6 +3329,10 @@ private partial def lowerRef (j : Json) : M Ref := do
         let n := cid.toNat
         let some decl := env.numericConstants.find? n <|> env.stateVars.find? n
           | failAt j "unresolved constant member"
+        if optStr decl "mutability" == some "immutable" then
+          let some word := env.deployedImmutables.find? n
+            | failAt j "qualified immutable requires a checked deployed binding"
+          return .expr { pre := #[], expr := .literal word }
         if env.constantStack.contains n then failAt j "cyclic constant initializer"
         let declared ← mType decl
         let initializer ← mField decl "value"
@@ -13986,14 +13993,6 @@ private partial def canLowerDynamicBytesReturnExpr (j : Json) : M Bool := do
 
 private def bindRoot (fn : Json) : M (Array SrcParam) := do
   noteFn fn
-  if (← get).stateVars.size > 1 then
-    for (svId, svDecl) in (← get).stateVars.toList do
-      if optStr svDecl "mutability" == some "immutable" &&
-          ((field? svDecl "value").filter (!·.isNull)).isNone &&
-          (← mType svDecl) == "address" then
-        modify fun e =>
-          { e with values := e.values.insert svId .contractAddress,
-                   scalarTy := e.scalarTy.insert svId .address }
   let params ← mArr (← mField (← mField fn "parameters") "parameters")
   let mut out : Array SrcParam := #[]
   for p in params do
@@ -14514,7 +14513,12 @@ private def lowerPublicVarGetter (varDecl : Json) : M (Array Stmt × Array SrcPa
   let isConstant := (field? varDecl "constant").bind (fun v => v.getBool?.toOption) == some true
   let mutability := optStr varDecl "mutability" |>.getD "mutable"
   if mutability == "immutable" then
-    failAt varDecl s!"immutable state variable {name} is outside this slice"
+    let some word := (← get).deployedImmutables.find? rootId
+      | failAt varDecl s!"immutable {name} requires a checked deployed binding"
+    let some pty := paramType (← mType varDecl)
+      | failAt varDecl "unsupported immutable getter type"
+    modify fun e => { e with publicVarGetterReturns := #[pty] }
+    return (#[.returnValues [.literal word]], #[])
   if isConstant || mutability == "constant" then
     let declared ← mType varDecl
     let initializer ← mField varDecl "value"
@@ -15361,7 +15365,10 @@ private def importSlice
       ("runs", profile.optimizerRuns.getD 200)]),
     ("outputSelection", Json.mkObj [("*", Json.mkObj [
       ("", Json.arr #[Json.str "ast"]),
-      ("*", Json.arr #[Json.str "storageLayout"])])]),
+      ("*", Json.arr (#[Json.str "storageLayout"] ++
+        if profile.deployedImmutables.isSome then
+          #[Json.str "evm.deployedBytecode.object", Json.str "evm.deployedBytecode.immutableReferences"]
+        else #[]))])]),
     ("remappings", Json.arr (remaps.map fun p => Json.str s!"{p.1}={p.2}"))]
   let settings := Json.mkObj (if release.supportsViaIR then
     baseSettings ++ [("viaIR", Json.bool profile.viaIR)]
@@ -15419,6 +15426,33 @@ private def importSlice
   let contracts ← field parsed "contracts"
   let entryContracts ← field contracts entry
   let chosen ← field entryContracts contract
+  let mut deployment := Json.null
+  let mut deploymentSummary : Option String := none
+  if let some path := profile.deployedImmutables then
+    let text ← IO.FS.readFile (projectRoot / path)
+    deployment ← match Json.parse text with
+      | .ok data => pure data
+      | .error message => throwError "invalid deployment JSON: {message}"
+    let mut declarations := #[]
+    for (id, decl) in env.stateVars do
+      if optStr decl "mutability" == some "immutable" &&
+          (env.funContractId.find? id).any targetBases.contains then
+        declarations := declarations.push {
+          id, source := env.nodeFile.find? id |>.getD "",
+          contract := env.funContract.find? id |>.getD "",
+          name := optStr decl "name" |>.getD "", solcType := ← typeString decl :
+          DeployedImmutables.Declaration }
+    let runtime ← field (← field chosen "evm") "deployedBytecode"
+    let words ← match DeployedImmutables.check declarations
+        (← str (← field runtime "object")) (← field runtime "immutableReferences") deployment with
+      | .ok words => pure words
+      | .error message => throwError "deployed immutables: {message}"
+    env := { env with deployedImmutables := words }
+    deploymentSummary := some (Json.mkObj [
+      ("codeAddress", ← field deployment "codeAddress"),
+      ("runtimeHexSha256", toJson (sha256Hex
+        (← str (← field deployment "runtimeBytecode")).toUTF8)),
+      ("bindings", ← field deployment "bindings")]).compress
   let layout ← field chosen "storageLayout"
   let types ← field layout "types"
   let items ← arr (← field layout "storage")
@@ -15828,7 +15862,10 @@ private def importSlice
     ("functions", Json.arr signatures),
     ("solcInput", input),
     ("sourceGas", Json.bool profile.sourceGas),
+    ("deployment", deployment),
     ("importerSources", Json.mkObj [
+      ("DeployedImmutables.lean", Json.str
+        (← moduleText sourceRoot "Compiler/SolidityImport/DeployedImmutables.lean")),
       ("Import.lean", Json.str importer), ("Coverage.lean", Json.str coverage),
       ("Report.lean", Json.str reportSrc), ("Quote.lean", Json.str quoteSrc),
       ("Profile.lean", Json.str profileSrc), ("Legacy.lean", Json.str legacySrc),
@@ -15862,7 +15899,7 @@ private def importSlice
   let digest := sha256Hex digestInput.compress.toUTF8
   let report : ImportReport :=
     { importerVersion, solcLongVersion := release.longVersion, solcSha256 := solcSha, settingsJson := settings.compress,
-      sourceDigest := digest, contract, roots := (roots.map (·.1)).toList,
+      sourceDigest := digest, deploymentSummary, contract, roots := (roots.map (·.1)).toList,
       functions := specs.toList.map fun f =>
         { function := f.name, denoteCovered := executableStmtListCovered f.body,
           compilerProof := .unavailable noCompilerProofReason },

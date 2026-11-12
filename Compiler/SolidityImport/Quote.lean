@@ -388,6 +388,7 @@ def quoteReport (r : ImportReport) : m Term := do
          compilerProof := $proof } : Compiler.CompilationModel.SolidityImport.FunctionStatus))
   `(({ importerVersion := $(quote r.importerVersion), solcLongVersion := $(quote r.solcLongVersion),
        solcSha256 := $(quote r.solcSha256), settingsJson := $(quote r.settingsJson),
+       deploymentSummary := $(quote r.deploymentSummary),
        sourceDigest := $(quote r.sourceDigest), contract := $(quote r.contract),
        roots := $(← strings r.roots),
        functions := $(← list (← r.functions.mapM status)),
