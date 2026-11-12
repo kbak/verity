@@ -24,34 +24,39 @@ DRIVER = r'''
 open Lean Compiler.CompilationModel
 private def accounting (input : Json) : Except String Json := do
   let rows ← (← (← input.getObjVal? "transactions").getArr?).toList.mapM fun tx => do
-    let state ← SolidityImport.SourceGasInput.parse (← tx.getObjVal? "sourceGas")
-    let mut remaining := state.remaining
-    let mut output : List Json := []
-    for event in state.events do
-      let cost := match event with
-        | .read _ cost | .call cost _ | .endFrame cost => cost
-      let some after := GasCandidate.consume remaining cost | throw "span OOG"
-      remaining := after
-      match event with
-      | .read _ _ =>
-        let some after := GasCandidate.observe remaining | throw "GAS OOG"
+    let ident ← tx.getObjVal? "id"
+    let result : Except String Json := do
+      let state ← SolidityImport.SourceGasInput.parse (← tx.getObjVal? "sourceGas")
+      let mut remaining := state.remaining
+      let mut output : List Json := []
+      for event in state.events do
+        let cost := match event with
+          | .read _ cost | .call cost _ | .endFrame cost => cost
+        let some after := GasCandidate.consume remaining cost | throw "span OOG"
         remaining := after
-        output := output ++ [Json.mkObj [("kind", toJson "read"), ("remaining", toJson after)]]
-      | .call _ witness =>
-        let c := witness.context
-        let ctx : GasCandidate.Context := {
-          memoryWords := c.memoryWords, inputOffset := c.inputOffset, inputSize := c.inputSize
-          outputOffset := c.outputOffset, outputSize := c.outputSize
-          targetWarm := c.targetWarm, targetDead := c.targetDead
-          transfersValue := c.transfersValue, delegationWarm := c.delegationWarm }
-        let some charged := GasCandidate.charge remaining witness.request.gas ctx
-          | throw "CALL OOG"
-        remaining ← GasCandidate.finish charged witness.exceptional witness.gasLeft
-        output := output ++ [Json.mkObj [("kind", toJson "call"),
-          ("allowance", toJson charged.childGas), ("remaining", toJson remaining)]]
-      | .endFrame _ =>
-        output := output ++ [Json.mkObj [("kind", toJson "end"), ("remaining", toJson remaining)]]
-    return Json.mkObj [("id", ← tx.getObjVal? "id"), ("events", toJson output)]
+        match event with
+        | .read _ _ =>
+          let some after := GasCandidate.observe remaining | throw "GAS OOG"
+          remaining := after
+          output := output ++ [Json.mkObj [("kind", toJson "read"), ("remaining", toJson after)]]
+        | .call _ witness =>
+          let c := witness.context
+          let ctx : GasCandidate.Context := {
+            memoryWords := c.memoryWords, inputOffset := c.inputOffset, inputSize := c.inputSize
+            outputOffset := c.outputOffset, outputSize := c.outputSize
+            targetWarm := c.targetWarm, targetDead := c.targetDead
+            transfersValue := c.transfersValue, delegationWarm := c.delegationWarm }
+          let some charged := GasCandidate.charge remaining witness.request.gas ctx
+            | throw "CALL OOG"
+          remaining ← GasCandidate.finish charged witness.exceptional witness.gasLeft
+          output := output ++ [Json.mkObj [("kind", toJson "call"),
+            ("allowance", toJson charged.childGas), ("remaining", toJson remaining)]]
+        | .endFrame _ =>
+          output := output ++ [Json.mkObj [("kind", toJson "end"), ("remaining", toJson remaining)]]
+      return Json.mkObj [("id", ← tx.getObjVal? "id"), ("events", toJson output)]
+    return match result with
+      | .ok row => row
+      | .error reason => Json.mkObj [("id", ident), ("rejected", toJson reason)]
   return toJson rows
 private def runAccounting (input output : String) : IO Unit := do
   let parsed ← IO.ofExcept (Json.parse (← IO.FS.readFile input))
@@ -64,6 +69,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source-campaign', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--fixture', type=Path,
+                        default=Path('Contracts/SolidityImportSmoke/LegacyGasObservations.sol'))
     args = parser.parse_args()
     out = args.output.resolve()
     out.mkdir(parents=True, exist_ok=False)
@@ -72,7 +79,7 @@ def main():
     payload = json.loads((saved / 'input.json').read_text())
     expected = json.loads((saved / 'accounting-expected.json').read_text())
     complete = json.loads((saved / 'complete.json').read_text())
-    fixture = Path('Contracts/SolidityImportSmoke/LegacyGasObservations.sol').read_bytes()
+    fixture = args.fixture.read_bytes()
     if complete['fixtureSha256'] != hashlib.sha256(fixture).hexdigest():
         raise HarnessError('preserved source differs from fixture')
     if not expected or len(expected) != len(payload['transactions']):
@@ -102,6 +109,10 @@ def main():
         if [row['id'] for row in actual] != [tx['id'] for tx in transactions]:
             raise HarnessError('accounting driver dropped/reordered cases')
         for row, tx in zip(actual, transactions):
+            if 'rejected' in row:
+                if set(row) != {'id', 'rejected'} or not isinstance(row['rejected'], str):
+                    raise HarnessError('malformed accounting rejection')
+                continue
             if len(row['events']) != len(tx['sourceGas']['events']):
                 raise HarnessError('accounting driver omitted events')
             for event in row['events']:
@@ -118,7 +129,10 @@ def main():
             raise HarnessError('nonunique gas mutation anchor: ' + name)
         code = source.replace(before, after)
         actual = execute(name, code, payload['transactions'])
-        witnesses = [i for i, (got, want) in enumerate(zip(actual, expected)) if got != want]
+        # A changed allowance can invalidate a later recorded child response.
+        # Such model rejections are recorded, never counted as detections.
+        witnesses = [i for i, (got, want) in enumerate(zip(actual, expected))
+                     if 'rejected' not in got and got != want]
         if not witnesses:
             raise HarnessError('undetected gas mutant: ' + name)
         index = witnesses[0]
@@ -127,6 +141,7 @@ def main():
         if execute(name + '-delete', code, []) != []:
             raise HarnessError('empty deletion control differs')
         results.append({'mutant': name, 'detected': True, 'baselinePassed': True,
+            'rejectedTraces': [row for row in actual if 'rejected' in row],
             'caseId': expected[index]['id'], 'deletion_minimal': True,
             'sourceSha256': hashlib.sha256(code.encode()).hexdigest(),
             'scope': 'CallGas executable arithmetic versus preserved original EVM; no compiler equivalence'})

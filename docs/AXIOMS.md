@@ -677,6 +677,16 @@ external-program correspondence remain separate obligations. Differential and
 mutation checks cover finite callback/copy/execution/payment/rollback sequences.
 No axiom or gas-accounting assumption is added.
 
+Metered ABI-v1 void callbacks expose the assumed summary
+`legacy_void_original_bytecode_gas_evidence`, carry their implicit GAS site and retain
+the consumed source-gas cursor even when the callback reverts. Five kernel lemmas
+pin the canonical execution arm, exact failure bytes and cursor preservation;
+these are model laws, not EVM/frontend correspondence. The finite gas-observing
+child programs and local bytecode traces validate forwarding, rollback and
+accounting but do not establish arbitrary callback behavior. Source spans,
+access/memory context and child gas usage retain the original-bytecode meter's
+trust boundary. No project axiom is added; static/signature adapters remain open.
+
 The separate CI Turbo-Lean builder adds no project axiom or proof coverage.
 The established verifier/evaluator and narrow axiom allowlist remain unchanged.
 Declarative Solidity file inputs remain tracked by Lake and cache identity,

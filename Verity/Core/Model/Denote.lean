@@ -1376,16 +1376,38 @@ def executeRawCall (oracle : DenoteOracle) (fields : List Field) (state : Denote
     byteCallAccesses := state.byteCallAccesses ++ observed.touched }
   return (.continue next, observed.touched)
 
+/-- Typed-call failure drops the world but retains the consumed gas evidence.
+Success commits the functional child observation and the same gas cursor. -/
+def finishLegacyVoidCall (state : DenoteState)
+    (observed : ByteExternalCall.Observation Verity.ContractState Verity.StorageKey)
+    (meter : Option SourceGas.State) :
+    StmtOutcome × List Verity.StorageKey × Option SourceGas.State :=
+  if !observed.success then (.revertWithData observed.returndata, observed.touched, meter)
+  else
+    let next := { state with
+      sourceGas := meter
+      world := observed.world
+      rawReturndata := some observed.returndata
+      byteCallAccesses := state.byteCallAccesses ++ observed.touched }
+    (.continue next, observed.touched, meter)
+
 /-- Execute a code-checked, value-free typed CALL. Successful returndata is
 ignored regardless of size or content; the complete buffer is still observable. -/
-def executeLegacyVoidCall (oracle : DenoteOracle) (fields : List Field) (state : DenoteState)
+def executeLegacyVoidCallObserved (oracle : DenoteOracle) (fields : List Field)
+    (state : DenoteState)
     (mod : Compiler.ECM.ExternalCallModule) (selector : Nat)
-    (layout : List Compiler.Yul.LegacyVoidCalls.Argument) (args : List Expr) :
-    Except String (StmtOutcome × List Verity.StorageKey) := do
-  unless mod == Compiler.ECM.LegacyVoidCall.module selector layout do
+    (layout : List Compiler.Yul.LegacyVoidCalls.Argument) (args : List Expr)
+    (gasSite : Option String) :
+    Except String (StmtOutcome × List Verity.StorageKey × Option SourceGas.State) := do
+  unless mod == Compiler.ECM.LegacyVoidCall.module selector layout gasSite do
     throw "closed legacy void call metadata differs"
   let some adversary := state.byteCallAdversary | throw "legacy void call adversary missing"
-  let some gas := state.byteCallGas | throw "legacy void call gas environment missing"
+  if gasSite.isSome && state.sourceGas.isNone then
+    throw "original bytecode gas evidence missing"
+  if gasSite.isNone && state.sourceGas.isSome then
+    throw "unmetered typed callback in source gas execution"
+  if gasSite.isNone && state.byteCallGas.isNone then
+    throw "legacy void call gas environment missing"
   let some values := evalExprList oracle fields state args
     | throw "legacy void call operand evaluation unsupported"
   unless selector < 2^32 && values.length == Compiler.Yul.LegacyVoidCalls.arity layout do
@@ -1399,17 +1421,35 @@ def executeLegacyVoidCall (oracle : DenoteOracle) (fields : List Field) (state :
   let (prepared, size) := VoidCalls.encode state.world selector layout values inputByte
   let target := values[0]! % 2^160
   if DenoteExternalCode.extCodeSize prepared (Verity.Core.Address.ofNat target) == 0 then
-    return (.revertWithData [], [])
+    return (.revertWithData [], [], state.sourceGas)
+  let (gas, meter) ← match gasSite, state.sourceGas with
+    | some site, some meter => do
+        let (gas, next) ← SourceGas.read meter site
+        pure (gas, some next)
+    | _, _ => do
+        let some gas := state.byteCallGas | throw "legacy void call gas environment missing"
+        pure (gas, none)
   let request : ByteExternalCall.Request := {
     kind := .call, caller := prepared.thisAddress.val, target, value := 0, gas,
     calldata := (List.range size).map fun i => UInt8.ofNat (prepared.physicalByte (pointer+i)).val }
+  let (request, witness, meter) ← match meter with
+    | none => pure (request, none, none)
+    | some meter => do
+        let (actual, witness, next) ← SourceGas.prepareCall meter request
+        pure (actual, some witness, some next)
   let observed ← RawCalls.execute adversary request prepared
-  if !observed.success then return (.revertWithData observed.returndata, observed.touched)
-  let next := { state with
-    world := observed.world
-    rawReturndata := some observed.returndata
-    byteCallAccesses := state.byteCallAccesses ++ observed.touched }
-  return (.continue next, observed.touched)
+  if let some witness := witness then
+    SourceGas.checkResponse witness observed.success observed.returndata
+  return finishLegacyVoidCall state observed meter
+
+/-- Canonical functional outcome; the observed adapter also retains gas on failure. -/
+def executeLegacyVoidCall (oracle : DenoteOracle) (fields : List Field) (state : DenoteState)
+    (mod : Compiler.ECM.ExternalCallModule) (selector : Nat)
+    (layout : List Compiler.Yul.LegacyVoidCalls.Argument) (args : List Expr)
+    (gasSite : Option String := none) : Except String (StmtOutcome × List Verity.StorageKey) := do
+  let (outcome, touched, _) ←
+    executeLegacyVoidCallObserved oracle fields state mod selector layout args gasSite
+  return (outcome, touched)
 
 /-- Legacy scalar staticcall: preserve the output word and normalize only bool.
 This transport neither advances the free pointer nor rejects dirty true words. -/
@@ -2341,8 +2381,8 @@ mutual
             match executeLegacyBoolCall oracle fields state mod result selector count args with
             | .ok (outcome, _) => outcome
             | .error _ => .revert
-        | some (.legacyVoid selector layout) =>
-            match executeLegacyVoidCall oracle fields state mod selector layout args with
+        | some (.legacyVoid selector layout gasSite) =>
+            match executeLegacyVoidCall oracle fields state mod selector layout args gasSite with
             | .ok (outcome, _) => outcome
             | .error _ => .revert
         | some (.rawCall resultVar delegated) =>
