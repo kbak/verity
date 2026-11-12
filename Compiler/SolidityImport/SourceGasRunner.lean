@@ -46,23 +46,30 @@ private partial def statement (oracle : DenoteOracle) (fields : List Field)
         | throw "source gas loop evaluation unsupported"
       loop oracle fields state name statements 0 count
   | _ =>
-      let outcome ← match stmt with
+      let (outcome, meter) ← match stmt with
         | .ecm mod args =>
           match mod.byteTransport with
-          | some (.sourceGasRead result site) => executeSourceGasRead state mod result site args
+          | some (.sourceGasRead result site) => do
+              let outcome ← executeSourceGasRead state mod result site args
+              pure (outcome, state.sourceGas)
+          | some (.legacyVoid selector layout (some site)) => do
+              let (outcome, _, meter) ←
+                executeLegacyVoidCallObserved oracle fields state
+                  mod selector layout args (some site)
+              pure (outcome, meter)
           | some (.rawCall result delegated) => do
               let (outcome, _) ← executeRawCall oracle fields state mod result delegated args
-              pure outcome
+              pure (outcome, state.sourceGas)
           | some (.log ..) | some (.extCodeSize ..) | some (.extCodeCopy ..)
             | some .invalid | some .revertMemory | some .returnMemory =>
-              pure (execStmt oracle fields state stmt)
+              pure (execStmt oracle fields state stmt, state.sourceGas)
           | _ => throw "source gas transport requires an explicit call-boundary adapter"
         | .externalCallBind .. | .tryExternalCallBind .. =>
             throw "source gas transport requires an explicit call-boundary adapter"
-        | _ => pure (execStmt oracle fields state stmt)
+        | _ => pure (execStmt oracle fields state stmt, state.sourceGas)
       match outcome with
       | .continue next | .stop next | .return _ next => pure ⟨outcome, next.sourceGas⟩
-      | .revertWithData _ | .invalid => pure ⟨outcome, state.sourceGas⟩
+      | .revertWithData _ | .invalid => pure ⟨outcome, meter⟩
       | .revert => throw "source gas execution has unsupported semantics or missing evidence"
 end
 

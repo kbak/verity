@@ -167,8 +167,9 @@ def closedTransportCovered (mod : Compiler.ECM.ExternalCallModule) (args : List 
   | some (.legacyBool result selector count) =>
       mod == Compiler.ECM.LegacyBoolCall.module result selector count &&
         decide (selector < 2^32) && args.length == count + 1 && exprListCovered args
-  | some (.legacyVoid selector layout) =>
-      mod == Compiler.ECM.LegacyVoidCall.module selector layout && decide (selector < 2^32) &&
+  | some (.legacyVoid selector layout gasSite) =>
+      mod == Compiler.ECM.LegacyVoidCall.module selector layout gasSite &&
+        decide (selector < 2^32) &&
         args.length == Compiler.Yul.LegacyVoidCalls.arity layout && exprListCovered args
   | some (.rawCall resultVar delegated) =>
       mod == Compiler.ECM.SolidityRawCall.module resultVar delegated &&

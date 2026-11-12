@@ -27,6 +27,24 @@ class SourceGasTraceTests(unittest.TestCase):
         self.assertEqual(source_sites(node(['value'])), {'40:21:0'})
         self.assertEqual(source_sites(node(['value', 'gas'])), set())
 
+    def test_typed_gas_site_requires_resolved_nonpayable_void_declaration(self):
+        import copy
+        declaration = {'id': 17, 'nodeType': 'FunctionDefinition',
+                       'stateMutability': 'nonpayable', 'returnParameters': {'parameters': []}}
+        call = {'nodeType': 'FunctionCall', 'src': '80:42:0', 'expression': {
+            'nodeType': 'MemberAccess', 'referencedDeclaration': 17,
+            'typeDescriptions': {'typeString': 'function (uint256,bytes memory) external'}}}
+        self.assertEqual(source_sites([call, declaration]), {'80:42:0'})
+        self.assertEqual(source_sites(call), set())
+        for mutability in ['view', 'pure', 'payable']:
+            changed = {**declaration, 'stateMutability': mutability}
+            self.assertEqual(source_sites([call, changed]), set())
+        changed = {**declaration, 'returnParameters': {'parameters': [{'type': 'bool'}]}}
+        self.assertEqual(source_sites([call, changed]), set())
+        internal = copy.deepcopy(call)
+        internal['expression']['typeDescriptions']['typeString'] = 'function () internal'
+        self.assertEqual(source_sites([internal, declaration]), set())
+
     def fixture(self):
         logs = [{'depth': 1, 'pc': 0, 'op': 'GAS', 'gas': 100, 'gasCost': 2,
                  'stack': [], 'memory': []},
