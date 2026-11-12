@@ -2220,3 +2220,69 @@ Campaign artifacts stay under ignored `.lake/`, not in the source tree.
 Accounting references: [EIP-150](https://eips.ethereum.org/EIPS/eip-150),
 [EIP-2929](https://eips.ethereum.org/EIPS/eip-2929), and
 [EIP-7702](https://eips.ethereum.org/EIPS/eip-7702).
+
+
+### Solidity 0.7.6 native-value and optional-word payments (development)
+
+The importer admits `(bool ok, ) = receiver.call{value: amount}("")` in roots and
+inlined scalar/void helpers. Receiver and value must be effect-free scalars; the
+only option is `value`, calldata must be an empty literal, and the bytes tuple
+component must be discarded. Success is the raw CALL success bit. Failure does
+not implicitly bubble returndata or revert: subsequent source checks determine
+that behavior. The existing raw-call model checks funds, transfers value before
+child execution, commits successful child effects and rolls back failed children.
+An outer revert restores the whole frame, including successful earlier payments.
+
+Discarding the bytes result does **not** discard its memory effect. Solc 0.7.6
+allocates nonempty returndata at the free pointer, with a length word and rounded
+capacity; empty returndata does not advance the pointer. This behavior is lowered
+explicitly and tested with return lengths 0, 1, 31, 32, 33 and 64. No code-existence
+check is inserted: an explicitly modeled empty account can receive payment.
+
+Static `abi.encodeWithSelector` with a numeric four-byte literal and supported
+ABI-v1 scalar arguments constructs selector-prefixed memory bytes. Dynamic
+arguments/selectors and ABI-v2 sites remain rejected. Assembly CALL
+can additionally copy up to one word into scratch offset zero: exactly
+`min(32, returndatasize())` bytes overwrite memory, including on child REVERT.
+Other nonempty output regions, including DELEGATECALL outputs, remain rejected.
+A scratch-word read requires an immediately following returndata-size case that
+establishes at least 32 copied bytes; short and unguarded reads remain rejected. Legacy numeric `switch` cases
+lower to one selector evaluation and scoped conditional branches. Immutable Yul
+locals retain a proven boolean bound; reassigned/unbounded locals cannot be
+assigned to Solidity bools without explicit cleanup.
+
+These constructs preserve source-level optional-word checks. In particular,
+empty returndata or an exact 32-byte nonzero word can be accepted without ABI
+bool decoding, while short/long returndata, zero words and failed children can
+be rejected. The importer neither inserts that policy nor substitutes a strict
+`0`/`1` decoder. Post-call memory stores/copies and terminal memory reverts are allowed when their operands
+read no storage; the ban on post-call persistent/transient reads/writes remains.
+
+With `sourceGas := true`, the native call's compiler-inserted GAS is identified
+by the original call's source site, followed by the existing checked CALL gas
+boundary. SequenceRunner accepts an explicit per-transaction `gasPrice` word for
+`tx.gasprice` observations (zero when omitted for older fixtures). This does not
+add transaction-fee settlement or EVM refund-counter semantics. The payment
+campaign normalizes sender fees and envelope nonce before comparing frame state.
+Gas-sensitive recompilation remains unavailable; typed/static-call gas adapters
+and other limitations above still apply. Import admission and finite differential
+evidence are not full contract verification or a frontend equivalence theorem.
+
+Run the focused campaigns with the pinned environment:
+
+```sh
+python3 -m solidity_differential.check_legacy_value_payments --output .lake/value-payments
+python3 -m solidity_differential.check_legacy_value_payments --optimized --output .lake/value-payments-opt
+python3 -m solidity_differential.check_value_payment_boundaries --output .lake/value-payment-boundaries
+```
+
+Each payment campaign includes original-bytecode/Denote comparisons of exact
+return/revert bytes, source gas, caller and child storage, balances and rollback,
+plus executable model mutants that remove native, asset and outer-failure guards.
+Compiler errors or missing instrumentation never count as mutation detections.
+
+The gas-free native fixture also runs original/model/generated-bytecode checks:
+
+```sh
+python3 -m solidity_differential.check_native_value_compilation --output .lake/native-value-abc
+```

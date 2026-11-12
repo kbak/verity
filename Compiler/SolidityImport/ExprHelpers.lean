@@ -899,6 +899,7 @@ def isProvablyBoundedYulExpr (scalarType : ParamType) (expr : Expr) : Bool :=
   | none => false
   | some bits =>
       match expr with
+      | .literal value => value < 2^bits
       | .byte _ _ => bits ≥ 8
       | .lt _ _ | .gt _ _ | .slt _ _ | .sgt _ _ | .eq _ _ | .logicalNot _ => bits ≥ 1
       | .bitAnd (.literal mask) _ | .bitAnd _ (.literal mask) => mask < 2 ^ bits

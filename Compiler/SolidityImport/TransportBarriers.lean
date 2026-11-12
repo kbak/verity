@@ -203,8 +203,12 @@ partial def stmtAfterTrailingCall : Stmt → Bool
   | .ecm mod args => (isClosedSourceGasRead mod || isClosedLowLevelCall mod ||
       isClosedRawCall mod || isClosedVoidCall mod ||
       isClosedExtCodeSize mod ||
-      mod == Compiler.ECM.SolidityInvalid.module) &&
+      mod == Compiler.ECM.SolidityInvalid.module ||
+      mod == Compiler.ECM.SolidityRevertMemory.module) &&
       args.all exprStorageFree
+  | .mstore offset value => exprStorageFree offset && exprStorageFree value
+  | .returndataCopy dest source count =>
+      exprStorageFree dest && exprStorageFree source && exprStorageFree count
   | .return value => exprStorageFree value
   | .returnValues values | .emit _ values => values.all exprStorageFree
   | .revertEmpty | .revertReturndata | .stop => true

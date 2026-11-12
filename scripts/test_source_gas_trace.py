@@ -19,6 +19,14 @@ class SourceGasTraceTests(unittest.TestCase):
                                    'referencedDeclaration': ident}}
         self.assertEqual(source_sites([node(-1), node(4)]), {'-1'})
 
+    def test_implicit_value_call_gas_site(self):
+        def node(names):
+            return {'nodeType': 'FunctionCall', 'src': '40:21:0',
+                    'expression': {'nodeType': 'FunctionCallOptions', 'names': names,
+                                   'expression': {'memberName': 'call'}}}
+        self.assertEqual(source_sites(node(['value'])), {'40:21:0'})
+        self.assertEqual(source_sites(node(['value', 'gas'])), set())
+
     def fixture(self):
         logs = [{'depth': 1, 'pc': 0, 'op': 'GAS', 'gas': 100, 'gasCost': 2,
                  'stack': [], 'memory': []},
