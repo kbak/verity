@@ -16,7 +16,7 @@ CASES = {
     'selector-width': ('function run() external pure returns(uint256) { bytes memory b = '
         'abi.encodeWithSelector(0x12345678,uint256(9)); return b.length; }', 'run()', None),
     'dynamic-selector': ('function run(uint256 s) external pure returns(uint256) { bytes memory b = '
-        'abi.encodeWithSelector(bytes4(uint32(s)),uint256(9)); return b.length; }', 'run(uint256)', 'literal four-byte selector'),
+        'abi.encodeWithSelector(bytes4(uint32(s)),uint256(9)); return b.length; }', 'run(uint256)', 'legacy selector requires a literal or resolved external function selector'),
     'dynamic-payload': ('function run(bytes memory v) external pure returns(uint256) { bytes memory b = '
         'abi.encodeWithSelector(0x12345678,v); return b.length; }', 'run(bytes)', 'static ABI encoding requires'),
     'abi-v2': ('pragma experimental ABIEncoderV2; contract P { function run() external pure returns(uint256) '

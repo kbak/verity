@@ -48,7 +48,13 @@ def source_sites(ast):
                             ' external' in expr.get('typeDescriptions', {}).get('typeString', '') and
                             declaration.get('stateMutability') in ('view', 'pure') and
                             len(declaration.get('returnParameters', {}).get('parameters', [])) == 1)
-            if high or low or implicit or typed_void or recovery or typed_static:
+            raw_static = (node.get('nodeType') == 'FunctionCall' and
+                          expr.get('nodeType') == 'MemberAccess' and
+                          expr.get('memberName') == 'staticcall' and
+                          expr.get('referencedDeclaration') is None and
+                          expr.get('expression', {}).get('typeDescriptions', {}).get('typeString')
+                          in ('address', 'address payable'))
+            if high or low or implicit or typed_void or recovery or typed_static or raw_static:
                 sites.add(node['src'])
             for child in node.values():
                 walk(child)

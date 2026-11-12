@@ -147,6 +147,8 @@ inductive ByteTransport where
   | legacyRecover (resultVar : String)
   /-- Raw CALL/DELEGATECALL over memory with an empty output area. -/
   | rawCall (resultVar : String) (delegated : Bool)
+  /-- Raw STATICCALL retains success and all returndata, without a code check. -/
+  | rawStaticCall (resultVar : String)
   /-- ABI v1 view call `(bytes32, bytes) returns (bytes4)`. -/
   | legacyBytes4 (resultVar : String) (selector : Nat)
   /-- ABI-v1 scalar STATICCALL with nonzero-word bool decoding. -/
@@ -1025,6 +1027,28 @@ def module (resultVar : String) (delegated : Bool) : ExternalCallModule where
 
 end SolidityRawCall
 
+namespace SolidityRawStaticCall
+
+/-- The exact six STATICCALL operands; decoding belongs to later source statements. -/
+def compile (result : String) (args : List YulExpr) : Except String (List YulStmt) := do
+  unless args.length == 4 do throw "raw static call argument count differs"
+  return [.let_ result (.call "staticcall" (args ++ [.lit 0, .lit 0]))]
+
+/-- A closed static boundary, with neither a code check nor automatic revert forwarding. -/
+def module (result : String) : ExternalCallModule where
+  name := "solidityRawStaticCall"
+  numArgs := 4
+  resultVars := [result]
+  readsState := true
+  writesState := false
+  compile := fun _ args => compile result args
+  byteTransport := some (.rawStaticCall result)
+  proofStatus := .assumed
+  summaryName := "raw_static_call_byte_response"
+  summaryMutability := .staticcall
+
+end SolidityRawStaticCall
+
 namespace LegacyBoolCall
 
 /-- ABI-v1 bool static call with code existence and truthiness cleanup.
@@ -1145,6 +1169,10 @@ def compileCanonical (module : ExternalCallModule) (context : CompilationContext
       if gasSite.isSome then
         throw "source gas observations require original bytecode; recompilation unsupported"
       LegacyVoidCalls.compile selector layout args
+  | some (.rawStaticCall result) =>
+      unless module == SolidityRawStaticCall.module result do
+        throw "closed raw static call metadata differs"
+      SolidityRawStaticCall.compile result args
   | some (.rawCall resultVar delegated) =>
       unless module == SolidityRawCall.module resultVar delegated do
         throw "closed raw call metadata differs"

@@ -8,8 +8,39 @@ open Lean Compiler.CompilationModel
 /-- Recognize the resolved standard ABI encoding builtin. -/
 def isEncoding (node : Json) : Bool := LegacyPacked.isEncoding node "encode"
 
-/-- Selector-prefixed encoding is limited to a literal selector and static words. -/
+/-- Selector-prefixed encoding is limited to static selectors and words. -/
 def isSelectorEncoding (node : Json) : Bool := LegacyPacked.isEncoding node "encodeWithSelector"
+
+/-- Resolve a literal or a type-qualified external function's four-byte selector. -/
+def selectorValue (node : Json) (lowerScalar : Json → M Val) : M Nat := do
+  if optStr node "nodeType" == some "Literal" then
+    let value ← lowerScalar node
+    let .literal selector := value.expr | failAt node "legacy selector requires a constant"
+    unless value.pre.isEmpty && selector < 2^32 do failAt node "legacy selector exceeds four bytes"
+    return selector
+  unless optStr node "nodeType" == some "MemberAccess" &&
+      optStr node "memberName" == some "selector" && (← mType node) == "bytes4" do
+    failAt node "legacy selector requires a literal or resolved external function selector"
+  let selected ← mField node "expression"
+  unless optStr selected "nodeType" == some "MemberAccess" do
+    failAt node "legacy selector requires a type-qualified function"
+  let owner ← mField selected "expression"
+  unless optStr owner "nodeType" == some "Identifier" &&
+      (← mType owner).startsWith "type(contract " do
+    failAt node "legacy selector requires a type-qualified function"
+  let id ← refInt selected
+  let env ← get
+  let some declaration := if id ≥ 0 then env.funs.find? id.toNat else none
+    | failAt node "legacy selector function is unresolved"
+  unless #[some "external", some "public"].contains (optStr declaration "visibility") do
+    failAt node "legacy selector function must be external or public"
+  let some hex := optStr declaration "functionSelector"
+    | failAt node "legacy selector function has no selector"
+  let some selector := Compiler.Hex.parseHexNat? ("0x" ++ hex)
+    | failAt node "legacy function selector is malformed"
+  unless hex.length == 8 && selector < 2^32 do
+    failAt node "legacy function selector exceeds four bytes"
+  return selector
 
 /-- Lower a static scalar tuple into physical memory, including its length header.
 Arguments are evaluated before stores; unsigned/address/bool words are right-aligned,
@@ -25,14 +56,8 @@ def lower (node : Json) (lowerScalar : Json → M Val) : M EncodedBytes := do
   let mut words : Array Expr := #[]
   let arguments ← mArr (← mField node "arguments")
   let selector ← if isSelectorEncoding node then do
-    unless !arguments.isEmpty && optStr arguments[0]! "nodeType" == some "Literal" do
-      failAt node "legacy selector encoding requires a literal four-byte selector"
-    let value ← lowerScalar arguments[0]!
-    let .literal selector := value.expr
-      | failAt arguments[0]! "legacy selector encoding requires a numeric literal"
-    unless value.pre.isEmpty && selector < 2^32 do
-      failAt arguments[0]! "legacy selector exceeds four bytes"
-    pure (some selector)
+    unless !arguments.isEmpty do failAt node "legacy selector argument missing"
+    pure (some (← selectorValue arguments[0]! lowerScalar))
     else pure none
   let offset := if selector.isSome then 4 else 0
   let arguments := if selector.isSome then arguments.extract 1 arguments.size else arguments

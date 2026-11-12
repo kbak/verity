@@ -1376,6 +1376,42 @@ def executeRawCall (oracle : DenoteOracle) (fields : List Field) (state : Denote
     byteCallAccesses := state.byteCallAccesses ++ observed.touched }
   return (.continue next, observed.touched)
 
+/-- Retain the actual success flag and complete return buffer on every static exit. -/
+def finishRawStaticCall (state : DenoteState) (result : String)
+    (observed : ByteExternalCall.Observation Verity.ContractState Verity.StorageKey)
+    (meter : Option SourceGas.State) : DenoteState :=
+  { state with
+    sourceGas := meter
+    world := observed.world
+    bindings := bindValue state.bindings result (if observed.success then 1 else 0)
+    rawReturndata := some observed.returndata
+    byteCallAccesses := state.byteCallAccesses ++ observed.touched }
+
+/-- Raw static execution shares the checked static-world boundary. The source
+meter, when present, derives the child allowance from original-bytecode evidence. -/
+def executeRawStaticCall (oracle : DenoteOracle) (fields : List Field) (state : DenoteState)
+    (mod : Compiler.ECM.ExternalCallModule) (result : String) (args : List Expr) :
+    Except String (StmtOutcome × List Verity.StorageKey) := do
+  unless mod == Compiler.ECM.SolidityRawStaticCall.module result do
+    throw "closed raw static call metadata differs"
+  let some adversary := state.byteCallAdversary | throw "raw static call adversary missing"
+  let some [gas, target, pointer, size] := evalExprList oracle fields state args
+    | throw "raw static call operands unsupported"
+  let request : ByteExternalCall.Request := {
+    kind := .staticcall, caller := state.world.thisAddress.val, target := target % 2^160
+    value := 0, gas
+    calldata := (List.range size).map fun i =>
+      UInt8.ofNat (state.world.physicalByte (pointer + i)).val }
+  let (request, witness, meter) ← match state.sourceGas with
+    | none => pure (request, none, none)
+    | some meter => do
+        let (actual, witness, next) ← SourceGas.prepareCall meter request
+        pure (actual, some witness, some next)
+  let observed ← ByteExternalCall.executeChecked adversary request state.world
+  if let some witness := witness then
+    SourceGas.checkResponse witness observed.success observed.returndata
+  return (.continue (finishRawStaticCall state result observed meter), observed.touched)
+
 /-- Typed-call failure drops the world but retains the consumed gas evidence.
 Success commits the functional child observation and the same gas cursor. -/
 def finishLegacyVoidCall (state : DenoteState)
@@ -2472,6 +2508,10 @@ mutual
             | .error _ => .revert
         | some (.legacyVoid selector layout gasSite) =>
             match executeLegacyVoidCall oracle fields state mod selector layout args gasSite with
+            | .ok (outcome, _) => outcome
+            | .error _ => .revert
+        | some (.rawStaticCall result) =>
+            match executeRawStaticCall oracle fields state mod result args with
             | .ok (outcome, _) => outcome
             | .error _ => .revert
         | some (.rawCall resultVar delegated) =>

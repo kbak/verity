@@ -930,6 +930,17 @@ def static_call_gas_campaign(optimized: bool) -> None:
                            *[arg for name in mutants for arg in ("--mutant", name)])
 
 
+def raw_static_gas_campaign(optimized: bool) -> None:
+    saved = module_campaign_output("check_raw_static_gas", "raw-static-gas", 1800,
+                                   *(["--optimized"] if optimized else []))
+    mutants = ["gas-own-cost", "call-eip150-cap", "call-cold-access", "call-warm-access",
+               "call-return-gas", "source-span-cost"]
+    module_campaign_output("check_source_gas_mutations", "raw-static-gas-mutations", 1800,
+                           "--source-campaign", str(saved), "--fixture",
+                           "Contracts/SolidityImportSmoke/LegacyStaticWord.sol",
+                           *[arg for name in mutants for arg in ("--mutant", name)])
+
+
 def tasks(update_golden: bool) -> list:
     """Independent work items, most expensive first (each runs in its own snapshot).
 
@@ -960,6 +971,21 @@ def tasks(update_golden: bool) -> list:
     items += [(f"static-call-gas-opt{int(optimized)}", 1,
                lambda optimized=optimized: static_call_gas_campaign(optimized))
               for optimized in (False, True)]
+    items += [(f"raw-static-gas-opt{int(optimized)}", 1,
+               lambda optimized=optimized: raw_static_gas_campaign(optimized))
+              for optimized in (False, True)]
+    items += [(f"legacy-static-words-opt{int(optimized)}-ctx{context}", 1,
+               lambda optimized=optimized, context=context: module_campaign_output(
+                   "check_legacy_static_words", "legacy-static-words", 1800,
+                   "--context", str(context), *(["--optimized"] if optimized else [])))
+              for optimized in (False, True) for context in (0, 1, 2)]
+    items += [(f"raw-static-mutations-opt{int(optimized)}", 1,
+               lambda optimized=optimized: module_campaign_output(
+                   "check_raw_static_mutations", "raw-static-mutations", 1800,
+                   *(["--optimized"] if optimized else [])))
+              for optimized in (False, True)]
+    items += [("raw-static-boundaries", 1, lambda: module_campaign_output(
+        "check_raw_static_boundaries", "raw-static-boundaries", 900))]
     items += [("static-call-gas-boundaries", 1, lambda: module_campaign_output(
         "check_static_call_gas_boundaries", "static-call-gas-boundaries", 900))]
     items += [("typed-callback-gas-boundaries", 1, lambda: module_campaign_output(

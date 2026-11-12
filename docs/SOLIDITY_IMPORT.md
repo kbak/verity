@@ -2366,3 +2366,66 @@ The registered `static-call-gas-opt0` and `static-call-gas-opt1` mutation tasks 
 run the five applicable accounting mutants (GAS cost, EIP-150 cap, warm access,
 returned gas and source spans). These typed targets are warm after the code check,
 or inherently warm as precompile 1. STATICCALL has no value stipend to mutate.
+
+
+### Raw legacy STATICCALL and guarded uint256 decoding (development)
+
+Solidity 0.7.6 ABI-v1 tuple initializers of the form
+`(bool ok, bytes memory data) = target.staticcall(input)` now preserve the success
+flag and complete returndata. The receiver is an address; the input is an existing
+memory-bytes local or a static-word `abi.encodeWithSelector` expression. Selectors
+may be literals or type-qualified external/public function selectors. Instance
+selectors and effectful operands reject; their evaluation is never discarded.
+Contracts containing unresolved immutables reject, including constructor-set
+target addresses; the existing frontend shortcut to the caller address is not
+valid evidence for a deployed token binding. Call options, ABI-v2, omitted tuple
+bindings and other raw call forms remain outside
+this admission path.
+
+The closed `raw_static_call_byte_response` transport has no code-existence check,
+no output area and no automatic failure forwarding. Empty-code calls succeed with
+empty bytes; a reverting callee produces `false` plus its exact bytes. Nonempty
+responses allocate a length header and rounded capacity at the current free pointer,
+which may be unaligned. Empty responses use the legacy zero-slot pointer. Allocation
+and copying use existing physical-memory statements and retain bytes aliases.
+
+Source checks remain separate statements: a bare `require(ok && data.length >= 32)`
+reverts with empty bytes, regardless of the callee's revert payload. Legacy
+`abi.decode` is admitted here only for one `uint256` from memory bytes under ABI-v1.
+The decoder independently checks for at least 32 bytes and reads the first word;
+extra bytes are allowed. Other target types/tuples and calldata decoding reject.
+
+`RawStaticCallFrames` proves six model laws for the checked static-world boundary,
+exact response retention, false failure binding, consumed meter and canonical arm.
+These laws do not prove importer or bytecode correspondence. Source/model/generated
+bytecode campaigns use a calldata-hashing oracle to observe selector and argument
+errors, exact empty failures, unaligned allocation, repeated calls, aliases and
+minimum-amount checks. Source mutations remove success, decoder-length and minimum
+checks; completed counterexamples on all three routes are required.
+
+The optional `sourceGas` profile records implicit GAS at the raw call site and
+checks the original STATICCALL boundary. Targets may be cold because there is no
+preceding code check; repeated calls test warm access. Both optimizer modes compare
+original-bytecode frame gas and functional observations, reject malformed evidence,
+and detect six accounting mutations. Source instruction spans, memory/access
+context and child gas consumption retain the existing trace-evidence assumptions.
+Generated-code gas equivalence is not claimed and metered compilation rejects.
+
+This admits balance-query helpers, not an entire pool or transaction proof.
+Arbitrary callee correspondence, nested account-access journals, root out-of-gas,
+transaction fees/refunds and general post-state-changing-call composition remain
+separate work. The existing post-call admission rules are unchanged.
+
+```sh
+python3 -m solidity_differential.check_legacy_static_words --output .lake/static-word-abc
+python3 -m solidity_differential.check_legacy_static_words --optimized --context 2 --output .lake/static-word-abc-opt
+python3 -m solidity_differential.check_raw_static_mutations --output .lake/static-word-mutants
+python3 -m solidity_differential.check_raw_static_gas --output .lake/raw-static-gas
+python3 -m solidity_differential.check_raw_static_gas --optimized --output .lake/raw-static-gas-opt
+python3 -m solidity_differential.check_raw_static_boundaries --output .lake/raw-static-boundaries
+```
+
+The mutation runner registers both optimizer modes, ordinary storage contexts
+0/1/2, guard counterexamples and original-bytecode accounting mutants. Runtime
+artifacts stay in ignored campaign directories; the generic fixtures and runners
+are checked in.

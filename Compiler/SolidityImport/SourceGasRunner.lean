@@ -61,6 +61,9 @@ private partial def statement (oracle : DenoteOracle) (fields : List Field)
                 executeLegacyVoidCallObserved oracle fields state
                   mod selector layout args (some site)
               pure (outcome, meter)
+          | some (.rawStaticCall result) => do
+              let (outcome, _) ← executeRawStaticCall oracle fields state mod result args
+              pure (outcome, state.sourceGas)
           | some (.rawCall result delegated) => do
               let (outcome, _) ← executeRawCall oracle fields state mod result delegated args
               pure (outcome, state.sourceGas)

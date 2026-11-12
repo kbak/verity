@@ -5,6 +5,7 @@ import Compiler.SolidityImport.LegacyMemory
 import Compiler.SolidityImport.LegacyCalls
 import Compiler.SolidityImport.LegacyVoidCalls
 import Compiler.SolidityImport.LegacyBoolCalls
+import Compiler.SolidityImport.LegacyStaticCalls
 import Compiler.SolidityImport.LegacyStorage
 import Compiler.SolidityImport.StorageLayout
 
@@ -198,7 +199,8 @@ partial def validateLegacyDeclaration (node : Json) (encodingInput : Bool := fal
           let init := field? node "initialValue" |>.getD Json.null
           unless init.isNull do
             unless (optStr init "nodeType" == some "Identifier" &&
-                (← mType init) == "bytes memory") || LegacyAbi.isSelectorEncoding init do
+                (← mType init) == "bytes memory") || LegacyAbi.isSelectorEncoding init ||
+                LegacyStaticCalls.applies node do
               failAt node "Solidity 0.7.6 bytes locals require an existing memory buffer"
       if kind == "BinaryOperation" then
         for key in #["leftExpression", "rightExpression"] do
