@@ -18,7 +18,24 @@ solidity_import imported from "Contracts/SolidityImportSmoke" entry "UniswapV4Ty
   function exttload(bytes32)
   function setPoolFee(PoolKey, uint24)
   function accountPoolBalanceDelta(PoolKey, int128, int128)
+
+-- Keep the packed-memory root as an explicit rejection regression until its
+-- source body can be translated. It must never receive a padded replacement.
+/--
+error: UniswapV4TypesAndTransientSequence.sol:115:13: YulFunctionCall:
+[solidity-import:unsupported] only scratch-space mstore at 0x00 or 0x20 is supported
+closure: SequenceFixture.recordPositionLiquidity -> PositionSlice.calculatePositionKey
+mstore(add(fmp, 0x26), salt)
+-/
+#guard_msgs (whitespace := lax) in
+solidity_import rejectedPackedHash from "Contracts/SolidityImportSmoke"
+  entry "UniswapV4TypesAndTransientSequence.sol"
+  using {
+    solc := "0.8.26+commit.8a97fa7a", evmVersion := "cancun", viaIR := true
+    optimizerRuns := some 200, bytecodeHash := "none" }
+  contract SequenceFixture
   function recordPositionLiquidity(int24, int24, bytes32, uint256)
+
 def model : CompilationModel := imported.model
 -- Mapping slots use the actual Keccak oracle shared with differential execution.
 def oracle : Denote.DenoteOracle := SolidityImport.Differential.oracle

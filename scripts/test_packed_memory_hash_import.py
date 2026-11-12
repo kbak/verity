@@ -3,8 +3,9 @@ import copy
 import unittest
 
 from solidity_differential.check_packed_memory_hash_import import (
-    ROOTS, check_controls, classify,
+    ROOTS, check_controls, check_helper_controls, classify, helper_controls,
 )
+from solidity_differential.check_packed_memory_hash import FIXTURE
 from solidity_differential.engine import HarnessError
 
 
@@ -85,6 +86,34 @@ class PackedMemoryHashImportTests(unittest.TestCase):
             for root in ROOTS:
                 rows[name][root] = {'status': 'rejected'}
         self.assertTrue(check_controls(rows))
+
+    def test_helper_controls_preserve_body_and_cover_storage_boundary(self):
+        source = FIXTURE.read_text()
+        controls = dict(helper_controls(source, ('customHash',)))
+        self.assertEqual(len(controls), 27)
+        self.assertEqual({c['storageDeclarations'] for c in controls.values()}, {0, 1, 2})
+        for control in controls.values():
+            restored = control['source'].replace(control['helper'], 'hashPacked')
+            for index in range(control['storageDeclarations']):
+                restored = restored.replace(f' uint256 private unusedStorage{index};', '')
+            if control['body'] == 'original':
+                self.assertEqual(restored, source)
+        with self.assertRaises(HarnessError):
+            dict(helper_controls(source, ('invalid;name',)))
+
+    def test_helper_or_storage_changes_cannot_enable_shortcut(self):
+        rows = self.rows(False)
+        observation = copy.deepcopy(rows['original']['digest'])
+        observation['closure'] = observation['closure'].replace('hashPacked', 'customHash')
+        controls = {'probe': {'helper': 'customHash', 'storageDeclarations': 2,
+                              'body': 'original', 'observation': observation}}
+        check_helper_controls(rows, controls)
+        for mutation in ({'status': 'admitted', 'model': 'padded substitute'},
+                         {'reason': 'different boundary'}, {'closure': 'Other.helper'}):
+            stale = copy.deepcopy(controls)
+            stale['probe']['observation'].update(mutation)
+            with self.subTest(mutation=mutation), self.assertRaises(HarnessError):
+                check_helper_controls(rows, stale)
 
 
 if __name__ == '__main__':
