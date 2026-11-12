@@ -1,6 +1,18 @@
-# Uniswap v4 (`v4-core`) Model Support (`38/38` Functions)
+# Uniswap v4 (`v4-core`) Model Support Boundaries
 
-Verity's Solidity importer (`Compiler/SolidityImport/Import.lean` + `Compiler/SolidityImport/InlineAssemblyShims.lean`) supports **100% (`38/38` functions)** of Uniswap v4's `PoolManager.sol` (`Uniswap/v4-core` commit `3779387e5ef296f39df54cd2bb1dca9a6eff46f8`, `solc 0.8.26`, Cancun EVM, `viaIR := true`).
+The historical `38/38` admission claim below is not a current correctness or
+coverage guarantee. The importer previously replaced a packed-memory helper body
+with a four-word, 128-byte hash selected by helper name and storage-variable count.
+That replacement is removed by [Stage 1 (#28)](https://github.com/kbak/verity/issues/28).
+Reached packed-memory bodies now receive a located unsupported-source diagnostic.
+The combined smoke model retains eight admitted roots and checks its ninth,
+packed-hash-dependent root for rejection. The full PoolManager inventory has not
+been remeasured here; no updated whole-contract support percentage is claimed.
+
+The bounded packed-key/storage-lookup work is tracked in fork issues #28–#32.
+See [the reproducer and independent expectations](PACKED_MEMORY_HASH_REPRODUCER.md).
+The inventory below refers to historical `Uniswap/v4-core` revision
+`3779387e5ef296f39df54cd2bb1dca9a6eff46f8`, Solidity 0.8.26, Cancun, and viaIR.
 
 ## 1. Modular Inline-Assembly Shim Architecture (`InlineAssemblyShims.lean`)
 
@@ -20,16 +32,19 @@ To keep `Compiler/SolidityImport/Import.lean` modular and verifiable, Uniswap v4
 | `BitMath.mostSignificantBit` | `BitMath` | `.bitMathMsb` | Branchless `shr` / `gt` Yul statement lowering (`lowerYulStmtSlice`) |
 | `BitMath.leastSignificantBit` | `BitMath` | `.bitMathLsb` | De Bruijn / branchless bit scan lowering (`lowerYulStmtSlice`) |
 | `TickMath.getSqrtPriceAtTick` / `getTickAtSqrtPrice` | `TickMath` | `.tickMath` | Inline Yul bit/shift/comparison lowering (`YulLiteral` booleans, `signextend`, `sar`, `shl`, `shr`) |
-| `Position.calculatePositionKey` | `Position` | `.positionKey` | `lowerPositionKeyShim` (`mstore` packed words + `Expr.keccak256`) |
+| Packed position-key hash | `Position` | No registered replacement | Ordinary body translation rejects the unsupported overlapping memory write |
 | `TickBitmap.flipTick` | `TickBitmap` | `.tickBitmapFlip` | `lowerTickBitmapFlipShim` (`sdiv`/`smod` word-pos & bit-pos + `sload`/`sstore` XOR mask) |
 | `Hooks.callHook` | `Hooks` | `.hooksCall` | `lowerHooksCallShim` (`SolidityLowLevelCall.bytesUint256Module` + selector/delta extraction) |
 
 ### 3-Layer Meta-Specification Bundle
 
 `Compiler/SolidityImport/InlineAssemblyShims.lean` exports a 3-layer specification bundle:
-- **Layer I (`InlineAssemblyShimsMetaSpec`)**: Conjunction of `allShimsVerified = true` and `uniswapV4VerifiedShims.length = 15`, proved in `inlineAssemblyShims_metaSpec_holds`.
-- **Layer II (`metaSpec_allShimsVerified`, `metaSpec_shimCount`)**: 1-line projection corollaries derived from Layer I.
-- **Layer III (`findVerifiedShim_customRevert_witness`, `findVerifiedShim_hooksCall_witness`, `findVerifiedShim_tickBitmapFlip_witness`)**: Concrete `by decide` witnesses.
+- **Layer I (`InlineAssemblyShimsMetaSpec`)**: Registry flag consistency and an exact count of 17 remaining entries, proved in `inlineAssemblyShims_satisfies_metaSpec`.
+- **Layer II (`uniswapV4VerifiedShims_all_verified`, `uniswapV4VerifiedShims_length`)**: Projection corollaries derived from Layer I.
+- **Layer III**: Concrete `by decide` witnesses for registry lookup and flag consistency.
+
+These registry theorems check metadata. They do not prove that a lowering matches
+the Solidity body, its hash preimage, or its storage effects.
 
 ## 2. General Importer Enhancements Supporting `v4-core`
 
@@ -48,9 +63,10 @@ Alongside the shims in `InlineAssemblyShims.lean`, `Compiler/SolidityImport/Impo
 6. **`msg.value` Support in `Coverage.lean` and `Quote.lean`**:
    - `exprCovered` covers `Expr.msgValue` (`evalExpr_msgValue_arm`), and `Quote.lean` quotes `Expr.msgValue`.
 
-## 3. Complete `PoolManager.sol` Function Inventory (`38/38` Imported & Covered)
+## 3. Historical `PoolManager.sol` Function Inventory
 
-Every function in `src/PoolManager.sol` elaborates via `solidity_import` with `modelImportCovered model = true`:
+This historical inventory is retained for reference; admission and source
+correspondence must be revalidated after removal of the packed-hash replacement:
 
 | # | Function Signature | Category |
 | --- | --- | --- |
@@ -96,4 +112,6 @@ Every function in `src/PoolManager.sol` elaborates via `solidity_import` with `m
 | 40* | `exttload(bytes32)` | `Exttload` Single-Slot Transient Introspection |
 | 41* | `exttload(bytes32[])` | `Exttload` Batch-Array Transient Introspection |
 
-*(Note: `extsload` has 3 overloads and `exttload` has 2 overloads; all 38 distinct function/overload probes in `PoolManager` pass with `modelImportCovered = true`.)*
+`extsload` has three overloads and `exttload` has two. The historical aggregate
+count is not current acceptance evidence, and `modelImportCovered = true` alone
+does not establish source equivalence.

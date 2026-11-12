@@ -100,6 +100,14 @@ succeed. It does **not** require admission: `results.json` separately records
 That option changes only the admission gate, never the byte/hash expectations.
 The manifest explicitly marks Denote and generated EVM execution as not run.
 
+The admission runner also varies the helper spelling and adds zero, one, or two
+unused private storage declarations, for each original, padded, and changed body.
+These 18 additional probes must preserve each body's admission or located
+rejection. `--helper-name IDENTIFIER` adds another spelling to this matrix, allowing
+historical dispatch names to be tested without coupling the fixture to a project.
+`helper-controls.json` retains the observations even if the matrix detects a
+regression. These controls do not alter the fixture, vectors, or byte/hash oracle.
+
 On this branch's current importer, the eight probes produce seven located rejections
 and one admission. Original, renamed and changed-body `digest` reject the first
 overlapping write at line 18; their `inspect` roots reject the free-pointer write
@@ -123,10 +131,17 @@ this test. Imported semantics and Verity-generated output are explicitly marked
 **not run** in the manifest. A successful source campaign is not evidence that
 Verity admits this construct or preserves its meaning.
 
-After PR #23 merges, move this branch onto that merged revision, implement the
-generic lowering, and compare imported semantics and Verity-generated EVM output
-with these unchanged expectations. Helper renaming
-must preserve importer support; body changes must change the model or yield a
-located rejection. Storage-key addressing and preservation of unrelated state
-still need their own regressions. Full proof, smoke, loss and mutation gates
-remain required before an implementation is ready to merge.
+Integration PR #23 merged as `eb5d7249c4b7aad2841da289d72b500b1a2877bc`.
+[Stage 1 (#28)](https://github.com/kbak/verity/issues/28) removes the incorrect
+name-selected 128-byte replacement and its registry entry. Helpers now go through
+ordinary body translation. Packed-memory admission remains unsupported; this
+correction adds no memory lowering and does not satisfy `--require-admission`.
+The existing combined smoke model retains eight admitted roots; its ninth,
+packed-hash-dependent root is checked for a located rejection instead of exposing
+an incorrect model. No golden or byte/hash expectation is changed.
+
+The remaining stages are the memory proof bridge (#29), actual three-route
+execution (#30), source-driven memory lowering (#31), and storage-reference
+addressing/state preservation (#32), all tracked in `kbak/verity`. Full proof,
+smoke, loss and mutation gates remain required before an implementation is ready
+to merge. Import coverage is not a source-correspondence proof.

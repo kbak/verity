@@ -134,7 +134,41 @@ def check_controls(rows):
                for name in ('original', 'renamed') for root in ROOTS)
 
 
-def run(output, *, prepared=False, require_admission=False):
+def helper_controls(source, extra_names=()):
+    """Vary helper spelling and unreachable storage without changing its body."""
+    names = tuple(dict.fromkeys(('hashPacked', 'renamedPacked', *extra_names)))
+    if any(not re.fullmatch(r'[A-Za-z_$][A-Za-z0-9_$]*', name) for name in names):
+        raise HarnessError('helper names must be Solidity identifiers')
+    anchor = 'contract PackedMemoryHash {'
+    if source.count(anchor) != 1:
+        raise HarnessError('storage declaration control anchor changed')
+    sources = variants(source)
+    for name_index, name in enumerate(names):
+        for count in (0, 1, 2):
+            fields = ''.join(f' uint256 private unusedStorage{i};' for i in range(count))
+            for body in ('original', 'padded', 'changed-body'):
+                control = sources[body].replace('hashPacked', name).replace(anchor, anchor + fields)
+                yield f'helper-{name_index}-storage-{count}-{body}', {
+                    'helper': name, 'storageDeclarations': count, 'body': body, 'source': control,
+                }
+
+
+def check_helper_controls(rows, controls):
+    """Names and unused storage must never turn an unsupported body into a model."""
+    for label, control in controls.items():
+        expected = rows[control['body']]['digest']
+        actual = control['observation']
+        if expected['status'] != actual['status']:
+            raise HarnessError(f'{label}: helper name or unused storage changed importer support')
+        if expected['status'] == 'rejected':
+            for key in ('node', 'reason', 'closure'):
+                normalized = actual[key].replace('PackedMemoryHash.' + control['helper'],
+                                                 'PackedMemoryHash.hashPacked')
+                if expected[key] != normalized:
+                    raise HarnessError(f'{label}: helper name or unused storage changed rejection')
+
+
+def run(output, *, prepared=False, require_admission=False, helper_names=()):
     output = output.resolve()
     if not output.is_relative_to(ROOT):
         raise HarnessError('output must be inside this checkout for importer package discovery')
@@ -152,6 +186,7 @@ def run(output, *, prepared=False, require_admission=False):
     write_json(output / 'expectations.json', expected)
     metadata = {
         'scope': 'importer admission and source-body sensitivity only',
+        'extraHelperNames': list(helper_names),
         'verityHead': command(['git', 'rev-parse', 'HEAD'], cwd=ROOT).strip(),
         'worktreeStatus': command(['git', 'status', '--porcelain'], cwd=ROOT),
         'sourceCompilerSha256': file_sha256(solc), 'settings': SETTINGS,
@@ -180,6 +215,21 @@ def run(output, *, prepared=False, require_admission=False):
         if name == 'control' and rows[name]['echo']['status'] != 'admitted':
             raise HarnessError('required scalar import control failed')
     admitted = check_controls(rows)
+    controls = {}
+    for label, control in helper_controls(FIXTURE.read_text(), helper_names):
+        directory = output / label
+        directory.mkdir()
+        source = control.pop('source')
+        (directory / FIXTURE.name).write_text(source)
+        solc_compile({'language': 'Solidity', 'sources': {FIXTURE.name: {'content': source}},
+                      'settings': {**SETTINGS, 'outputSelection': {'*': {'': ['ast'],
+                                   '*': ['abi', 'storageLayout']}}}},
+                     directory, directory / 'solc', solc=solc)
+        control['observation'] = observe(directory, FIXTURE.name, 'PackedMemoryHash', ROOTS['digest'])
+        controls[label] = control
+    # Retain all observations even when a regression in this matrix is detected.
+    write_json(output / 'helper-controls.json', controls)
+    check_helper_controls(rows, controls)
     write_json(output / 'results.json', {
         'observationsComplete': True, 'controlsPassed': True,
         'requiredRootsAdmitted': admitted, 'semanticAgreement': 'not tested',
@@ -188,7 +238,8 @@ def run(output, *, prepared=False, require_admission=False):
     })
     count = sum(row['status'] == 'rejected' for name in variants(FIXTURE.read_text())
                 for row in rows[name].values())
-    print(f'8 importer observations; {count} located rejections; controls passed; '
+    print(f'8 importer observations; {count} located rejections; '
+          f'{len(controls)} helper/storage controls passed; '
           f'required roots admitted: {admitted}; semantics not tested')
     return 1 if require_admission and not admitted else 0
 
@@ -199,8 +250,11 @@ def main():
     parser.add_argument('--prepared', action='store_true', help='reuse an already built importer')
     parser.add_argument('--require-admission', action='store_true',
                         help='fail until original and renamed digest/inspect roots are admitted')
+    parser.add_argument('--helper-name', action='append', default=[],
+                        help='additional helper spelling to test with zero, one and two unused fields')
     args = parser.parse_args()
-    return run(args.output, prepared=args.prepared, require_admission=args.require_admission)
+    return run(args.output, prepared=args.prepared, require_admission=args.require_admission,
+               helper_names=args.helper_name)
 
 
 if __name__ == '__main__':
