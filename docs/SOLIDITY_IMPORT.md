@@ -2098,3 +2098,77 @@ mutations corrupt the forwarded address or enum word, or add an incorrect early
 enum range check; each requires a passing control and runtime divergence.
 These are finite translation checks; no new primitive, axiom or source-equivalence
 theorem is introduced. Gas-sensitive execution remains outside this slice.
+
+
+## Original-bytecode gas observations (experimental, Solidity 0.7.6)
+
+Set `sourceGas := true` with the explicit pinned 0.7.6 profile to import
+`gasleft()` and Yul `gas()` as ordered source-execution observations. The default
+remains off. This mode verifies gas-sensitive behavior against the **original
+solc bytecode**. Compilation of these observations is rejected: regenerated Yul
+has different instruction costs and no gas equivalence theorem is claimed.
+
+Each transaction supplies `sourceGas` evidence containing its initial frame gas,
+ordered GAS sites, raw CALL/DELEGATECALL boundaries and final instruction span.
+`SourceGasRunner` requires complete consumption, including on REVERT. Missing,
+reordered, mismatched or unaffordable evidence is an instrumentation error. A
+source span includes dispatcher, stack, memory and storage work in the original
+bytecode; its cost is never estimated from source statements. Source sites use
+solc AST/source-map locations and participate in the import profile digest.
+
+`CallGas` independently calculates the GAS opcode's two-gas charge, input/output
+memory expansion, warm/cold target access, value and new-account costs,
+EIP-150 cap, value stipend and gas returned from the child. The source call
+operand is checked against the functional request; only the derived allowance
+is passed to the callee. The callee's success bit and complete returndata must
+match the same source observation. Kernel lemmas prove operand bounds, gas
+partition, no gas creation on child return, and failure/charging laws. They do
+not prove EVM execution or the Solidity frontend.
+
+One gas read may occur alongside independent scalars, existing memory-byte
+identifiers, one immutable calldata-byte identifier (forwarded or copied to fresh
+memory), and a resolved nonvirtual pure helper with scalar parameters, no
+modifiers, and a single call-free return expression. This covers minimum-budget
+checks and conditional gas arguments to internal helpers. Multiple gas reads in
+unordered siblings, competing effects and other allocation/conversion expressions remain
+rejected. The calldata copy and evidence read affect disjoint model state; actual
+copy costs and evaluation position come from the original-bytecode meter.
+
+The current source adapter validates complete root CALL/DELEGATECALL traces on
+Osaka, exact deployed runtime, source-map sites, actual child allowances and
+parent continuation gas. Fixed child programs are independently modeled;
+target balances/code and caller storage are compared through successful and
+reverting transactions. The EVM and trace adapter are **trusted meters** for
+ordinary instruction spans, call context and child gas consumption. The JSON
+parser alone does not authenticate provenance. A downstream proof must assume or
+separately establish that its evidence describes the intended bytecode, input,
+fork and prestate, and that its callee model describes the deployed child.
+
+Typed/static external transports (including signature precompiles), CREATE2,
+nested account access/warmth journals, access-list transactions, EIP-7702 trace
+reconstruction, root OOG, and transaction refund/fee accounting are not covered by this adapter. Unmetered
+transports fail closed in `SourceGasRunner`; the ordinary functional mode
+retains its existing behavior. Frame gas remaining is not receipt gas usage.
+The CallGas arithmetic accepts an explicit EIP-7702 delegation-access input,
+but that input has no source replay claim here. Full contract execution with
+these constructs needs additional adapters and evidence.
+
+Reproduce with the pinned toolchain and Python dependencies:
+
+```sh
+PYTHONPATH=scripts python3 -m solidity_differential.check_legacy_source_gas --output .lake/source-gas
+PYTHONPATH=scripts python3 -m solidity_differential.check_legacy_source_gas --optimized --output .lake/source-gas-opt
+PYTHONPATH=scripts python3 -m solidity_differential.check_source_gas_boundaries --output .lake/source-gas-boundaries
+PYTHONPATH=scripts python3 -m solidity_differential.check_source_gas_mutations --source-campaign .lake/source-gas --output .lake/source-gas-mutants
+```
+
+Both optimizer modes compare source return/revert bytes, observations, balances,
+code and rollback. Mutation checks execute altered GAS cost, EIP-150 divisor,
+stipend, cold access, parent gas return and ordinary-span charging against saved
+actual EVM observations. Each requires an unmodified passing control and an
+independently replayed witness; build/instrumentation errors never count.
+Campaign artifacts stay under ignored `.lake/`, not in the source tree.
+
+Accounting references: [EIP-150](https://eips.ethereum.org/EIPS/eip-150),
+[EIP-2929](https://eips.ethereum.org/EIPS/eip-2929), and
+[EIP-7702](https://eips.ethereum.org/EIPS/eip-7702).

@@ -90,6 +90,11 @@ partial def quoteStmt : Stmt → m Term
   | .ecm module args => do
       let quotedArgs ← list (← args.mapM quoteExpr)
       match module.byteTransport with
+      | some (.sourceGasRead result site) =>
+          unless module == Compiler.ECM.SourceGasRead.module result site do
+            throwError "closed source gas metadata differs"
+          `(Compiler.CompilationModel.Stmt.ecm
+            (Compiler.ECM.SourceGasRead.module $(quote result) $(quote site)) $quotedArgs)
       | some (.legacyBool result selector count) => do
           unless module == Compiler.ECM.LegacyBoolCall.module result selector count do
             throwError "closed legacy bool call metadata differs"

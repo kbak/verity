@@ -116,6 +116,8 @@ private def resolveSolcRelease (profile : Profile) : MetaM SolcRelease := do
     | throwError "this importer is pinned to solc {String.intercalate " or " (solcReleases.map (·.longVersion)).toList}, not {profile.solc}"
   unless release.supportedEvmVersions.contains profile.evmVersion do
     throwError "evmVersion {profile.evmVersion} is not supported for solc {release.longVersion}"
+  if profile.sourceGas && profile.solc != "0.7.6+commit.7338295f" then
+    throwError "sourceGas requires the explicit Solidity 0.7.6 profile"
   if profile.viaIR && !release.supportsViaIR then
     throwError "viaIR is not supported for solc {release.longVersion}"
   pure release
@@ -129,9 +131,14 @@ private partial def statefulCallIn (j : Json) (env : Env) : Bool :=
   | .obj o =>
       let isStateful (fid : Nat) : Bool :=
         match env.funs.find? fid with
-        | some fn => ![some "pure", some "view"].contains (optStr fn "stateMutability")
+        | some fn => ![some "pure", some "view"].contains (optStr fn "stateMutability") ||
+            (env.sourceGas && containsSourceGasRead fn env [fid])
         | none => false
-      let own := if optStr j "nodeType" == some "FunctionCall" &&
+      let gasRead := env.sourceGas && optStr j "nodeType" == some "FunctionCall" &&
+        ((field? j "expression").bind (optStr · "name")) == some "gasleft" &&
+        (((field? j "expression").bind (field? · "referencedDeclaration")).bind
+          (·.getInt?.toOption)).any (· < 0)
+      let own := if gasRead then true else if optStr j "nodeType" == some "FunctionCall" &&
           optStr j "kind" == some "functionCall" then
         match (field? j "expression").bind (fun callee =>
             (field? callee "referencedDeclaration").bind (fun id => id.getNat?.toOption)) with
@@ -1242,6 +1249,14 @@ private partial def lowerYul (j : Json) : M Val := do
   | "YulFunctionCall" =>
       let fname ← mStr (← mField (← mField j "functionName") "name")
       let args ← mArr (← mField j "arguments")
+      if fname == "gas" then
+        unless (← get).sourceGas && (← get).legacyWrapping && args.isEmpty do
+          failAt j "gas() requires original-bytecode sourceGas verification"
+        let site ← mStr (← mField j "src")
+        let result ← fresh
+        return {
+          pre := #[.ecm (Compiler.ECM.SourceGasRead.module result site) []]
+          expr := .localVar result }
       if fname == "mload" then
         if args.size == 1 then
           if (← yulNatLit? args[0]!) == some 64 then
@@ -1282,6 +1297,13 @@ private partial def lowerYul (j : Json) : M Val := do
         let v ← lowerYul arg
         pre := pre ++ v.pre
         xs := xs.push v.expr
+      let gasReads := pre.filter (fun stmt => match stmt with
+        | .ecm mod _ => match mod.byteTransport with
+          | some (.sourceGasRead ..) => true
+          | _ => false
+        | _ => false)
+      if gasReads.size > 1 then
+        failAt j "multiple Yul gas observations require explicit evaluation-order support"
       match fname, xs with
       | "add", #[a, b] => pure { pre, expr := .add a b }
       | "sub", #[a, b] => pure { pre, expr := .sub a b }
@@ -3683,7 +3705,10 @@ private partial def lowerBinary (j : Json) : M Val := do
       !statefulCallIn leftNode env && !assignmentIn leftNode))) ||
     (op == "+" && (← mKind leftNode) == "Identifier" &&
       !statefulCallIn leftNode env && !assignmentIn leftNode && env.stateVars.size > 1)
-  unless op == "&&" || op == "||" || admittedCall do
+  let gasOperands := env.sourceGas &&
+    (containsSourceGasRead leftNode env || containsSourceGasRead rightNode env)
+  unless op == "&&" || op == "||" || (admittedCall && !gasOperands) ||
+      independentSourceGasArgs #[leftNode, rightNode] env do
     if statefulCallIn leftNode env ||
         statefulCallIn rightNode env then
       failAt j "stateful helper operands require explicit evaluation-order support"
@@ -6147,10 +6172,12 @@ private partial def lowerCallArgs (j : Json) (receiver? : Option Json) : M (Arra
     | some recv => #[recv] ++ args
     | none => args
   let independentIncrement := independentLegacyPostIncrementArgs nodes (← get)
+  let independentGas := independentSourceGasArgs nodes (← get)
   let mut vals : Array CallArg := #[]
   for arg in nodes do
     if statefulCallIn arg (← get) then
-      unless nodes.size == 1 && (← get).stateVars.size > 1 do
+      unless independentGas || (nodes.size == 1 && (← get).stateVars.size > 1 &&
+          !((← get).sourceGas && containsSourceGasRead arg (← get))) do
         failAt arg "stateful helper call arguments require explicit evaluation-order support"
     if nodes.size > 1 && assignmentIn arg && !independentIncrement then
       failAt arg "assignment expression in multi-argument call requires explicit evaluation-order support"
@@ -6930,6 +6957,16 @@ private partial def lowerCall (j : Json) : M Val := do
     let callee ← mField j "expression"
     if (← mKind callee) == "Identifier" then
       let calleeId ← refInt callee
+      if calleeId < 0 && optStr callee "name" == some "gasleft" then
+        unless (← get).sourceGas && (← get).legacyWrapping do
+          failAt j "gasleft requires original-bytecode sourceGas verification"
+        unless (← mArr (← mField j "arguments")).isEmpty do
+          failAt j "gasleft expects no arguments"
+        let site ← mStr (← mField j "src")
+        let result ← fresh
+        return {
+          pre := #[.ecm (Compiler.ECM.SourceGasRead.module result site) []]
+          expr := .localVar result }
       if calleeId < 0 && optStr callee "name" == some "ecrecover" then
         unless (← get).legacyWrapping &&
             (← mType callee) == "function (bytes32,uint8,bytes32,bytes32) pure returns (address)" do
@@ -15297,7 +15334,11 @@ private def importSlice
         throwError "solc: {optStr err "formattedMessage" |>.getD "error"}"
   let mut env := Env.init
   let legacy := release.longVersion == "0.7.6+commit.7338295f"
-  env := { env with files := fileBytes, legacyWrapping := legacy, unchecked := legacy }
+  env := { env with
+    files := fileBytes
+    legacyWrapping := legacy
+    unchecked := legacy
+    sourceGas := profile.sourceGas }
   let sourcesOut ← field parsed "sources"
   let .obj sourceUnits := sourcesOut | throwError "solc sources output is not an object"
   for (logical, _) in sourceUnits do
@@ -15703,6 +15744,8 @@ private def importSlice
   let legacyMemorySrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyMemory.lean"
   let signatureSrc ← moduleText sourceRoot "Verity/Core/Model/LegacySignatureCalls.lean"
   let rawCallsSrc ← moduleText sourceRoot "Verity/Core/Model/RawCalls.lean"
+  let gasSrc ← moduleText sourceRoot "Verity/Core/Model/SourceGas.lean"
+  let callGasSrc ← moduleText sourceRoot "Verity/Core/Model/CallGas.lean"
   let boolLoweringSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyBoolCalls.lean"
   let boolCompilerSrc ← moduleText sourceRoot "Verity/Core/Model/LegacyBoolCalls.lean"
   let legacyStorageSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyStorage.lean"
@@ -15722,6 +15765,7 @@ private def importSlice
     ("contract", Json.str contract),
     ("functions", Json.arr signatures),
     ("solcInput", input),
+    ("sourceGas", Json.bool profile.sourceGas),
     ("importerSources", Json.mkObj [
       ("Import.lean", Json.str importer), ("Coverage.lean", Json.str coverage),
       ("Report.lean", Json.str reportSrc), ("Quote.lean", Json.str quoteSrc),
@@ -15737,6 +15781,7 @@ private def importSlice
       ("ExprHelpers.lean", Json.str exprHelpersSrc),
       ("LegacySignatureCalls.lean", Json.str signatureSrc),
       ("RawCalls.lean", Json.str rawCallsSrc),
+      ("SourceGas.lean", Json.str gasSrc), ("CallGas.lean", Json.str callGasSrc),
       ("SolidityImport/LegacyBoolCalls.lean", Json.str boolLoweringSrc),
       ("Model/LegacyBoolCalls.lean", Json.str boolCompilerSrc),
       ("LegacyStorage.lean", Json.str legacyStorageSrc),

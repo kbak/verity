@@ -36,7 +36,8 @@ private partial def validateLegacyYul (memoryRevert : Bool) (node : Json) : M Un
             #[some "mload", some "mstore", some "add", some "revert"]
             else #[some "mload", some "add", some "sub", some "mul", some "byte", some "chainid",
               some "call", some "delegatecall", some "returndatasize", some "sload"]
-          unless builtins.contains name do
+          unless builtins.contains name ||
+              (!memoryRevert && name == some "gas" && (← get).sourceGas) do
             failAt node (if memoryRevert then
               "Solidity 0.7.6 memory-revert assembly builtin is unsupported"
               else "Solidity 0.7.6 read-only assembly builtin is unsupported")
@@ -291,7 +292,8 @@ partial def validateLegacyDeclaration (node : Json) (encodingInput : Bool := fal
           -- Ordinary reference/overload resolution is checked by the lowering.
           if let some id := (field? callee "referencedDeclaration").bind (·.getInt?.toOption) then
             let allowed := #[some "require", some "revert", some "ecrecover", some "keccak256"]
-            if id < 0 && !allowed.contains (optStr callee "name") then
+            if id < 0 && !allowed.contains (optStr callee "name") &&
+                !((← get).sourceGas && optStr callee "name" == some "gasleft") then
               failAt node ("Solidity 0.7.6 builtin call is outside the scalar slice " ++
                 "(assert/INVALID is not modeled)")
     let callee := field? node "expression" |>.getD Json.null

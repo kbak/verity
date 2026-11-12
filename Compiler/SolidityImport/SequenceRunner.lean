@@ -1,3 +1,5 @@
+import Compiler.SolidityImport.SourceGasInput
+import Compiler.SolidityImport.SourceGasRunner
 import Compiler.SolidityImport.TransactionAccess
 import Compiler.SolidityImport.ValueTransactions
 import Compiler.Hex
@@ -204,6 +206,11 @@ def execute (model : CompilationModel) (oracle : DenoteOracle) (input : Json)
   let mut rows := #[]
   let mut ids : List String := []
   for transaction in transactions do
+    let byteCalls ← match transaction.getObjVal? "sourceGas" with
+      | .error _ => pure byteCalls
+      | .ok evidence => do
+          let meter ← SourceGasInput.parse evidence
+          pure { byteCalls with sourceGas := some meter }
     let ident ← transaction.getObjValAs? String "id"
     if ident.isEmpty || ids.contains ident then throw "nonempty unique model transaction ids required"
     ids := ident :: ids
@@ -260,6 +267,15 @@ def execute (model : CompilationModel) (oracle : DenoteOracle) (input : Json)
       (byteCalls := byteCalls) (calldataSize := exactSize)
     let bindings := if exactSize.any (· < 4 + 32 * fn.bindingParams.length) then none
       else bindExternalParams selector fn.bindingParams args
+    let gasLeft ← match byteCalls.sourceGas, bindings with
+      | none, _ => pure none
+      | some _, none => throw "source gas evidence requires a decoded function frame"
+      | some meter, some bindings => do
+          let gas ← SourceGasRunner.finish oracle (effectiveFields model)
+            { world := initial, bindings, selector, errors := model.errors,
+              byteCallAdversary := byteCalls.adversary, byteCallGas := byteCalls.gas,
+              sourceGas := some meter } fn.body
+          pure (some gas)
     let result : TracedFrameResult ←
       if !ValueTransactions.acceptsValue fn value then pure ⟨⟨false, [], initial, false⟩, []⟩
       else match bindings with
@@ -307,7 +323,8 @@ def execute (model : CompilationModel) (oracle : DenoteOracle) (input : Json)
         let key := if owner == account then Verity.StorageKey.slot slot
           else Verity.StorageKey.contractSlot owner slot
         [hexAddress owner, hexWord slot, hexWord (world.storageWords key).val])),
-      ("events", toJson emitted)] ++ (deployment.map (("deployment", ·))).toList)
+      ("events", toJson emitted)] ++ (deployment.map (("deployment", ·))).toList ++
+        (gasLeft.map (fun gas => ("sourceGasLeft", toJson gas))).toList)
   return Json.arr rows
 
 /-- The generated model driver supplies the actual model and hash oracle. -/
