@@ -4,6 +4,14 @@ This file is the authoritative registry of axioms used by Verity proof code.
 
 ## Solidity import
 
+The coherent byte-slice bridge adds no project axiom, `sorry`, or `native_decide`.
+Its generic memory and IR lemmas are included in the generated axiom inventory.
+They connect the readers' exact inputs to physical bytes under explicit coherence
+and non-wrapping bounds; equality transports through the existing hash function
+without proving cryptographic correctness or EVM faithfulness. Physical write
+sequence frames preserve unrelated bytes and the complete non-memory world.
+See the corresponding scope in `TRUST_ASSUMPTIONS.md`.
+
 Removing the name-selected packed-hash replacement adds no axiom or proof shortcut.
 The inline-assembly registry's exact count changes from 18 to 17 with the removed
 entry; its metadata theorems do not prove source-body equivalence. Unsupported
