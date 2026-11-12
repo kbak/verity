@@ -121,7 +121,8 @@ boundary controls must reject. Separate hash/key controls or successful import
 alone cannot pass the composition gate. Repository, warning, proof, differential
 and mutation checks remain required on the exact PR head.
 
-Tail-only cleanup needs a separate caller liveness/frame argument. Writes,
+Tail-only cleanup needs a separate caller liveness/frame argument, prepared in
+[the caller-liveness design](TAIL_CLEANUP_LIVENESS.md). Writes,
 events, rollback and the always-reverting value-return root remain later work,
 followed by validation of the pinned downstream wrapper tracked in #32. Full
 cleanup does not substitute for any of those acceptance criteria.

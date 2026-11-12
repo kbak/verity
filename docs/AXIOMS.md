@@ -42,6 +42,12 @@ execution against the frozen expectations is finite regression evidence, not
 source/importer or compiler correspondence. Tail-only cleanup and writes remain
 excluded; see `PACKED_STORAGE_READ_DESIGN.md` and `TRUST_ASSUMPTIONS.md`.
 
+The tail-only caller-liveness preparation adds no axiom, theorem or admission.
+Controlled upper-bit perturbations provide finite source-EVM sensitivity evidence
+against unchanged packed hashes. All tail-only roots still reject; no Denote or
+generated-EVM agreement is claimed. The relational caller argument in
+`TAIL_CLEANUP_LIVENESS.md` remains a design obligation.
+
 `smoke.covered` and `smoke_step_credit` are ordinary theorems. The import
 path adds no project axiom, `sorry`, or `native_decide`. `covered` is
 `decide` on the whitelist. `smoke_step_credit` is `simp` plus `decide` on the
@@ -664,6 +670,15 @@ axiom. `PaymentCallMocks` proves admissibility only for its explicitly configure
 finite child programs; it does not establish arbitrary token or receiver behavior.
 Contract reimbursement is distinct from EVM refund-counter and transaction-fee
 accounting, which remain outside the frame model. No project axiom is added.
+
+
+Post-call memory loops use a recursive, storage-free/call-free admission predicate.
+`PostCallMemoryFrames` proves that the admitted statements preserve all Denote
+state except local bindings and memory, for arbitrary initial states. This is a
+model frame theorem; frontend correspondence, compiled execution and arbitrary
+external-program correspondence remain separate obligations. Differential and
+mutation checks cover finite callback/copy/execution/payment/rollback sequences.
+No axiom or gas-accounting assumption is added.
 
 The separate CI Turbo-Lean builder adds no project axiom or proof coverage.
 The established verifier/evaluator and narrow axiom allowlist remain unchanged.

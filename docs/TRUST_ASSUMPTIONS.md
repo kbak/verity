@@ -67,6 +67,13 @@ source/importer correspondence theorem or new cryptographic premise is claimed.
 Tail-only cleanup, writes and observations of synthetic layouts remain excluded.
 See `PACKED_STORAGE_READ_DESIGN.md` for the precise boundary and remaining work.
 
+The tail-only caller probes compare controlled upper-bit perturbations against
+the unchanged packed hashes. They retain both complete state archives without
+executing their transactions in this stateless campaign. All current tail-only
+rejections remain mandatory; source sensitivity establishes no caller-liveness
+theorem, gas equivalence, storage sequence or source/compiler correspondence.
+Actual Denote/generated routes remain absent; see `TAIL_CLEANUP_LIVENESS.md`.
+
 The modern bounded-memory frontend now translates supported straight-line source
 operations directly to physical `mload`, `mstore`, and `keccak256`. A byte-wise
 unknown-bit analysis requires observed bytes to be independent of dirty narrow
@@ -2669,3 +2676,12 @@ axiom. `PaymentCallMocks` proves admissibility only for its explicitly configure
 finite child programs; it does not establish arbitrary token or receiver behavior.
 Contract reimbursement is distinct from EVM refund-counter and transaction-fee
 accounting, which remain outside the frame model. No project axiom is added.
+
+
+Post-call memory loops use a recursive, storage-free/call-free admission predicate.
+`PostCallMemoryFrames` proves that the admitted statements preserve all Denote
+state except local bindings and memory, for arbitrary initial states. This is a
+model frame theorem; frontend correspondence, compiled execution and arbitrary
+external-program correspondence remain separate obligations. Differential and
+mutation checks cover finite callback/copy/execution/payment/rollback sequences.
+No axiom or gas-accounting assumption is added.

@@ -65,6 +65,7 @@ lean_lib «SolidityImportSmoke» where
     .one `Contracts.SolidityImportSmoke.CallGasChecks,
     .one `Contracts.SolidityImportSmoke.LegacyGasObservationsModel,
     .one `Contracts.SolidityImportSmoke.LegacyValuePaymentsModel,
+    .one `Contracts.SolidityImportSmoke.LegacyPostCallMemoryLoopsModel,
     .one `Contracts.SolidityImportSmoke.LegacyNativeValueModel,
     .one `Contracts.SolidityImportSmoke.Create2OpcodeChecks,
     .one `Contracts.SolidityImportSmoke.Smoke,
