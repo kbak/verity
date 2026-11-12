@@ -174,7 +174,9 @@ jobs:
       - name: Verify three-route storage controls
         timeout-minutes: 15
         run: |
-          turbo-lean --json build Compiler.SolidityImport.SequenceRunner --project-dir .
+          TURBO_LEAN_HOME="$RUNNER_TEMP/verity-input-build-cas" \
+            .lake/turbo-input-builder/target/release/turbo-lean --json build \
+            Compiler.SolidityImport.SequenceRunner --project-dir .
           PYTHONPATH=scripts python3 -m solidity_differential.check_storage_reference_routes --prepared --output .lake/bounded-memory/storage-routes
 
       - name: Archive bounded memory execution and rejection evidence
