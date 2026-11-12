@@ -490,6 +490,12 @@ solidity_import both from "{WORK / "base"}" entry "Slice.sol"
 # Compile and execute actual Denote mutants: a build failure is invalid,
 # not a detected semantic mutation. These regressions compare EVM bytes.
 DIFFERENTIAL_MUTANTS = (
+    "postincrement-new-value", "postincrement-double-write", "postincrement-missing-write",
+    "postincrement-local-new-value",
+    "conditional-invert", "conditional-eager-true", "conditional-eager-false",
+    "conditional-repeat-condition",
+    'helper-copy-source', 'helper-copy-header', 'helper-copy-rounding',
+    'helper-copy-reuse', 'helper-copy-padding', 'helper-forward-offset',
     'legacy-bool-code',
     'legacy-bool-truth',
     'legacy-bool-short',
@@ -904,6 +910,20 @@ def tasks(update_golden: bool) -> list:
     """
     items = [("prefix-checks", 2, lambda: prefix_checks(update_golden)),
              ("reference-boundary", 2, reference_boundary_mutations)]
+    items += [("legacy-postincrement-rejections", 1, lambda: module_campaign_output(
+        "check_legacy_postincrement_rejections", "legacy-postincrement-rejections", 900))]
+    items += [(f"legacy-postincrement-opt{int(optimized)}", 1,
+               lambda optimized=optimized: module_campaign_output(
+                   "check_legacy_postincrement_arguments", "legacy-postincrement",
+                   1800, *(["--optimized"] if optimized else [])))
+              for optimized in (False, True)]
+    items += [("legacy-conditional-rejections", 1, lambda: module_campaign_output(
+        "check_legacy_conditional_rejections", "legacy-conditional-rejections", 900))]
+    items += [(f"legacy-conditionals-{kind}-opt{int(optimized)}", 1,
+               lambda kind=kind, optimized=optimized: module_campaign_output(
+                   "check_legacy_scalar_conditionals", f"legacy-conditionals-{kind}",
+                   1800, "--kind", kind, *(["--optimized"] if optimized else [])))
+              for kind in ("scalar", "effects") for optimized in (False, True)]
     items += [(f"storage-rejections-{part}", 1, (lambda part=part: storage_rejections(part)))
               for part in range(STORAGE_REJECTION_PARTS)]
     items += [("quote-integrity", 1, quote_integrity_check),

@@ -1863,8 +1863,8 @@ Receivers must be explicit interface conversions of effect-free address expressi
 Arguments are captured `uint256`, `bytes32`, address/payable-address, bool or enum
 scalars and existing memory/calldata bytes. Enum ordinals retain the legacy INVALID
 use-site check. Dynamic arrays, structs, strings, value-bearing typed calls,
-effectful argument evaluation and internal calldata-to-memory helper conversions
-remain rejected. The call site must use ABI coder v1.
+effectful argument evaluation remain rejected. Internal calldata forwarding and
+calldata-to-memory helper conversions use the separate legacy helper slice below. The call site must use ABI coder v1.
 
 `LegacyVoidCall` is a closed, assumed transport. It writes the selector and all
 scalar head words before dynamic offsets and payloads, at the current free pointer.
@@ -1954,3 +1954,109 @@ The transport remains assumed. The kernel-checked canonical dispatch equation is
 a model law, not Solidity/importer/compiler equivalence. External-program
 correspondence and adequate gas, memory resources and call depth remain obligations;
 full application execution and refund accounting are not established by this slice.
+
+
+### Internal calldata forwarding and memory helper arguments (experimental)
+
+Solidity 0.7.6 ABI-v1 calls may pass an existing `bytes calldata` identifier to a
+resolved internal call, including direct library calls and public functions called
+internally. A calldata parameter retains the original offset and length; forwarding
+through multiple helpers does not allocate memory or change the free pointer.
+
+Passing the same region to a `bytes memory` parameter allocates a fresh length
+header and payload at the current free pointer. The pointer advances by 32 plus
+the payload length rounded up to 32 bytes, before the copy and helper body. Every
+conversion allocates independently, including empty regions and unused parameters.
+The copy preserves the exact payload and writes a zero word immediately after its
+end, clearing dirty padding and the following 32 bytes. Memory arguments already
+in memory retain the existing pointer/alias behavior and live length reads.
+
+`LegacyMemory.materializeBytes` uses existing model memory and loop statements;
+there is no new external-call transport or axiom. Source admission remains narrow:
+slices, returned calldata, reassignment, element reads, dynamic construction and
+ABI-v2 byte roots/call sites remain outside this slice. Effectful argument ordering,
+post-interaction storage access and external-call restrictions are unchanged.
+
+`check_legacy_calldata_helpers` compares original 0.7.6 EVM, public/traced Denote
+and generated EVM against an independent byte-addressed memory oracle. It checks
+allocation order, repeated and unused parameters, aliases, mixed memory/calldata
+arguments, dirty padding, truncated/noncanonical ABI and conditional calls.
+`check_legacy_calldata_execution` exercises forwarded arguments reaching existing
+CALL/DELEGATECALL helpers, exact return buffers, value transfers and outer rollback.
+Adjacent source controls retain explicit rejection; executable mutants alter the
+source offset, length header, allocation rounding/reuse, padding and forwarding.
+Each mutant must first pass its unchanged control and then diverge at runtime.
+
+This is finite semantic evidence, not a Solidity/importer/compiler equivalence
+proof. Gas, memory resources and call-depth adequacy remain assumptions. Complete
+application execution, argument side-effect ordering, gas observations and refund
+handling still require additional work. Generated artifacts remain under `.lake/`.
+
+
+### Scalar conditional expressions (experimental)
+
+Solidity 0.7.6 admits `condition ? yes : no` for unsigned integers, bools,
+addresses (including payable/contract addresses), and fixed bytes. Nested choices,
+scalar helper results/arguments, selected scalar assignments and existing increment
+forms use the shared scalar lowerer. The condition is evaluated once; the chosen
+arm's prelude and value stay inside its `Stmt.ite` branch. Skipped arms do not
+allocate, emit events, write storage or execute their require/revert behavior.
+Legacy wrapping arithmetic and ABI-v1 scalar cleaning retain their existing rules.
+Narrow fixed-byte root parameters/returns remain rejected; internal conditional
+values can be observed through the existing full-word conversions.
+
+The declaration gate validates both arms, including statically unselected arms.
+Signed values, enum results, tuples, dynamic/reference values and function pointers
+remain outside this legacy conditional slice. Existing restrictions on argument
+ordering and storage access after external interactions still apply. This does not
+admit `gasleft()`, gas prices, refund calls or general effectful call arguments.
+
+Division-path validation follows each conditional edge using the same conservative
+facts as `if` and short-circuit expressions. For example, `d == 0 ? 0 : n / d`
+is admitted for an unsigned, never-assigned local `d`. Facts do not escape the
+expression, cross helper calls, survive mutation, or justify a truncated divisor.
+An unguarded zero-divisor path remains rejected; no legacy exceptional-halt behavior
+is replaced with a modern panic.
+
+`check_legacy_scalar_conditionals` compares the original compiler, public/traced
+Denote and generated EVM with independent ABI, arithmetic, allocation, state and
+ordered-event expectations. It covers both branch outcomes, nested choices, dirty
+ABI values, width/overflow boundaries, lazy failures/copies, condition effects,
+selected increments/assignments and outer rollback. `check_legacy_conditional_rejections`
+checks supported scalar contexts and neighboring unsafe division/non-scalar cases.
+Executable mutations invert the choice, eagerly execute either arm or repeat the
+condition; an unchanged control must pass before runtime divergence counts.
+
+These are finite translation checks, not a new compiler-correctness theorem.
+The existing model primitives and resource/external-world assumptions are unchanged.
+
+
+### Independent postfix helper arguments (experimental)
+
+The 0.7.6 profile admits one direct unsigned `x++` argument in an internal call
+with multiple arguments. The target must be a writable scalar local/parameter or
+a scalar storage identifier. The existing lowering captures its old value, writes
+the incremented value once (with legacy width-dependent wrapping), and passes the
+old value to the helper. The helper observes the updated storage; outer failure
+rolls back the increment, helper writes and logs under the existing transaction model.
+Scalar, multiple-result and void helpers share the argument boundary.
+
+[Solidity leaves sibling evaluation order unspecified](https://docs.soliditylang.org/en/v0.7.6/control-structures.html#order-of-evaluation-of-expressions).
+This slice admits only
+commuting siblings: numeric/bool literals, distinct scalar identifiers and at most
+one existing calldata bytes identifier. That descriptor may be forwarded or
+copied for a memory parameter; its allocation cannot alias the incremented scalar.
+The existing finite-resource assumptions still apply. A sibling read of the target,
+multiple increments, prefix/decrement/assignment forms, computed expressions,
+sibling calls, memory/storage references and multiple byte descriptors remain
+rejected in this new multi-argument boundary. Modern compiler admission is unchanged.
+Single-argument calls retain their previous boundary.
+
+`check_legacy_postincrement_arguments` compares original 0.7.6 EVM, public/traced
+Denote and generated EVM with independent old/new-value, state, event, ABI and
+rollback expectations, including every argument position, local/helper aliases,
+narrow locals, wraparound, nested calls and calldata forwarding/copying.
+`check_legacy_postincrement_rejections` checks the neighboring rejection boundary.
+Executable mutations pass the new value, write twice, omit the write or pass the
+new local value; each must compile and fail runtime checks after a passing control.
+No new primitive, axiom, transport or source-equivalence theorem is introduced.

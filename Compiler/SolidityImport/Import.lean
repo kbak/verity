@@ -12,6 +12,7 @@ import Compiler.SolidityImport.TypesAndRecords
 import Compiler.SolidityImport.TransportBarriers
 import Compiler.SolidityImport.LibraryCallGuard
 import Compiler.SolidityImport.Legacy
+import Compiler.SolidityImport.LegacyCallArguments
 import Compiler.SolidityImport.LegacyBytePointers
 import Compiler.SolidityImport.ExprHelpers
 import Compiler.SolidityImport.StorageLayout
@@ -6145,12 +6146,13 @@ private partial def lowerCallArgs (j : Json) (receiver? : Option Json) : M (Arra
   let nodes := match receiver? with
     | some recv => #[recv] ++ args
     | none => args
+  let independentIncrement := independentLegacyPostIncrementArgs nodes (← get)
   let mut vals : Array CallArg := #[]
   for arg in nodes do
     if statefulCallIn arg (← get) then
       unless nodes.size == 1 && (← get).stateVars.size > 1 do
         failAt arg "stateful helper call arguments require explicit evaluation-order support"
-    if nodes.size > 1 && assignmentIn arg then
+    if nodes.size > 1 && assignmentIn arg && !independentIncrement then
       failAt arg "assignment expression in multi-argument call requires explicit evaluation-order support"
     let argTy ← mType arg
     if argTy.startsWith "struct " && !argTy.contains "[" then
@@ -7269,6 +7271,21 @@ private partial def bindHelperParams (params : Array Json) (args : Array CallArg
         let expectedTy := if descriptor.isString then "string" else "bytes"
         unless pty == expectedTy do
           failAt p s!"calldata {expectedTy} argument requires a {expectedTy} parameter"
+        if (← get).legacyWrapping then
+          unless !descriptor.isString && !descriptor.inMemory do
+            failAt p "legacy bytes helpers require a calldata bytes region"
+          if location == "calldata" then
+            pre := pre ++ effects
+            let forwarded := { descriptor with param := pname }
+            modify fun e => { e with calldataBytes := e.calldataBytes.insert pid forwarded }
+          else if location == "memory" then
+            let buffer ← LegacyMemory.materializeBytes
+              (.localVar descriptor.dataBinding) (.localVar descriptor.lengthBinding)
+            pre := pre ++ effects ++ (← LegacyBytePointers.bind pid pname buffer)
+          else
+            failAt p "legacy bytes helpers require calldata or memory parameters"
+          if pname != "" then yul := yul.erase pname
+          continue
         if location == "calldata" && !descriptor.inMemory then
           pre := pre ++ effects
           modify fun e => { e with calldataBytes := e.calldataBytes.insert pid descriptor }

@@ -2452,8 +2452,8 @@ encoding, memory headers are read after preceding stores and reloaded after the
 outgoing length store, and overlapping copies read the current memory. It does not
 advance the free pointer. Constant-slot assembly address reads clean to 160 bits;
 unsupported dirty assembly reads stay rejected. Post-interaction storage access,
-effectful argument expressions and internal calldata-to-memory helper conversions
-remain outside admission.
+effectful argument expressions remain outside admission. Internal calldata
+forwarding and memory helper conversions use the separate boundary below.
 
 Three-route comparisons, independent expectations, boundary controls and compilable
 runtime mutations provide finite evidence. The coverage equation is a kernel-checked
@@ -2493,3 +2493,56 @@ must not be presented as complete transaction authorization proofs.
 Only the finite `StaticBoolMocks` validation program is excluded from the verified
 population, consistently with existing external mocks. Core encoding, dispatch and
 storage lowering remain in the generated axiom inventory. No project axiom is added.
+
+
+### Legacy internal byte-helper boundary (experimental)
+
+ABI-v1 internal calldata forwarding retains validated offset/length bindings.
+Calldata-to-memory helper arguments use a fresh physical length-header allocation,
+rounded payload capacity and an exact post-payload zero word. Existing memory
+arguments retain aliases and live header reads. These operations lower to existing
+model memory/loop statements; no new assumed external transport, project axiom or
+compiler correspondence theorem is introduced. The importer change itself remains
+an unproved translation step, tested by three-route comparisons, independent byte
+expectations, negative controls and actual executable mutations.
+
+The admitted source is an existing calldata-bytes identifier at a resolved internal
+call. This does not admit arbitrary slices, returned/reassigned calldata, ABI-v2
+conversion semantics, general effectful argument ordering or storage access after
+state-changing external calls. Finite campaigns assume adequate gas, memory and call
+depth; external interaction cases retain their explicit callee-world obligations.
+
+
+### Legacy scalar conditional boundary (experimental)
+
+The 0.7.6 declaration gate admits unsigned, bool, address/contract and fixed-byte
+conditional results through the existing scalar `Stmt.ite` lowering. The condition
+runs once and only the selected arm's effects execute. Both arms still undergo
+source admission checks. The nonzero-divisor analysis propagates facts into each
+arm only for never-assigned unsigned local declarations; it neither exports those
+facts past the conditional nor imports caller assumptions into a helper.
+
+No new model primitive, transport, project axiom or source/compiler equivalence
+theorem is introduced. The admission/translation remains unproved and is checked
+with independent value/state expectations, negative controls and executable
+mutations. Gas, memory and call-depth adequacy remain assumptions. Signed, enum,
+aggregate/reference and function-pointer conditionals, general effectful argument
+ordering and gas/refund behavior are not established by this slice. Existing
+external-world correspondence obligations remain when admitted helpers interact.
+
+
+### Legacy commuting postfix argument boundary (experimental)
+
+A legacy internal call with several arguments may contain one direct unsigned
+postfix increment of a scalar identifier when all siblings are independent scalar
+identifiers/literals or at most one calldata bytes descriptor. Existing
+lowering snapshots the old value and updates the target before entering the helper;
+legacy wrapping and outer transaction rollback use existing model operations.
+The structural guard avoids imposing a source evaluation order on interacting
+siblings. It does not establish general effectful argument ordering, gas adequacy,
+arbitrary reference aliasing or full application execution correctness.
+
+This is an unproved source-admission/translation extension, validated through finite
+independent state/value/event expectations, rejection controls and executable
+mutations. No new model primitive or external transport is added. Existing
+resource, importer correspondence and external-world assumptions remain in force.

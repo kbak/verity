@@ -8,7 +8,7 @@ HEADER = 'pragma solidity 0.7.6;\n'
 CASES = {
     'calldata-memory-helper': ('function h(bytes memory b) internal pure returns(uint256) '
         '{ return b.length; } function run(bytes calldata b) public pure returns(uint256) '
-        '{ return h(b); }', 'run(bytes)', 'calldata call arguments are outside'),
+        '{ return h(b); }', 'run(bytes)', None),
     'allocator-write': ('function run() public pure { assembly { mstore(64, 0) } }',
         'run()', 'free-pointer root and constant displacement'),
     'existing-buffer-write': ('function run(bytes memory b) public pure { '
@@ -89,9 +89,13 @@ def main():
         result = run_bounded(['turbo-lean', '--json', 'check', str(driver)], timeout=180)
         log = result.stdout+result.stderr
         driver.with_suffix('.log').write_text(log)
-        if result.returncode == 0 or '[solidity-import:unsupported]' not in log or reason not in log:
+        if reason is None:
+            if result.returncode != 0:
+                raise HarnessError(f'{name}: supported root did not import: {log}')
+        elif result.returncode == 0 or '[solidity-import:unsupported]' not in log or reason not in log:
             raise HarnessError(f'{name}: missing located rejection: {log}')
-        reports.append(dict(case=name, diagnostic=reason))
+        reports.append(dict(case=name, status='admitted' if reason is None else 'rejected',
+                            diagnostic=reason))
     write_json(output/'results.json', dict(passed=True, rejections=reports))
     return 0
 

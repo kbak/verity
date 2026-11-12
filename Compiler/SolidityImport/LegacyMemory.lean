@@ -155,6 +155,23 @@ private def copyCalldata (destination source count : Expr) : M (Array Stmt) := d
       (.bitAnd (.mload target) (.literal (2^248-1))))]
   return dest.pre ++ src.pre ++ size.pre |>.push (.forEach index size.expr body)
 
+/-- Materialize a validated calldata region for a legacy memory helper argument.
+The allocator advances before the copy; an unaligned zero word clears the tail
+and the next 32 bytes exactly as the ABI-v1 compiler does. -/
+def materializeBytes (source length : Expr) : M EncodedBytes := do
+  let pointer ← fresh
+  let data := Expr.add (.localVar pointer) (.literal 32)
+  let rounded := Expr.bitAnd (.add length (.literal 31)) (.bitNot (.literal 31))
+  let copy ← copyCalldata data source length
+  modify fun e => { e with encodingMemory := true }
+  return {
+    pre := #[.letVar pointer (.mload (.literal 64)),
+      .mstore (.literal 64) (.add data rounded),
+      .mstore (.localVar pointer) length] ++ copy ++
+      #[.mstore (.add data length) (.literal 0)]
+    pointer := data
+    size := length }
+
 /-- Lower byte-exact copies, physical memory reads/writes and hashes in source order.
 Only Yul-local pointer snapshots may address the temporary region; external
 assignment targets still pass the importer's declaration/type checks. -/

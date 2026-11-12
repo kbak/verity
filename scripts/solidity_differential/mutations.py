@@ -7,7 +7,65 @@ import sys
 
 from .engine import ROOT, WORKSPACE, MUTANT_BUILD_TIMEOUT, HarnessError, command, write_json
 
+# Exact shared lowering anchor; every mutation must still compile and diverge at runtime.
+CONDITIONAL_LOWERING = """private partial def lowerConditional (j : Json) : M Val := do
+  let cond ← atom (← lowerExpr (← mField j "condition"))
+  let yes ← lowerExpr (← mField j "trueExpression")
+  let no ← lowerExpr (← mField j "falseExpression")
+  let dest ← fresh
+  let thenB := yes.pre.push (.assignVar dest yes.expr)
+  let elseB := no.pre.push (.assignVar dest no.expr)
+  let ite := Stmt.ite cond.expr thenB.toList elseB.toList
+  pure { pre := cond.pre.push (.letVar dest (.literal 0)) |>.push ite, expr := .localVar dest }
+"""
+
+POSTINCREMENT_STORAGE = '  let stmts := pre.push (.letVar oldVar (.storage name)) ++ combined.pre |>.push (.letVar newVar combined.expr) |>.push (.setStorage name (.localVar newVar))\n  return { pre := stmts, expr := if isPrefix then .localVar newVar else .localVar oldVar }\n'
+POSTINCREMENT_LOCAL = '        unless isSupportedIncDecTy ty do\n          failAt target s!"unsupported scalar local increment/decrement type {ty}"\n        let oldVar ← fresh\n        let combined ← combineCompound compoundOp ty (.localVar oldVar) (.literal 1) j\n        let stmts := #[Stmt.letVar oldVar (.localVar binding)] ++ combined.pre |>.push (.assignVar binding combined.expr)\n        return { pre := stmts, expr := if isPrefix then .localVar binding else .localVar oldVar }\n'
+
 MUTANTS = {
+    'postincrement-new-value': ('Compiler/SolidityImport/Import.lean', POSTINCREMENT_STORAGE,
+        POSTINCREMENT_STORAGE.replace('else .localVar oldVar', 'else .localVar newVar')),
+    'postincrement-double-write': ('Compiler/SolidityImport/Import.lean', POSTINCREMENT_STORAGE,
+        POSTINCREMENT_STORAGE.replace('.setStorage name (.localVar newVar)',
+            '.setStorage name (.add (.localVar newVar) (.literal 1))')),
+    'postincrement-missing-write': ('Compiler/SolidityImport/Import.lean', POSTINCREMENT_STORAGE,
+        POSTINCREMENT_STORAGE.replace(' |>.push (.setStorage name (.localVar newVar))', '')),
+    'postincrement-local-new-value': ('Compiler/SolidityImport/Import.lean', POSTINCREMENT_LOCAL,
+        POSTINCREMENT_LOCAL.replace('else .localVar oldVar', 'else .localVar binding')),
+
+    'conditional-invert': ('Compiler/SolidityImport/Import.lean', CONDITIONAL_LOWERING,
+        CONDITIONAL_LOWERING.replace('Stmt.ite cond.expr thenB.toList elseB.toList',
+            'Stmt.ite (.logicalNot cond.expr) thenB.toList elseB.toList')),
+    'conditional-eager-true': ('Compiler/SolidityImport/Import.lean', CONDITIONAL_LOWERING,
+        CONDITIONAL_LOWERING.replace('let thenB := yes.pre.push (.assignVar dest yes.expr)',
+            'let thenB := #[Stmt.assignVar dest yes.expr]').replace('pre := cond.pre.push',
+            'pre := (cond.pre ++ yes.pre).push')),
+    'conditional-eager-false': ('Compiler/SolidityImport/Import.lean', CONDITIONAL_LOWERING,
+        CONDITIONAL_LOWERING.replace('let elseB := no.pre.push (.assignVar dest no.expr)',
+            'let elseB := #[Stmt.assignVar dest no.expr]').replace('pre := cond.pre.push',
+            'pre := (cond.pre ++ no.pre).push')),
+    'conditional-repeat-condition': ('Compiler/SolidityImport/Import.lean', CONDITIONAL_LOWERING,
+        CONDITIONAL_LOWERING.replace('  let yes ← lowerExpr',
+            '  let repeated ← atom (← lowerExpr (← mField j "condition"))\n  let yes ← lowerExpr').replace(
+            'pre := cond.pre.push', 'pre := (cond.pre ++ repeated.pre).push')),
+
+    'helper-copy-source': ('Compiler/SolidityImport/LegacyMemory.lean',
+        'let copy ← copyCalldata data source length',
+        'let copy ← copyCalldata data (.add source (.literal 1)) length'),
+    'helper-copy-header': ('Compiler/SolidityImport/LegacyMemory.lean',
+        '.mstore (.localVar pointer) length] ++ copy ++',
+        '.mstore (.localVar pointer) (.add length (.literal 1))] ++ copy ++'),
+    'helper-copy-rounding': ('Compiler/SolidityImport/LegacyMemory.lean',
+        '.mstore (.literal 64) (.add data rounded)',
+        '.mstore (.literal 64) (.add data length)'),
+    'helper-copy-reuse': ('Compiler/SolidityImport/LegacyMemory.lean',
+        '.mstore (.literal 64) (.add data rounded)',
+        '.mstore (.literal 64) (.localVar pointer)'),
+    'helper-copy-padding': ('Compiler/SolidityImport/LegacyMemory.lean',
+        '#[.mstore (.add data length) (.literal 0)]', '#[]'),
+    'helper-forward-offset': ('Compiler/SolidityImport/Import.lean',
+        'let forwarded := { descriptor with param := pname }',
+        'let forwarded := { descriptor with param := pname, dataBinding := descriptor.headerBinding }'),
     'legacy-bool-code': ('Verity/Core/Model/LegacyBoolCalls.lean', '.if_ (.call "iszero" [.call "extcodesize" [target]])', '.if_ (.lit 0)'),
     'legacy-bool-truth': ('Verity/Core/Model/LegacyBoolCalls.lean', '.assign result (.call "iszero" [.call "iszero" [.call "mload" [ptr]]])', '.assign result (.call "eq" [.call "mload" [ptr], .lit 1])'),
     'legacy-bool-short': ('Verity/Core/Model/LegacyBoolCalls.lean', '.if_ (.call "lt" [.call "returndatasize" [], .lit 32])', '.if_ (.call "lt" [.call "returndatasize" [], .lit 1])'),
@@ -309,6 +367,16 @@ def mutation_campaign(output, selected=None):
                 argv = [sys.executable, "-c",
                         "import sys; sys.path.insert(0, 'scripts'); "
                         "from solidity_differential.check_legacy_calldata_hash import main; sys.exit(main())",
+                        "--output", str(directory / ".lake/campaign")]
+            if name.startswith("postincrement-"):
+                argv = [sys.executable, "-m", "solidity_differential.check_legacy_postincrement_arguments",
+                        "--output", str(directory / ".lake/campaign")]
+            if name.startswith("conditional-"):
+                kind = "effects" if name == "conditional-repeat-condition" else "scalar"
+                argv = [sys.executable, "-m", "solidity_differential.check_legacy_scalar_conditionals",
+                        "--kind", kind, "--output", str(directory / ".lake/campaign")]
+            if name.startswith(("helper-copy-", "helper-forward-")):
+                argv = [sys.executable, "-m", "solidity_differential.check_legacy_calldata_helpers",
                         "--output", str(directory / ".lake/campaign")]
             if name.startswith(("legacy-bool-", "legacy-store-")):
                 argv = [sys.executable, "-m", "solidity_differential.check_legacy_static_installation",
