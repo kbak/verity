@@ -161,6 +161,35 @@ existing rejection gates and independent expectations remain unchanged. Importer
 admission still waits for #39, with full-cleanup composition before tail-only
 caller analysis.
 
+## Parameter and local-variable store bridge
+
+`BindingMstoreOperands.lean` describes bounded literals, present parameter/local
+bindings and nonwrapping constant additions. Its witnesses establish evaluation
+by the canonical interpreter independently of memory. Binding agreement compares
+only the names used by those operands, including binding presence; unrelated
+bindings may differ. Each referenced scalar must already fit a full EVM word.
+
+`BindingMstoreExecution.lean` composes these witnesses into store-only blocks with
+explicit nonwrapping 32-byte footprints. Agreement on the referenced bindings
+derives the same resolved write list in the second runtime. The block executes
+to exactly the literal-store result from the preceding bridge, including the
+complete non-memory runtime frame. No assignment or memory-dependent operand
+can be represented by this witness. Missing bindings cannot use the interpreter's
+default zero, and overflowing constant additions have no witness.
+
+`BindingMstoreObservation.lean` reuses the preceding load/hash theorems after
+actual block execution. Coherence, byte agreement outside the writes, and all
+observation bounds remain explicit. These results cover pointer-plus-constant
+addresses and scalar values without equating unrelated runtime fields.
+
+Binding agreement is a hypothesis, not an inferred provenance or liveness fact.
+A value captured from dirty memory before cleanup is not made equal by later
+stores. This slice does not analyze aliases, assignments, branches or calls,
+prove ABI return/allocator behavior, or establish compiler/generated-EVM
+correspondence or gas/memory-size equality. It adds no importer admission rule;
+all independent expectations and rejection gates remain unchanged. Full-cleanup
+hash/storage-read admission still waits for #39 and precedes tail-only analysis.
+
 ## Subsequent implementation acceptance
 
 After #39 and the preceding full-cleanup slice merge, first prove the minimal

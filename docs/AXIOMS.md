@@ -716,3 +716,12 @@ and nonwrapping/literal-normalization bounds. It does not prove arbitrary caller
 operands, source/compiler correspondence, generated-EVM equivalence, ABI return
 behavior or admission. Existing hash premises are unchanged; the matching scope
 is recorded in `TRUST_ASSUMPTIONS.md` and `TAIL_CLEANUP_LIVENESS.md`.
+
+The parameter/local-variable store bridge adds no axiom or proof shortcut.
+Explicit witnesses require present, word-bounded
+bindings, nonwrapping constant additions and full word-footprint bounds. Equal
+referenced bindings derive the same resolved writes; canonical execution and
+load/hash observations then reuse the bounded literal bridge. Binding agreement
+is a premise, not inferred provenance, and earlier captured scalars are not
+erased. Existing hash premises, expectations and importer admission are unchanged.
+`TRUST_ASSUMPTIONS.md` and `TAIL_CLEANUP_LIVENESS.md` record the same limited scope.
