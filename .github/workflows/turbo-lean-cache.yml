@@ -178,7 +178,7 @@ jobs:
             .lake/turbo-input-builder/target/release/turbo-lean --json build \
             Compiler.SolidityImport.SequenceRunner --project-dir .
           PYTHONPATH=scripts python3 -m solidity_differential.check_storage_reference_routes --prepared --output .lake/bounded-memory/storage-routes
-          PYTHONPATH=scripts python3 -m solidity_differential.check_packed_storage_read --prepared --output .lake/bounded-memory/packed-storage-read
+          PYTHONPATH=scripts python3 -m solidity_differential.check_packed_storage_read --prepared --require-composition --output .lake/bounded-memory/packed-storage-read
           PYTHONPATH=scripts python3 -m solidity_differential.check_tail_cleanup_liveness --prepared --output .lake/bounded-memory/tail-cleanup
 
       - name: Archive bounded memory execution and rejection evidence

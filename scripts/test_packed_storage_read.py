@@ -6,7 +6,7 @@ from keccak256 import selector
 from solidity_differential.check_packed_memory_hash import word
 from solidity_differential.check_packed_storage_read import (
     COMPOSITION_REJECTION, DIGEST, FIXTURE, KEY_READ, READ, key_read_inputs,
-    read_prefix, rejected_sources, require_rejection, require_source, source_variants,
+    read_prefix, rejected_sources, require_combined, require_rejection, require_source, source_variants,
 )
 from solidity_differential.pinned_sequence import SENDERS, create_address
 from solidity_differential.engine import HarnessError
@@ -81,6 +81,36 @@ class PackedStorageReadTests(unittest.TestCase):
         require_source({'routes': ['source'],
                         'mismatches': {'source': [{'fields': ['data']}]}}, True)
 
+    def test_combined_gate_requires_all_executed_routes_against_independent_observations(self):
+        valid = {'routes': ['source', 'model', 'compiled'],
+                 'mismatches': {route: [] for route in ('source', 'model', 'compiled')},
+                 'divergences': []}
+        require_combined(valid)
+        for route in valid['routes']:
+            for defect in ('absent', 'mismatch', 'divergence'):
+                result = copy.deepcopy(valid)
+                if defect == 'absent':
+                    result['routes'].remove(route)
+                    del result['mismatches'][route]
+                elif defect == 'mismatch':
+                    result['mismatches'][route] = [{'fields': ['data']}]
+                else:
+                    result['divergences'] = ['different result']
+                with self.subTest(route=route, defect=defect), self.assertRaises(HarnessError):
+                    require_combined(result)
+
+    def test_combined_mutants_must_change_data_on_every_route_without_state_corruption(self):
+        valid = {'routes': ['source', 'model', 'compiled'],
+                 'mismatches': {route: [{'fields': ['data']}] for route in
+                                ('source', 'model', 'compiled')}, 'divergences': []}
+        require_combined(valid, True)
+        for route in valid['routes']:
+            for fields in ([], ['status'], ['data', 'storage']):
+                result = copy.deepcopy(valid)
+                result['mismatches'][route] = [{'fields': fields}] if fields else []
+                with self.subTest(route=route, fields=fields), self.assertRaises(HarnessError):
+                    require_combined(result, True)
+
     def test_unexpected_admission_or_different_rejection_cannot_pass(self):
         for observation in ({}, {'status': 'admitted'},
                             {'status': 'rejected', 'reason': 'evaluation failed'}):
@@ -90,11 +120,13 @@ class PackedStorageReadTests(unittest.TestCase):
     def test_rejection_matrix_is_distinct_and_source_mutations_leave_fixture_unchanged(self):
         source = FIXTURE.read_text()
         cases = list(rejected_sources(source))
-        self.assertEqual(len(cases), 6)
-        self.assertEqual(len({text for _, text, _, _ in cases}), 6)
+        self.assertEqual(len(cases), 10)
+        self.assertEqual(len({text for _, text, _, _ in cases}), 10)
         for name, text, signature, _ in cases:
             self.assertNotEqual(text, source)
-            self.assertEqual(signature, READ if name == 'scratch-after-read' else DIGEST)
+            self.assertEqual(signature, DIGEST if name in {
+                'partial-cleanup', 'dirty-hash', 'dirty-read', 'unknown-cleanup-alias',
+                'abi-allocation'} else READ)
         with self.assertRaises(HarnessError):
             list(rejected_sources(source.replace('mstore(base, 0)', 'mstore(base, 1)')))
         variants = source_variants(source)

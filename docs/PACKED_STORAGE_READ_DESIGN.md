@@ -1,22 +1,24 @@
 # Full-cleanup packed hash and storage read
 
-This is regression preparation and a proposed design for #32, based on fork PR
-#43. Importer admission must remain unchanged until #39 merges and its required
-gates pass. This preparation does not implement the design or complete #32.
+This implements the read-only full-cleanup composition slice of #32 after #39
+merged. Tail-only cleanup, writes, events, rollback and the pinned downstream
+wrapper remain separate work; this slice does not complete #32.
 
 ## Executable boundary
 
 `Contracts/SolidityImportSmoke/PackedStorageRead.sol` separates three roots:
 
-| Root or variant | Evidence required by this preparation |
+| Root or variant | Required execution evidence |
 | --- | --- |
 | `digest` with full cleanup | All 54 existing packed vectors agree across source EVM, actual Denote and generated Cancun EVM. |
 | `readKey` with a supplied key | Six initial reads agree across those same three routes. |
-| Combined `read`, helper rename, shifted layout | Six source reads each match the independent oracle; each import retains the synthetic-memory-write rejection. |
-| Wrong mapping base, shortened hash | Real source execution must disagree only in return data; failures or state corruption do not count as detection. |
+| Combined `read`, helper rename, shifted layout | The unchanged initial reads match the independent oracle across source EVM, actual Denote and generated Cancun EVM. |
+| Caller reads the cleared buffer after lookup | All three routes preserve the same independent reads; the source checks that all cleanup words remain zero. |
+| Wrong mapping base, shortened hash | All three real execution routes must disagree with the oracle only in return data, and agree with each other; failures or state corruption do not count as detection. |
 | Partial cleanup, dirty hash, dirty word read, unknown cleanup alias | Source-valid roots retain their respective located rejections. |
 | ABI allocation before the hash | Retains the synthetic-memory-write rejection. |
 | Raw scratch read after lookup | Retains the existing `unsupported Yul builtin mload` rejection. |
+| Storage write, storage-derived pointer or free pointer, source-written scratch pair | Retain their respective root-audit rejections. |
 
 Full cleanup clears all three words starting at the saved free pointer after
 computing the unchanged 58-byte packed hash. This is a separate generic control;
@@ -29,7 +31,7 @@ without rewriting either. These reads include three seeded and three empty
 records, uint128 padding, adjacent slots, other keys and enclosing sentinels.
 The shifted layout retains the existing independently specified mapping base.
 The supplied-key control changes only function/selector/argument inputs, and is
-reported separately from the rejected combined root.
+reported separately from the required combined execution.
 
 Source reads use the existing cumulative discovery/replay slot plan. Unexpected
 slots must retain their initial values; missing observations or tool failures
@@ -39,49 +41,38 @@ retained. Pure hash controls execute with empty initial storage; stateful read
 controls install the independently specified initial storage. These are finite
 experiments, not constructor, balance/nonce, gas or whole-world equivalence.
 
-## Why the combined root is rejected
+## Admission and effect boundary
 
-The mapping-to-struct path in
-[`Import.lean`](../Compiler/SolidityImport/Import.lean), `lowerRef`, emits a pair
-of scratch writes at 0 and 32, then hashes 64 bytes to derive the record address.
-Related address construction is in
 [`StorageLayout.lean`](../Compiler/SolidityImport/StorageLayout.lean),
-`computeSPathBaseSlot`. The key's assembly accesses are recorded separately by
-[`BoundedMemory.lean`](../Compiler/SolidityImport/BoundedMemory.lean).
+`mappingScratch`, emits the existing ordered writes at 0 and 32 followed by the
+64-byte hash. It allocates a hygienic fresh result and records that binding as
+lowering provenance. Struct mapping address construction shares this emitter;
+the emitted operands, binding allocation order and model statements are unchanged.
+Provenance is reset for each imported root and never inferred from source names.
+The emitter source is included in the importer digest. A source-written scratch
+pair with a compiler-style local name remains an explicit rejection control.
 
-[`MemoryBounds.lean`](../Compiler/SolidityImport/MemoryBounds.lean), `store`,
-currently accepts recorded source writes and the initial free-pointer prologue.
-It rejects these generated scratch writes as synthetic memory effects. The
-combined control reaches that guard after the full cleanup succeeds.
+[`MemoryBounds.lean`](../Compiler/SolidityImport/MemoryBounds.lean) scans the
+lowered root in source order. It consumes only an adjacent, intact mapping
+sequence with a recorded fresh result, removing that result from the provenance
+set. Arbitrary source-written scratch pairs, reordered or interrupted sequences,
+and synthetic ABI allocation writes still reject. Each operand must also pass
+the existing scalar-expression effect audit. This is a linear scan with hash-set
+provenance, not a global permission to combine storage and memory.
 
-There is another boundary visible in the code: `scalar` excludes storage-read
-expressions such as `storageArrayElement`. This is a prospective next rejection,
-not an observed successful composition or a reason to remove the scalar check.
-Accepting the scratch writes alone would not establish that the whole root is
-supported. Event argument lowering and tail-only cleanup are separate follow-ups.
+The scratch footprint `[0,64)` is disjoint from the allocator word `[64,96)`,
+the zero word `[96,128)`, and source buffers at or above 128. Recorded source
+accesses still require nonwrapping bounds, including the full cleanup footprint.
+The scratch operation therefore retains the preceding free-pointer range and
+scalar bindings; only its fresh hash result is bound. No generated instruction is
+rewritten or reordered and no source memory layout is assumed observable.
 
-## Proposed minimal admission slice after #39
-
-Keep the initial slice straight-line, fully cleaned and read-only. Analyze the
-lowered statement sequence structurally, including helper-inlined operations.
-Reuse or extend the existing effect summaries rather than introducing a global
-"storage plus memory is safe" flag or a helper-name exception.
-
-1. Recognize the mapping-address operation as a bounded, ordered scratch effect:
-   two clean word writes in `[0,64)` followed by the corresponding hash. Preserve
-   the original key and mapping-base expressions and their evaluation order.
-   Do not classify arbitrary writes to these addresses as verified mapping work.
-2. Compose that footprint with the existing source-access bounds: the packed
-   buffer starts at or above 128, all writes including cleanup are nonwrapping,
-   and `base + 96 <= 2^32`. Scratch writes must preserve the free-pointer word
-   `[64,96)`, the zero word `[96,128)`, and the bounded source buffer.
-3. Admit only storage-read expressions whose effects are understood. A storage
-   result is an unconstrained word for subsequent interval reasoning; it cannot
-   silently become a bounded pointer. Keep guard/version invalidation and reject
-   unsupported control flow, external calls, writes and unresolved aliases.
-4. Preserve restrictions on observations of synthetic layouts. The ABI-allocation
-   and raw-scratch controls must remain rejected. No proof may assume that source
-   Solidity exposes the importer's particular scratch or ABI allocation layout.
+Scalar storage-array reads are admitted in this straight-line root. Their values
+remain unknown words in the interval analysis, as do hash results. Reading storage
+does not establish a pointer bound. Existing successful guards and binding-version
+invalidation still apply; writes, external calls, loops and unsupported branches
+remain excluded. Dirty-bit cleanup requirements in `BoundedMemory.lean` are
+unchanged, so tail-only cleanup still rejects before this composition audit.
 
 The mapping-slot preimage remains the independent `word32(key) ++ word32(base)`
 expectation. Layout resolution and field extraction must remain construct-generic;
@@ -101,11 +92,11 @@ consume this preimage. Scratch writes at 0 and 32 preserve the free-pointer and
 zero words under initial coherence, and preserve arbitrary buffers above 128.
 The disjoint-slice hash frame also handles unaligned buffers.
 
-This is a foundation for the proposed admission slice. It does not recognize
-lowered mapping operations, connect arbitrary source execution to the pair,
-justify tail-only cleanup, or supply a storage-reference correspondence theorem.
-The combined-root rejection remains required until the admission implementation
-is separately accepted after #39 merges. All independent expectations are unchanged.
+These existing lemmas justify the physical scratch footprint and its frames.
+The new recognition and interval checks remain trusted frontend code; the lemmas
+do not connect arbitrary Solidity execution to an accepted root, justify tail-only
+cleanup, or supply a storage-reference correspondence theorem. No new proof or
+cryptographic assumption is introduced. All independent expectations are unchanged.
 
 ## Proof obligations and acceptance
 
@@ -116,21 +107,19 @@ Existing reusable results include `memory_writes_coherent`,
 [`MemorySliceBridge.lean`](../Compiler/Proofs/IRGeneration/MemorySliceBridge.lean).
 They provide ingredients, not a theorem proving this importer extension.
 
-The implementation must establish the scratch/buffer disjointness and allocator
-frame under explicit bounds, preserve the saved hash across mapping derivation,
-and preserve persistent storage and logs for the read-only root. Use existing
-state/frame lenses and small generic helper lemmas; retain current hash premises.
-Audit and fast-check candidate statements before proving them with Turbo-Lean.
-Any later Yul/ECM rewrite requires the repository's certified-shim framework;
-this preparation proposes no instruction rewrite and adds no proof or axiom.
+The physical frame lemmas preserve allocator metadata and source buffers under
+their explicit coherence/disjointness bounds, as well as persistent storage and
+logs. The admission change preserves the existing generated instruction sequence
+and uses fresh names to preserve previously computed hashes. It does not discharge
+the remaining source/importer or compiler correspondence obligations. Any later
+Yul/ECM rewrite still requires the repository's certified-shim framework.
 
-Acceptance for the implementation PR requires all three combined variants to run
-through the actual Denote and generated-EVM sequence routes against the same
-independent observations. Keep both source mutants detectable and all six excluded
-boundary controls rejected. Only then replace the combined-root rejection checks
-with mandatory three-route execution and allow the composition gate to pass.
-A supplied-key control or successful import alone can never satisfy that gate.
-Run exact-head repository, warning, proof, differential and mutation gates.
+Acceptance requires all combined variants to run through the actual Denote and
+generated-EVM sequence routes against the unchanged independent observations.
+Both source mutants must remain detectable on every route and all excluded
+boundary controls must reject. Separate hash/key controls or successful import
+alone cannot pass the composition gate. Repository, warning, proof, differential
+and mutation checks remain required on the exact PR head.
 
 Tail-only cleanup needs a separate caller liveness/frame argument, prepared in
 [the caller-liveness design](TAIL_CLEANUP_LIVENESS.md). Writes,
@@ -138,7 +127,7 @@ events, rollback and the always-reverting value-return root remain later work,
 followed by validation of the pinned downstream wrapper tracked in #32. Full
 cleanup does not substitute for any of those acceptance criteria.
 
-## Running the preparation
+## Running the regression
 
 ```bash
 PYTHONPATH=scripts python3 -m solidity_differential.check_packed_storage_read \
@@ -146,8 +135,8 @@ PYTHONPATH=scripts python3 -m solidity_differential.check_packed_storage_read \
 ```
 
 `--prepared` reuses built importer, differential and sequence-runner interfaces.
-Default exit 0 means only that the preparation matrix passed. Add
-`--require-composition` for exit 1 after a successful preparation while the
-combined Denote/generated routes remain absent. Unexpected admission, changed
-rejection reasons, bad observations or tool failures produce exit 2. CI archives
-the evidence with the other bounded-memory campaigns.
+Exit 0 requires combined execution, independent observations, mutation sensitivity
+and all rejection controls to pass. `--require-composition` remains accepted for
+existing callers, but composition is now mandatory with or without the flag.
+Missing routes, changed rejection reasons, bad observations or tool failures fail
+the campaign. CI archives the evidence with the other bounded-memory campaigns.

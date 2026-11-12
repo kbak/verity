@@ -181,6 +181,8 @@ structure Env where
   legacyCleanParams : List Nat := []
   rawBindings : RBMap Nat String compare := RBMap.empty
   memoryAccesses : Array MemoryAccess := #[]
+  /-- Fresh result bindings of generated, ordered mapping-preimage scratch sequences. -/
+  mappingScratchBindings : Std.HashSet String := {}
   uncheckedAssemblyReferences : Array AssemblyReference := #[]
   encodingMemory : Bool := false
   explicitAbi : Bool := false

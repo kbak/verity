@@ -372,7 +372,8 @@ pinned downstream wrapper pass. Infrastructure failures use exit 2. A passing
 control, or a later successful import alone, cannot open that milestone gate.
 
 
-The next [full-cleanup storage-read preparation](PACKED_STORAGE_READ_DESIGN.md)
-isolates the combined read rejection from supported hash and supplied-key
-controls. It preserves the existing expectation archives and changes no importer
-admission. Its proposed scratch-memory/storage composition remains gated on #39.
+The [full-cleanup storage-read slice](PACKED_STORAGE_READ_DESIGN.md) now admits
+bounded source memory composed with generated mapping scratch and scalar reads.
+It requires actual combined source/Denote/generated execution against the unchanged
+expectation archives. Tail-only cleanup, writes and the pinned downstream wrapper
+remain outside this slice, so the #32 milestone gate remains incomplete.

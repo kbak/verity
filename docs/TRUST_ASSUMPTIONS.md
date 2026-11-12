@@ -54,12 +54,18 @@ computation or admit the still-blocked packed-reference helper. Full initial and
 expected state archives remain unchanged. This is finite execution evidence, not
 constructor, gas, whole-world, importer or compiler correspondence.
 
-The full-cleanup read preparation retains both frozen state archives and the
-packed archive. It executes their unmodified initial-read prefix, but reports
-combined Denote/generated execution as missing. Separate successful hash and
-supplied-key controls do not justify admitting the combined root. The proposed
-scratch/storage effect analysis and frame obligations in
-`PACKED_STORAGE_READ_DESIGN.md` are unimplemented and add no current proof coverage.
+The full-cleanup read slice retains both frozen state archives and the packed
+archive. Its unchanged initial-read prefix must agree across source EVM, actual
+Denote and generated Cancun bytecode, including renamed helpers and shifted
+storage layout. Wrong mapping-base and shortened-hash source mutants must remain
+observable on all routes. The root audit now recognizes complete generated mapping
+scratch sequences using fresh-binding provenance and admits scalar storage reads
+without inferring pointer bounds from their values. This recognition is trusted
+frontend code, not a kernel-certified abstract interpretation. Existing physical
+scratch-frame lemmas supply disjointness and allocator/storage/event frames; no
+source/importer correspondence theorem or new cryptographic premise is claimed.
+Tail-only cleanup, writes and observations of synthetic layouts remain excluded.
+See `PACKED_STORAGE_READ_DESIGN.md` for the precise boundary and remaining work.
 
 The tail-only caller probes compare controlled upper-bit perturbations against
 the unchanged packed hashes. They retain both complete state archives without
@@ -450,6 +456,47 @@ composition theorems, not importer admission, source/compiler correspondence,
 storage-reference validity, or gas/memory-expansion equivalence. Existing hash
 faithfulness and collision premises remain unchanged. See
 [the read-composition design](PACKED_STORAGE_READ_DESIGN.md).
+
+The proof-only caller-memory composition modules add a two-run overwrite and
+observation argument. Both executions perform the same concrete word writes in
+the same order. They need initial physical-byte agreement outside the writes,
+or outside a residual byte set whose observed portion is covered by those writes.
+Exact slices and coherent word reads then agree; the existing proof-IR hash
+reader additionally requires its explicit rounded nonwrapping bound. No new
+hash axiom or change to existing faithfulness/collision premises is introduced.
+This is not a proof that arbitrary callers evaluate identical write operands,
+that earlier captured values are equal, or that aliases/residual masks can be
+inferred safely. Memory-size/gas equality and non-memory world agreement are
+separate obligations. Importer admission and every independent expectation and
+rejection remain unchanged; see `TAIL_CLEANUP_LIVENESS.md`.
+
+The bounded literal-store bridge proves actual canonical source execution of a
+straight-line block equals the existing ordered physical-write fold. Typed word
+literals and bounded 32-byte footprints establish the common evaluated operands.
+The exact poststate preserves all non-memory runtime fields, including bindings,
+immutable values, call bookkeeping, storage and events. It permits memory
+expansion and does not equate non-memory fields of different initial states.
+Subsequent canonical load/hash results agree under explicit initial coherence,
+byte agreement outside the writes, literal-normalization bounds and the existing
+nonwrapping observation bounds. No new hash premise is introduced. Arbitrary
+operand/alias analysis, ABI return and allocator behavior, source/compiler and
+generated-EVM correspondence, and gas/memory-size equality remain unproved by
+this bridge. Importer admission and all independent expectations remain
+unchanged; see `TAIL_CLEANUP_LIVENESS.md` and `AXIOMS.md`.
+
+The parameter/local-variable store bridge extends that proof to explicit
+store-only witnesses with literals, present parameter/local bindings and bounded
+constant additions. Agreement on referenced bindings derives identical evaluated
+writes; unrelated bindings may differ. Canonical execution, non-memory runtime
+preservation and subsequent load/hash agreement reuse the literal bridge under
+its existing bounds and coherence/byte-agreement hypotheses. No new hash premise
+is introduced. Binding agreement is assumed explicitly: the proof does not infer
+provenance or make previously captured dirty scalars equal. Missing bindings,
+overflowing additions, memory-dependent operands and other statement effects are
+outside the witness. Alias/liveness analysis, ABI return/allocator behavior,
+source/compiler and generated-EVM correspondence, and gas/memory-size equality
+remain outside this slice. Importer admission and independent expectations remain
+unchanged; see `TAIL_CLEANUP_LIVENESS.md` and `AXIOMS.md`.
 
 ## Compilation Pipeline
 

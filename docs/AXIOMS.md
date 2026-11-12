@@ -34,10 +34,13 @@ Denote-only and generated-code-only event-deletion mutants establish finite
 instrument sensitivity. This adds no axiom or compiler-correctness theorem;
 packed-reference roots still require separate admission and execution evidence.
 
-The full-cleanup storage-read preparation adds finite source/control evidence
-and located rejection checks, with no new axiom, theorem or admission. Separate
-hash and supplied-key executions do not establish their composition; see
-`PACKED_STORAGE_READ_DESIGN.md` for the pending generic frame obligations.
+The full-cleanup storage-read slice admits complete generated mapping scratch
+sequences and scalar storage reads within the bounded-memory root audit. It adds
+no axiom or theorem: recognition remains trusted frontend code. Existing physical
+scratch-frame lemmas retain their assumptions; combined source/Denote/generated
+execution against the frozen expectations is finite regression evidence, not
+source/importer or compiler correspondence. Tail-only cleanup and writes remain
+excluded; see `PACKED_STORAGE_READ_DESIGN.md` and `TRUST_ASSUMPTIONS.md`.
 
 The tail-only caller-liveness preparation adds no axiom, theorem or admission.
 Controlled upper-bit perturbations provide finite source-EVM sensitivity evidence
@@ -713,3 +716,30 @@ physical word writes to the existing ordered mapping ABI preimage and prove
 byte/word/non-memory frames with explicit coherence and nonwrapping hypotheses
 where needed. They do not discharge existing hash/collision premises or admit
 combined importer roots. `TRUST_ASSUMPTIONS.md` records the same limited scope.
+
+The caller-memory composition modules add eleven ordinary theorems and no axiom
+or proof shortcut. A common sequence of physical word writes removes byte
+observation differences exactly where it overwrites them; remaining bytes in a
+read range must agree. Exact slice, coherent word and bounded proof-IR hash
+observations follow. This does not establish caller liveness analysis, equality
+of memory sizes/gas, source/importer correspondence, or admission. Existing hash
+premises remain unchanged; see `TAIL_CLEANUP_LIVENESS.md` and
+`TRUST_ASSUMPTIONS.md` for the explicit two-run hypotheses.
+
+The bounded literal-store execution bridge adds eleven ordinary theorems and no
+axiom or proof shortcut. It proves canonical source execution equals the common
+physical-write fold and preserves the full runtime frame outside memory. Its
+subsequent canonical load/hash equality uses explicit coherence, byte-agreement
+and nonwrapping/literal-normalization bounds. It does not prove arbitrary caller
+operands, source/compiler correspondence, generated-EVM equivalence, ABI return
+behavior or admission. Existing hash premises are unchanged; the matching scope
+is recorded in `TRUST_ASSUMPTIONS.md` and `TAIL_CLEANUP_LIVENESS.md`.
+
+The parameter/local-variable store bridge adds no axiom or proof shortcut.
+Explicit witnesses require present, word-bounded
+bindings, nonwrapping constant additions and full word-footprint bounds. Equal
+referenced bindings derive the same resolved writes; canonical execution and
+load/hash observations then reuse the bounded literal bridge. Binding agreement
+is a premise, not inferred provenance, and earlier captured scalars are not
+erased. Existing hash premises, expectations and importer admission are unchanged.
+`TRUST_ASSUMPTIONS.md` and `TAIL_CLEANUP_LIVENESS.md` record the same limited scope.

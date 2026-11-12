@@ -45,6 +45,7 @@ private partial def evaluate (s : Bounds) : Expr → Range
 private def scalar (expr : Expr) : Bool :=
   expr.foldBool (fun e => match e with
     | .literal _ | .localVar _ | .param _ | .calldatasize | .calldataload _
+    | .storageArrayElement _ _
     | .mload _ | .keccak256 _ _ | .add _ _ | .sub _ _ | .mul _ _
     | .div _ _ | .mod _ _ | .sdiv _ _ | .smod _ _
     | .bitAnd _ _ | .bitOr _ _ | .bitXor _ _ | .bitNot _
@@ -131,29 +132,49 @@ private def store (s : Bounds) (address value : Expr) : M Bounds := do
   else if range.hi < 33 || 96 ≤ range.lo then return s
   else return { s with free := {} }
 
+private def step (s : Bounds) (stmt : Stmt) : M Bounds := do
+  unless stmt.directMetadata.subexpressions.all scalar do unsupported s
+  match stmt with
+  | .letVar name value | .assignVar name value => bind s name value
+  | .require cond _ | .requireError cond _ _ => return assume s cond
+  | .mstore address value => store s address value
+  | .ite cond [] no =>
+      unless terminal no do unsupported s
+      return assume s cond
+  | .return _ | .returnValues _ | .revertEmpty | .revertError ..
+  | .panicCode _ | .panic _ | .stop => return s
+  | _ => unsupported s
+
+/-- Consume only an intact mapping sequence carrying fresh lowering provenance.
+Its scratch footprint is [0,64); allocator metadata and bounded source buffers
+are unchanged. Storage words and hash results remain unknown to interval analysis. -/
+private def sequence (generated : Std.HashSet String) (s : Bounds) : List Stmt → M Bounds
+  | [] => pure s
+  | .mstore (.literal 0) key :: .mstore (.literal 32) baseSlot ::
+      .letVar name (.keccak256 (.literal 0) (.literal 64)) :: tail => do
+      unless generated.contains name do
+        failRoot s "bounded memory cannot observe synthetic allocation memory writes"
+      unless scalar key && scalar baseSlot do unsupported s
+      let next ← bind s name (.keccak256 (.literal 0) (.literal 64))
+      sequence (generated.erase name) next tail
+  | stmt :: rest => do
+      let next ← step s stmt
+      sequence generated next rest
+
 /-- Validate all recorded addresses, including helper-inlined operations, against
-successful guards and the actual preceding free-pointer writes. No control-flow
-joins or loops are inferred; unsupported roots retain a source-located rejection. -/
+successful guards and the actual preceding free-pointer writes. Generated mapping
+scratch is admitted only as a complete ordered operation. No control-flow joins,
+loops or storage writes are inferred; other roots retain a located rejection. -/
 def validate (body : Array Stmt) : M Unit := do
-  let accesses := (← get).memoryAccesses
+  let env ← get
+  let accesses := env.memoryAccesses
   if accesses.isEmpty then return
-  if let some site := (← get).uncheckedAssemblyReferences[0]? then
+  if let some site := env.uncheckedAssemblyReferences[0]? then
     modify fun e => { e with currentFile := site.file, stack := site.stack }
     failAt site.node "bounded memory cannot consume unaudited narrow assembly references"
-  let mut s : Bounds := {
+  let initial : Bounds := {
     accesses := Std.HashMap.ofList (accesses.toList.map fun access => (access.binding, access)) }
-  for stmt in body do
-    unless stmt.directMetadata.subexpressions.all scalar do unsupported s
-    match stmt with
-    | .letVar name value | .assignVar name value => s ← bind s name value
-    | .require cond _ | .requireError cond _ _ => s := assume s cond
-    | .mstore address value => s ← store s address value
-    | .ite cond [] no =>
-        unless terminal no do unsupported s
-        s := assume s cond
-    | .return _ | .returnValues _ | .revertEmpty | .revertError ..
-    | .panicCode _ | .panic _ | .stop => pure ()
-    | _ => unsupported s
+  let s ← sequence env.mappingScratchBindings initial body.toList
   for access in accesses do
     unless s.seen.contains access.binding do
       failure access "bounded-memory access is outside the supported root sequence"
