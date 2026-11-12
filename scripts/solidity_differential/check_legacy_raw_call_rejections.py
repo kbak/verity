@@ -16,10 +16,15 @@ CASES = {
                               'storage-free trailing continuation'),
     'post-branch-read': (FUNCTION + CALL + 'if(ok) return stored>0; }', SIGNATURE,
                          'storage-free trailing continuation'),
-    'output-area': (FUNCTION + CALL.replace('mload(data),0,0', 'mload(data),0,32') + '}',
-                    SIGNATURE, 'empty output area'),
+    'scratch-word-output': (FUNCTION + CALL.replace('mload(data),0,0', 'mload(data),0,32') + '}',
+                            SIGNATURE, None),
+    'output-area': (FUNCTION + CALL.replace('mload(data),0,0', 'mload(data),0,31') + '}',
+                    SIGNATURE, 'empty output'),
+    'delegate-output-word': (FUNCTION + CALL.replace('call(n,target,0,', 'delegatecall(n,target,')
+                             .replace('mload(data),0,0', 'mload(data),0,32') + '}',
+                             SIGNATURE, 'empty output'),
     'nonzero-output-pointer': (FUNCTION + CALL.replace('mload(data),0,0', 'mload(data),32,0') + '}',
-                               SIGNATURE, 'empty output area'),
+                               SIGNATURE, 'empty output'),
     'nested-call': (FUNCTION + CALL.replace('ok := call(n,target,0,',
                      'ok := call(call(n,target,0,0,0,0,0),target,0,') + '}',
                     SIGNATURE, 'unsupported Yul builtin call'),
@@ -57,7 +62,8 @@ def run(output, prepared=False):
             '  using { solc := "0.7.6+commit.7338295f", evmVersion := "istanbul", '
             'viaIR := false, optimizerRuns := none, bytecodeHash := "none" }\n'
             '  contract P\n  function ' + signature + '\n')
-        proc = run_bounded(['lake', 'env', 'lean', driver], timeout=180)
+        proc = run_bounded(['turbo-lean', 'eval', driver, '--project-dir', Path.cwd(),
+                            '--timeout-ms', '180000'], timeout=210)
         log = proc.stdout + proc.stderr
         driver.with_suffix('.log').write_text(log)
         if reason is None:

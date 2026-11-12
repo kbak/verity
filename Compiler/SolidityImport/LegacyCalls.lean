@@ -2,7 +2,7 @@ import Compiler.SolidityImport.ExprHelpers
 import Verity.Core.Model.ECM
 
 /-! Narrow generic lowering of legacy assembly calls. Only whole assignment
-values with a zero-sized output area are admitted. No effectful nested operands,
+values with empty output or a CALL scratch word at zero are admitted. No effectful nested operands,
 Yul control flow, implicit code-existence check or automatic failure bubbling. -/
 namespace Compiler.CompilationModel.SolidityImport.LegacyCalls
 open Lean
@@ -35,6 +35,29 @@ partial def maskedTargets (node : Json) : Std.HashSet String := Id.run do
   | _ => pure ()
   return found
 
+/-- A Yul local retains a proven boolean bound only if it is never reassigned. -/
+partial def assignsName (node : Json) (name : String) : Bool :=
+  match node with
+  | .arr children => children.any (assignsName · name)
+  | .obj fields =>
+      (optStr node "nodeType" == some "YulAssignment" &&
+        (((field? node "variableNames").bind (·.getArr?.toOption)).getD #[]).any
+          (fun target => optStr target "name" == some name)) ||
+      fields.toList.any (fun (_, child) => assignsName child name)
+  | _ => false
+
+/-- A size switch immediately after a scratch-word CALL can establish that all
+32 bytes were overwritten. Short and unguarded reads retain their rejection. -/
+def scratchWordSwitch (statements : Array Json) (index : Nat) (selector : Json) : Bool :=
+  if index == 0 || !named selector "returndatasize" || !(args selector).isEmpty then false
+  else
+    let previous := statements[index - 1]!
+    let value := (field? previous "value").getD Json.null
+    let operands := args value
+    #[some "YulVariableDeclaration", some "YulAssignment"].contains
+        (optStr previous "nodeType") && named value "call" && operands.size == 7 &&
+      literal? operands[5]! == some 0 && literal? operands[6]! == some 32
+
 /-- Raw call operands are effect-free; the target is cleaned by the opcode,
 and the success bit is explicitly bounded for bool assignment. -/
 def lower? (node : Json) (leaf : Json → M Val) : M (Option Val) := do
@@ -43,9 +66,10 @@ def lower? (node : Json) (leaf : Json → M Val) : M (Option Val) := do
   unless delegated || named node "call" do return none
   let operands := args node
   let count := if delegated then 4 else 5
+  let outputSize := literal? (operands.getD (count + 1) Json.null)
   unless operands.size == count + 2 && literal? operands[count]! == some 0 &&
-      literal? operands[count+1]! == some 0 do
-    failAt node "legacy raw calls require an empty output area"
+      (outputSize == some 0 || (!delegated && outputSize == some 32)) do
+    failAt node "legacy raw calls require empty output or one scratch word at zero"
   let mut values : List Expr := []
   let mut pre : Array Stmt := #[]
   for i in [:count] do
@@ -61,8 +85,14 @@ def lower? (node : Json) (leaf : Json → M Val) : M (Option Val) := do
     pre := pre ++ value.pre
     values := values ++ [value.expr]
   let result ← fresh
-  return some { pre := pre.push (.ecm (Compiler.ECM.SolidityRawCall.module result delegated) values)
-                expr := .logicalNot (.logicalNot (.localVar result)) }
+  pre := pre.push (.ecm (Compiler.ECM.SolidityRawCall.module result delegated) values)
+  if outputSize == some 32 then
+    -- CALL overwrites only min(outputSize, returndataSize), including on REVERT.
+    let size ← fresh
+    pre := pre ++ #[.letVar size (.literal 32),
+      .ite (.lt .returndataSize (.literal 32)) [.assignVar size .returndataSize] [],
+      .returndataCopy (.literal 0) (.literal 0) (.localVar size)]
+  return some { pre, expr := .logicalNot (.logicalNot (.localVar result)) }
 
 /-- Exact terminal forwarding block: a local free-pointer snapshot, a complete
 return-buffer copy, and a revert of those bytes. No live memory continuation. -/

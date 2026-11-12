@@ -12,6 +12,7 @@ import Compiler.SolidityImport.TypesAndRecords
 import Compiler.SolidityImport.TransportBarriers
 import Compiler.SolidityImport.LibraryCallGuard
 import Compiler.SolidityImport.Legacy
+import Compiler.SolidityImport.LegacyNativeCalls
 import Compiler.SolidityImport.LegacyCallArguments
 import Compiler.SolidityImport.LegacyBytePointers
 import Compiler.SolidityImport.ExprHelpers
@@ -1261,6 +1262,9 @@ private partial def lowerYul (j : Json) : M Val := do
           expr := .localVar result }
       if fname == "mload" then
         if args.size == 1 then
+          if (← get).legacyWrapping && (← get).yulScratch0 &&
+              (← yulNatLit? args[0]!) == some 0 then
+            return { pre := #[], expr := .mload (.literal 0) }
           if (← yulNatLit? args[0]!) == some 64 then
             return { pre := #[], expr := .mload (.literal 64) }
           if let some v ← yulMemoryArrayElementLoad? args[0]! lowerYul then
@@ -1914,7 +1918,7 @@ private partial def lowerYulStmtSlice (j : Json) (stmts refs : Array Json) (retN
           failAt j "memory-revert assembly requires literal-bound narrow scalars"
   let mut yulLocals : RBMap String String compare := RBMap.empty
   let mut out : Array Stmt := #[]
-  for stmt in stmts do
+  for (stmt, stmtIndex) in stmts.zipIdx do
     match ← mKind stmt with
     | "YulVariableDeclaration" =>
         let vars ← mArr (← mField stmt "variables")
@@ -1932,7 +1936,10 @@ private partial def lowerYulStmtSlice (j : Json) (stmts refs : Array Json) (retN
           | none => pure { pre := #[], expr := .literal 0 }
         let binding ← freshFor vname
         let expr := Expr.localVar binding
-        modify fun e => { e with yulNames := e.yulNames.insert vname expr }
+        let read := if isProvablyBoundedYulExpr .bool v.expr &&
+            !LegacyCalls.assignsName (← mField j "AST") vname then
+          Expr.logicalNot (.logicalNot expr) else expr
+        modify fun e => { e with yulNames := e.yulNames.insert vname read }
         yulLocals := yulLocals.insert vname binding
         out := out ++ v.pre |>.push (.letVar binding v.expr)
     | "YulAssignment" =>
@@ -2004,6 +2011,38 @@ private partial def lowerYulStmtSlice (j : Json) (stmts refs : Array Json) (retN
             (.ecm Compiler.ECM.SolidityRevertMemory.module [offVal.expr, szVal.expr])
         else
           failAt stmt s!"unsupported Yul expression statement {fname} (unsupported statement InlineAssembly)"
+    | "YulSwitch" =>
+        unless (← get).legacyWrapping do failAt stmt "Yul switch requires legacy lowering"
+        let selectorNode ← mField stmt "expression"
+        let selector ← atom (← lowerYul selectorNode)
+        let copiedWord := LegacyCalls.scratchWordSwitch stmts stmtIndex selectorNode
+        let cases ← mArr (← mField stmt "cases")
+        let saved ← get
+        let mut alternatives : Array (Nat × List Stmt) := #[]
+        let mut fallback : List Stmt := []
+        let mut hasDefault := false
+        for branch in cases do
+          let value ← mField branch "value"
+          let sizeCase ← if value == Json.str "default" then pure none else yulNatLit? value
+          modify fun e => { e with
+            yulScratch0 := saved.yulScratch0 || (copiedWord && sizeCase.any (· ≥ 32)) }
+          let body ← mArr (← mField (← mField branch "body") "statements")
+          let lowered ← lowerYulStmtSlice j body refs retName
+          modify fun e => { e with
+            yulNames := saved.yulNames
+            yulScratch0 := saved.yulScratch0
+            yulScratch32 := saved.yulScratch32 }
+          if value == Json.str "default" then
+            unless !hasDefault do failAt branch "duplicate Yul default"
+            hasDefault := true
+            fallback := lowered.toList
+          else
+            let some literal ← yulNatLit? value | failAt value "Yul case requires a word literal"
+            unless !(alternatives.any (·.1 == literal)) do failAt value "duplicate Yul case"
+            alternatives := alternatives.push (literal, lowered.toList)
+        for (value, branch) in alternatives.reverse do
+          fallback := [.ite (.eq selector.expr (.literal value)) branch fallback]
+        out := out ++ selector.pre ++ fallback.toArray
     | "YulIf" =>
         if (← get).stateVars.size > 1 then
           let condVal ← lowerYul (← mField stmt "condition")
@@ -5860,6 +5899,7 @@ private partial def lowerEncodedBytes (j : Json) : M EncodedBytes := do
     if (← get).legacyWrapping then return ← LegacyPacked.lower j lowerExpr
     return ← lowerPacked args
   if optStr callee "memberName" == some "encodeWithSelector" then
+    if (← get).legacyWrapping then return ← LegacyAbi.lower j lowerExpr
     unless args.size ≥ 1 do
       failAt j "abi.encodeWithSelector requires a selector argument"
     let selBuffer ← lowerSelectorBytes args[0]!
@@ -6909,6 +6949,7 @@ result. Neither local may be read anywhere else. `none` when `s` is not a
 low-level call declaration. -/
 private partial def lowerLowLevelCallSequence? (s : Json) (following : List Json) :
     M (Option (Array Stmt)) := do
+  if LegacyNativeCalls.applies s then return none
   let some init := (field? s "initialValue").filter (!·.isNull) | return none
   let some member ← lowLevelCallMember? init | return none
   let callee ← mField init "expression"
@@ -12987,6 +13028,7 @@ private partial def lowerLocal (s : Json) : M (Array Stmt) := do
   withAdmittedInterfaceCall (if single then field? s "initialValue" else none) (lowerLocalCore s)
 
 private partial def lowerLocalCore (s : Json) : M (Array Stmt) := do
+  if LegacyNativeCalls.applies s then return ← LegacyNativeCalls.lower s lowerExpr
   let assignedHere := bodyAssignedIds s
   if !assignedHere.isEmpty then
     modify fun e => { e with zeroInitLocals := e.zeroInitLocals.filter (!assignedHere.contains ·) }
@@ -15772,6 +15814,7 @@ private def importSlice
   let barriersSrc ← moduleText sourceRoot "Compiler/SolidityImport/TransportBarriers.lean"
   let callWorldSrc ← moduleText sourceRoot "Verity/Core/Model/CallWorld.lean"
   let legacyCallsSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyCalls.lean"
+  let nativeCallsSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyNativeCalls.lean"
   let ecmSrc ← moduleText sourceRoot "Verity/Core/Model/ECM.lean"
   let denoteSrc ← moduleText sourceRoot "Verity/Core/Model/Denote.lean"
   -- JSON framing prevents distinct file/signature lists from sharing a
@@ -15810,6 +15853,7 @@ private def importSlice
       ("TransportBarriers.lean", Json.str barriersSrc),
       ("CallWorld.lean", Json.str callWorldSrc),
       ("LegacyCalls.lean", Json.str legacyCallsSrc),
+      ("LegacyNativeCalls.lean", Json.str nativeCallsSrc),
       ("ECM.lean", Json.str ecmSrc), ("Denote.lean", Json.str denoteSrc)])]
   let digest := sha256Hex digestInput.compress.toUTF8
   let report : ImportReport :=

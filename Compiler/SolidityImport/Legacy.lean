@@ -26,7 +26,8 @@ private partial def validateLegacyYul (memoryRevert : Bool) (node : Json) : M Un
         let common := #["YulBlock", "YulVariableDeclaration", "YulTypedName",
           "YulLiteral", "YulIdentifier", "YulFunctionCall"]
         let extra := if memoryRevert then "YulExpressionStatement" else "YulAssignment"
-        unless common.contains kind || kind == extra do
+        unless common.contains kind || kind == extra ||
+            (!memoryRevert && #["YulSwitch", "YulCase"].contains kind) do
           failAt node (if memoryRevert then
             "Solidity 0.7.6 memory-revert assembly must be straight-line"
             else "Solidity 0.7.6 assembly requires a terminal memory revert or read-only decoding")
@@ -35,7 +36,8 @@ private partial def validateLegacyYul (memoryRevert : Bool) (node : Json) : M Un
           let builtins := if memoryRevert then
             #[some "mload", some "mstore", some "add", some "revert"]
             else #[some "mload", some "add", some "sub", some "mul", some "byte", some "chainid",
-              some "call", some "delegatecall", some "returndatasize", some "sload"]
+              some "call", some "delegatecall", some "returndatasize", some "sload",
+              some "iszero", some "or"]
           unless builtins.contains name ||
               (!memoryRevert && name == some "gas" && (← get).sourceGas) do
             failAt node (if memoryRevert then
@@ -140,7 +142,7 @@ partial def validateLegacyDeclaration (node : Json) (encodingInput : Bool := fal
           "ExpressionStatement", "VariableDeclarationStatement", "IfStatement", "Return",
           "BinaryOperation", "UnaryOperation", "Assignment", "Identifier", "Literal", "Conditional",
           "ElementaryTypeName", "ElementaryTypeNameExpression", "FunctionCall",
-          "MemberAccess", "IndexAccess", "Mapping", "TupleExpression",
+          "MemberAccess", "IndexAccess", "Mapping", "TupleExpression", "FunctionCallOptions",
           "UserDefinedTypeName", "OverrideSpecifier", "StructuredDocumentation",
           "ForStatement", "WhileStatement", "ModifierDefinition", "ModifierInvocation",
           "PlaceholderStatement", "EmitStatement", "ArrayTypeName", "NewExpression"].contains kind do
@@ -195,8 +197,8 @@ partial def validateLegacyDeclaration (node : Json) (encodingInput : Bool := fal
         if hasBytes then
           let init := field? node "initialValue" |>.getD Json.null
           unless init.isNull do
-            unless optStr init "nodeType" == some "Identifier" &&
-                (← mType init) == "bytes memory" do
+            unless (optStr init "nodeType" == some "Identifier" &&
+                (← mType init) == "bytes memory") || LegacyAbi.isSelectorEncoding init do
               failAt node "Solidity 0.7.6 bytes locals require an existing memory buffer"
       if kind == "BinaryOperation" then
         for key in #["leftExpression", "rightExpression"] do
@@ -240,7 +242,8 @@ partial def validateLegacyDeclaration (node : Json) (encodingInput : Bool := fal
               failAt arg "legacy bytes helpers require an existing calldata identifier"
             if (← get).legacyAbiV2Files.contains (← get).currentFile then
               failAt arg "legacy bytes helpers require ABI coder v1 at the call site"
-        if (← mType node) == "bytes memory" && !(encodingInput &&
+        if (← mType node) == "bytes memory" && !LegacyAbi.isSelectorEncoding node &&
+            !(encodingInput &&
             (LegacyPacked.isEncoding node || LegacyAbi.isEncoding node)) then
           failAt node "Solidity 0.7.6 byte construction is outside the decoding slice"
       if kind == "Assignment" then
