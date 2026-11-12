@@ -6677,8 +6677,8 @@ private partial def lowerInterfaceStaticCall (j : Json) : M Val := do
     let hash ← atom (← convert "bytes32" (← mType args[0]!) (← lowerExpr args[0]!) args[0]!)
     let data ← lowerEncodedBytes args[1]!
     let result ← fresh
-    let call := Stmt.ecm (Compiler.ECM.LegacySignatureCall.bytes4Module result selector)
-      [target.expr, hash.expr, data.pointer]
+    let mod ← SourceGasCalls.module j result (.bytes4 selector)
+    let call := Stmt.ecm mod [target.expr, hash.expr, data.pointer]
     return { pre := (target.pre ++ hash.pre ++ data.pre).push call, expr := .localVar result }
   let paramTypes := rawParamTypes.map fun ty =>
     if env.stateVars.size > 1 && ty.startsWith "contract " then "address" else ty
@@ -7023,7 +7023,8 @@ private partial def lowerCall (j : Json) : M Val := do
           pre := pre ++ value.pre
           values := values ++ [value.expr]
         let result ← fresh
-        let call := Stmt.ecm (Compiler.ECM.LegacySignatureCall.recoverModule result) values
+        let mod ← SourceGasCalls.module j result .recover
+        let call := Stmt.ecm mod values
         return { pre := pre.push call, expr := .localVar result }
       if calleeId == -8 then
         let args ← mArr (← mField j "arguments")

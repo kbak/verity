@@ -688,7 +688,22 @@ these are model laws, not EVM/frontend correspondence. The finite gas-observing
 child programs and local bytecode traces validate forwarding, rollback and
 accounting but do not establish arbitrary callback behavior. Source spans,
 access/memory context and child gas usage retain the original-bytecode meter's
-trust boundary. No project axiom is added; static/signature adapters remain open.
+trust boundary. No project axiom is added; the static/signature extensions are described below.
+
+
+Metered legacy recovery, `(bytes32,bytes) -> bytes4` validators and scalar bool
+predicates expose the assumed summary `legacy_static_original_bytecode_gas_evidence`.
+They share the ordinary profile's memory preparation and return decoders and use
+the checked static-world boundary. `StaticCallGasFrames` adds five kernel-checked
+model laws for the canonical arm, exact failure bytes and meter retention; it
+adds no project axiom and proves no Solidity/EVM correspondence or authorization
+property. `StaticGasMocks` proves admissibility only of finite test child models.
+Recovery's fixed 3000-gas child cost is explicitly checked, including insufficient
+gas and invalid-signature outcomes. Recovery cryptography, source spans and
+memory/access context remain trusted; other validator child gas consumption
+remains original-trace evidence. Isolated precompile threshold probes do not
+establish complete parent out-of-gas execution. Gas-sensitive recompilation,
+arbitrary low-level static calls and other typed return layouts remain unsupported.
 
 The separate CI Turbo-Lean builder adds no project axiom or proof coverage.
 The established verifier/evaluator and narrow axiom allowlist remain unchanged.

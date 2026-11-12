@@ -919,6 +919,17 @@ def typed_callback_gas_campaign(optimized: bool) -> None:
                            "Contracts/SolidityImportSmoke/LegacyTypedCallGas.sol")
 
 
+def static_call_gas_campaign(optimized: bool) -> None:
+    saved = module_campaign_output("check_static_call_gas", "static-call-gas", 1800,
+                                   *(["--optimized"] if optimized else []))
+    mutants = ["gas-own-cost", "call-eip150-cap", "call-warm-access", "call-return-gas",
+               "source-span-cost"]
+    module_campaign_output("check_source_gas_mutations", "static-call-gas-mutations", 1800,
+                           "--source-campaign", str(saved), "--fixture",
+                           "Contracts/SolidityImportSmoke/LegacyStaticCallGas.sol",
+                           *[arg for name in mutants for arg in ("--mutant", name)])
+
+
 def tasks(update_golden: bool) -> list:
     """Independent work items, most expensive first (each runs in its own snapshot).
 
@@ -946,6 +957,11 @@ def tasks(update_golden: bool) -> list:
     items += [(f"typed-callback-gas-opt{int(optimized)}", 1,
                lambda optimized=optimized: typed_callback_gas_campaign(optimized))
               for optimized in (False, True)]
+    items += [(f"static-call-gas-opt{int(optimized)}", 1,
+               lambda optimized=optimized: static_call_gas_campaign(optimized))
+              for optimized in (False, True)]
+    items += [("static-call-gas-boundaries", 1, lambda: module_campaign_output(
+        "check_static_call_gas_boundaries", "static-call-gas-boundaries", 900))]
     items += [("typed-callback-gas-boundaries", 1, lambda: module_campaign_output(
         "check_typed_callback_gas_boundaries", "typed-callback-gas-boundaries", 900))]
     items += [("source-gas-boundaries", 1, lambda: module_campaign_output(

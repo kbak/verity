@@ -164,6 +164,9 @@ def closedTransportCovered (mod : Compiler.ECM.ExternalCallModule) (args : List 
   match mod.byteTransport with
   | some (.sourceGasRead result site) =>
       mod == Compiler.ECM.SourceGasRead.module result site && args.isEmpty
+  | some (.sourceStatic result kind site) =>
+      mod == Compiler.ECM.SourceStaticCall.module result kind site && !site.isEmpty &&
+        kind.valid && args.length == kind.arity && exprListCovered args
   | some (.legacyBool result selector count) =>
       mod == Compiler.ECM.LegacyBoolCall.module result selector count &&
         decide (selector < 2^32) && args.length == count + 1 && exprListCovered args

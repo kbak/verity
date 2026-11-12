@@ -52,6 +52,10 @@ private partial def statement (oracle : DenoteOracle) (fields : List Field)
           | some (.sourceGasRead result site) => do
               let outcome ← executeSourceGasRead state mod result site args
               pure (outcome, state.sourceGas)
+          | some (.sourceStatic result kind site) => do
+              let (outcome, _, meter) ←
+                executeSourceStaticCallObserved oracle fields state mod result kind site args
+              pure (outcome, meter)
           | some (.legacyVoid selector layout (some site)) => do
               let (outcome, _, meter) ←
                 executeLegacyVoidCallObserved oracle fields state

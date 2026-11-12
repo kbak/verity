@@ -1451,6 +1451,32 @@ def executeLegacyVoidCall (oracle : DenoteOracle) (fields : List Field) (state :
     executeLegacyVoidCallObserved oracle fields state mod selector layout args gasSite
   return (outcome, touched)
 
+/-- Exact ABI-v1 scalar bool scratch layout shared by both gas profiles. -/
+def prepareLegacyBoolCall (state : DenoteState) (selector count : Nat) (values : List Nat) :
+    Nat × Nat × Verity.ContractState :=
+  let pointer := (state.world.memory 64).val
+  let write := fun (w : Verity.ContractState) p n =>
+    w.writePhysicalMemoryValue p (Verity.Core.Uint256.ofNat n)
+  let prepared := (values.drop 1).zipIdx.foldl
+    (fun w (word, i) => write w (pointer + 4 + i * 32) word)
+    (write state.world pointer (selector * 2^224))
+  let target := values[0]! % 2^160
+  (target, 4 + count * 32, prepared)
+
+/-- Legacy bool decoding keeps physical response bits and cleans only the binding. -/
+def finishLegacyBoolCall (state : DenoteState) (result : String) (pointer : Nat)
+    (response : ByteExternalCall.Observation Verity.ContractState Verity.StorageKey) :
+    Except String (StmtOutcome × List Verity.StorageKey) := do
+  if !response.success then return (.revertWithData response.returndata, response.touched)
+  if response.returndata.length < 32 then return (.revertWithData [], response.touched)
+  let world := response.world.copyPhysicalMemory (rawPhysicalByte response.returndata) pointer 0 32
+  let value := if (world.memory pointer).val == 0 then 0 else 1
+  return (.continue { state with
+    world := world
+    bindings := bindValue state.bindings result value
+    rawReturndata := some response.returndata
+    byteCallAccesses := state.byteCallAccesses ++ response.touched }, response.touched)
+
 /-- Legacy scalar staticcall: preserve the output word and normalize only bool.
 This transport neither advances the free pointer nor rejects dirty true words. -/
 def executeLegacyBoolCall (oracle : DenoteOracle) (fields : List Field)
@@ -1466,12 +1492,7 @@ def executeLegacyBoolCall (oracle : DenoteOracle) (fields : List Field)
   unless selector < 2^32 && values.length == count + 1 do
     throw "legacy bool selector or argument count differs"
   let pointer := (state.world.memory 64).val
-  let write := fun (w : Verity.ContractState) p n =>
-    w.writePhysicalMemoryValue p (Verity.Core.Uint256.ofNat n)
-  let prepared := (values.drop 1).zipIdx.foldl
-    (fun w (word, i) => write w (pointer + 4 + i * 32) word)
-    (write state.world pointer (selector * 2^224))
-  let target := values[0]! % 2^160
+  let (target, _, prepared) := prepareLegacyBoolCall state selector count values
   if DenoteExternalCode.extCodeSize prepared (Verity.Core.Address.ofNat target) == 0 then
     return (.revertWithData [], [])
   let request : ByteExternalCall.Request := {
@@ -1479,13 +1500,50 @@ def executeLegacyBoolCall (oracle : DenoteOracle) (fields : List Field)
     calldata := (List.range (4 + count * 32)).map fun i =>
       UInt8.ofNat (prepared.physicalByte (pointer + i)).val }
   let response ← ByteExternalCall.executeChecked adversary request prepared
+  finishLegacyBoolCall state result pointer response
+
+/-- Exact legacy recovery/bytes4 scratch layout, shared by both gas profiles. -/
+def prepareLegacySignatureCall (state : DenoteState) (selector : Option Nat)
+    (values : List Nat) : Nat × Nat × Verity.ContractState :=
+  let a := values[0]!
+  let b := values[1]!
+  let c := values[2]!
+  let pointer := (state.world.memory 64).val
+  let write := fun (w : Verity.ContractState) p n =>
+    w.writePhysicalMemoryValue p (Verity.Core.Uint256.ofNat n)
+  match selector with
+    | none =>
+      let w := write (write state.world pointer 0) 64 (pointer + 32)
+      let w := values.zipIdx.foldl (fun w (n, i) => write w (pointer + 32 + i * 32) n) w
+      (1, 128, w)
+    | some sel =>
+      let w := write (write (write state.world pointer (sel * 2^224))
+        (pointer + 4) b) (pointer + 36) 64
+      let d := (w.memory (wordNormalize (c + 2^256 - 32))).val
+      let w := write w (pointer + 68) d
+      let rounded := ((d + 31) / 32) * 32
+      let w := (List.range ((d + 31) / 32)).foldl (fun w i =>
+        write w (pointer + 100 + i * 32) (w.memory (c + i * 32)).val) w
+      let tail := pointer + 100 + rounded - 32
+      let w := if d % 32 == 0 then w else
+        write w tail (Nat.land (w.memory tail).val (2^256 - 2^(8 * (rounded - d))))
+      (a % 2^160, 100 + rounded, w)
+
+/-- The existing legacy return decoder, independent of the gas observation profile. -/
+def finishLegacySignatureCall (state : DenoteState) (resultVar : String)
+    (selector : Option Nat) (pointer : Nat)
+    (response : ByteExternalCall.Observation Verity.ContractState Verity.StorageKey) :
+    Except String (StmtOutcome × List Verity.StorageKey) := do
   if !response.success then return (.revertWithData response.returndata, response.touched)
-  if response.returndata.length < 32 then return (.revertWithData [], response.touched)
-  let world := response.world.copyPhysicalMemory (rawPhysicalByte response.returndata) pointer 0 32
-  let value := if (world.memory pointer).val == 0 then 0 else 1
+  if selector.isSome && response.returndata.length < 32 then
+    return (.revertWithData [], response.touched)
+  let world := response.world.copyPhysicalMemory (rawPhysicalByte response.returndata)
+    pointer 0 (min 32 response.returndata.length)
+  let mask := if selector.isSome then (2^32 - 1) * 2^224 else 2^160 - 1
+  let value := Nat.land (world.memory pointer).val mask
   return (.continue { state with
     world := world
-    bindings := bindValue state.bindings result value
+    bindings := bindValue state.bindings resultVar value
     rawReturndata := some response.returndata
     byteCallAccesses := state.byteCallAccesses ++ response.touched }, response.touched)
 
@@ -1505,29 +1563,8 @@ def executeLegacySignatureCall (oracle : DenoteOracle) (fields : List Field)
     | throw "legacy call argument evaluation unsupported"
   unless values.length == (if selector.isSome then 3 else 4) do
     throw "legacy call argument count differs"
-  let a := values[0]!
-  let b := values[1]!
-  let c := values[2]!
   let pointer := (state.world.memory 64).val
-  let write := fun (w : Verity.ContractState) p n =>
-    w.writePhysicalMemoryValue p (Verity.Core.Uint256.ofNat n)
-  let (target, size, prepared) := match selector with
-    | none =>
-      let w := write (write state.world pointer 0) 64 (pointer + 32)
-      let w := values.zipIdx.foldl (fun w (n, i) => write w (pointer + 32 + i * 32) n) w
-      (1, 128, w)
-    | some sel =>
-      let w := write (write (write state.world pointer (sel * 2^224))
-        (pointer + 4) b) (pointer + 36) 64
-      let d := (w.memory (wordNormalize (c + 2^256 - 32))).val
-      let w := write w (pointer + 68) d
-      let rounded := ((d + 31) / 32) * 32
-      let w := (List.range ((d + 31) / 32)).foldl (fun w i =>
-        write w (pointer + 100 + i * 32) (w.memory (c + i * 32)).val) w
-      let tail := pointer + 100 + rounded - 32
-      let w := if d % 32 == 0 then w else
-        write w tail (Nat.land (w.memory tail).val (2^256 - 2^(8 * (rounded - d))))
-      (a % 2^160, 100 + rounded, w)
+  let (target, size, prepared) := prepareLegacySignatureCall state selector values
   if selector.isSome && DenoteExternalCode.extCodeSize prepared
       (Verity.Core.Address.ofNat target) == 0 then
     return (.revertWithData [], [])
@@ -1536,18 +1573,66 @@ def executeLegacySignatureCall (oracle : DenoteOracle) (fields : List Field)
     kind := .staticcall, caller := prepared.thisAddress.val, target, value := 0, gas,
     calldata := (List.range size).map fun i => UInt8.ofNat (prepared.physicalByte (input + i)).val }
   let response ← ByteExternalCall.executeChecked adversary request prepared
-  if !response.success then return (.revertWithData response.returndata, response.touched)
-  if selector.isSome && response.returndata.length < 32 then
-    return (.revertWithData [], response.touched)
-  let world := response.world.copyPhysicalMemory (rawPhysicalByte response.returndata)
-    pointer 0 (min 32 response.returndata.length)
-  let mask := if selector.isSome then (2^32 - 1) * 2^224 else 2^160 - 1
-  let value := Nat.land (world.memory pointer).val mask
-  return (.continue { state with
-    world := world
-    bindings := bindValue state.bindings resultVar value
-    rawReturndata := some response.returndata
-    byteCallAccesses := state.byteCallAccesses ++ response.touched }, response.touched)
+  finishLegacySignatureCall state resultVar selector pointer response
+
+/-- Attach the accounted meter without altering a functional outcome's world or bytes. -/
+def finishSourceStaticCall (result : Except String (StmtOutcome × List Verity.StorageKey))
+    (meter : SourceGas.State) :
+    Except String (StmtOutcome × List Verity.StorageKey × Option SourceGas.State) := do
+  let (outcome, touched) ← result
+  let outcome := match outcome with
+    | .continue next => .continue { next with sourceGas := some meter }
+    | .stop next => .stop { next with sourceGas := some meter }
+    | .return value next => .return value { next with sourceGas := some meter }
+    | other => other
+  return (outcome, touched, some meter)
+
+/-- Original-bytecode static call with the same preparation, checked static-world
+boundary and decoder as ordinary execution. Terminal failures retain consumed gas. -/
+def executeSourceStaticCallObserved (oracle : DenoteOracle) (fields : List Field)
+    (state : DenoteState) (mod : Compiler.ECM.ExternalCallModule) (result : String)
+    (kind : Compiler.ECM.LegacyStaticKind) (site : String) (args : List Expr) :
+    Except String (StmtOutcome × List Verity.StorageKey × Option SourceGas.State) := do
+  unless mod == Compiler.ECM.SourceStaticCall.module result kind site do
+    throw "closed source static call metadata differs"
+  unless !site.isEmpty do throw "source static call site missing"
+  let some meter := state.sourceGas | throw "original bytecode gas evidence missing"
+  let some adversary := state.byteCallAdversary | throw "legacy static adversary missing"
+  let some values := evalExprList oracle fields state args
+    | throw "legacy static operand evaluation unsupported"
+  unless kind.valid && values.length == kind.arity do
+    throw "legacy static selector or argument count differs"
+  let pointer := (state.world.memory 64).val
+  let (target, size, prepared) := match kind with
+    | .recover => prepareLegacySignatureCall state none values
+    | .bytes4 selector => prepareLegacySignatureCall state (some selector) values
+    | .bool selector count => prepareLegacyBoolCall state selector count values
+  if kind != .recover && DenoteExternalCode.extCodeSize prepared
+      (Verity.Core.Address.ofNat target) == 0 then
+    return (.revertWithData [], [], some meter)
+  let (gas, meter) ← SourceGas.read meter site
+  let input := if kind == .recover then pointer + 32 else pointer
+  let request : ByteExternalCall.Request := {
+    kind := .staticcall, caller := prepared.thisAddress.val, target, value := 0, gas
+    calldata := (List.range size).map fun i => UInt8.ofNat (prepared.physicalByte (input + i)).val }
+  let (request, witness, meter) ← SourceGas.prepareCall meter request
+  if kind == .recover then SourceGas.checkRecoveryGas witness
+  let response ← ByteExternalCall.executeChecked adversary request prepared
+  SourceGas.checkResponse witness response.success response.returndata
+  let decoded := match kind with
+    | .recover => finishLegacySignatureCall state result none pointer response
+    | .bytes4 selector => finishLegacySignatureCall state result (some selector) pointer response
+    | .bool .. => finishLegacyBoolCall state result pointer response
+  finishSourceStaticCall decoded meter
+
+/-- Canonical outcome; the observing adapter additionally retains gas on failure. -/
+def executeSourceStaticCall (oracle : DenoteOracle) (fields : List Field)
+    (state : DenoteState) (mod : Compiler.ECM.ExternalCallModule) (result : String)
+    (kind : Compiler.ECM.LegacyStaticKind) (site : String) (args : List Expr) :
+    Except String (StmtOutcome × List Verity.StorageKey) := do
+  let (outcome, touched, _) ←
+    executeSourceStaticCallObserved oracle fields state mod result kind site args
+  return (outcome, touched)
 
 /-- CREATE2 byte hash through the model Keccak oracle, as for error selectors. -/
 def oracleByteHash (oracle : DenoteOracle) : DenoteCreate2.ByteHash := fun bytes =>
@@ -2376,6 +2461,10 @@ mutual
         | some (.sourceGasRead result site) =>
             match executeSourceGasRead state mod result site args with
             | .ok outcome => outcome
+            | .error _ => .revert
+        | some (.sourceStatic result kind site) =>
+            match executeSourceStaticCall oracle fields state mod result kind site args with
+            | .ok (outcome, _) => outcome
             | .error _ => .revert
         | some (.legacyBool result selector count) =>
             match executeLegacyBoolCall oracle fields state mod result selector count args with

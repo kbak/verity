@@ -1,7 +1,7 @@
 import Verity.Core.Model.Create2ParentGas
 
 /-!
-CALL/DELEGATECALL gas at an actual bytecode boundary, for Cancun through Osaka.
+CALL/DELEGATECALL/STATICCALL gas at an actual bytecode boundary, for Cancun through Osaka.
 Account warmth, death and optional EIP-7702 delegation are execution-context
 inputs. They must come from the source EVM, not from the functional world model.
 The memory ranges and pre-opcode gas are likewise source-bytecode quantities.

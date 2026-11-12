@@ -95,6 +95,17 @@ partial def quoteStmt : Stmt → m Term
             throwError "closed source gas metadata differs"
           `(Compiler.CompilationModel.Stmt.ecm
             (Compiler.ECM.SourceGasRead.module $(quote result) $(quote site)) $quotedArgs)
+      | some (.sourceStatic result kind site) => do
+          unless module == Compiler.ECM.SourceStaticCall.module result kind site do
+            throwError "internal: closed source static metadata differs"
+          let quotedKind ← match kind with
+            | .recover => `(Compiler.ECM.LegacyStaticKind.recover)
+            | .bytes4 selector => `(Compiler.ECM.LegacyStaticKind.bytes4 $(quote selector))
+            | .bool selector count =>
+                `(Compiler.ECM.LegacyStaticKind.bool $(quote selector) $(quote count))
+          `(Compiler.CompilationModel.Stmt.ecm
+            (Compiler.ECM.SourceStaticCall.module $(quote result) $quotedKind $(quote site))
+            $quotedArgs)
       | some (.legacyBool result selector count) => do
           unless module == Compiler.ECM.LegacyBoolCall.module result selector count do
             throwError "closed legacy bool call metadata differs"

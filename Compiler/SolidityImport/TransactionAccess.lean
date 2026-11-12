@@ -95,6 +95,10 @@ def statementAccesses (oracle : DenoteOracle) (fields : List Field)
       | some (.sourceGasRead result site) =>
           discard (executeSourceGasRead state mod result site args)
           return []
+      | some (.sourceStatic result kind site) =>
+          let reads ← args.mapM (expressionAccesses oracle fields state)
+          let (_, touched) ← executeSourceStaticCall oracle fields state mod result kind site args
+          return reads.flatten ++ touched
       | some (.legacyBool result selector count) =>
           let reads ← args.mapM (expressionAccesses oracle fields state)
           let (_, touched) ← executeLegacyBoolCall oracle fields state mod result selector count args
