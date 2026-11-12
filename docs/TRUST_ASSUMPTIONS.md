@@ -19,6 +19,14 @@ ABI/dispatcher composition and failure-byte equivalence remain unproved; see
 
 ## Solidity import
 
+The name-selected packed-hash replacement has been removed. Reached helper bodies
+use ordinary translation, which rejects the unsupported overlapping memory writes
+with a source location. The existing packed-byte/hash expectations remain unchanged;
+no packed-memory support or source-equivalence theorem is added by this correction.
+The inline-assembly registry now has 17 entries. Its flag/count theorems establish
+metadata consistency only, not source-to-model correctness. See
+`PACKED_MEMORY_HASH_REPRODUCER.md` for the remaining admission and execution gates.
+
 `Compiler/SolidityImport/Import.lean` selects functions from a solc project,
 closes over the definitions solc's declaration ids actually reach, and elaborates
 a `CompilationModel` (see `docs/SOLIDITY_IMPORT.md`). Execution of an accepted import is

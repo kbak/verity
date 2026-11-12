@@ -4,6 +4,13 @@ This file is the authoritative registry of axioms used by Verity proof code.
 
 ## Solidity import
 
+Removing the name-selected packed-hash replacement adds no axiom or proof shortcut.
+The inline-assembly registry's exact count changes from 18 to 17 with the removed
+entry; its metadata theorems do not prove source-body equivalence. Unsupported
+packed-memory bodies are rejected. The independent byte/hash expectations and
+existing hash premises are unchanged; see `TRUST_ASSUMPTIONS.md` and
+`PACKED_MEMORY_HASH_REPRODUCER.md`.
+
 `smoke.covered` and `smoke_step_credit` are ordinary theorems. The import
 path adds no project axiom, `sorry`, or `native_decide`. `covered` is
 `decide` on the whitelist. `smoke_step_credit` is `simp` plus `decide` on the
