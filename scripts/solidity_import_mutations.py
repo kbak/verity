@@ -903,6 +903,13 @@ def legacy_array_rejections() -> None:
     print("pass legacy array located rejections", flush=True)
 
 
+def source_gas_campaign(optimized: bool) -> None:
+    saved = module_campaign_output("check_legacy_source_gas", "source-gas", 1800,
+                                   *(["--optimized"] if optimized else []))
+    module_campaign_output("check_source_gas_mutations", "source-gas-mutations", 1800,
+                           "--source-campaign", str(saved))
+
+
 def tasks(update_golden: bool) -> list:
     """Independent work items, most expensive first (each runs in its own snapshot).
 
@@ -911,6 +918,11 @@ def tasks(update_golden: bool) -> list:
     """
     items = [("prefix-checks", 2, lambda: prefix_checks(update_golden)),
              ("reference-boundary", 2, reference_boundary_mutations)]
+    items += [("source-gas-boundaries", 1, lambda: module_campaign_output(
+        "check_source_gas_boundaries", "source-gas-boundaries", 1800))]
+    items += [(f"source-gas-opt{int(optimized)}", 1,
+               lambda optimized=optimized: source_gas_campaign(optimized))
+              for optimized in (False, True)]
     items += [("legacy-helper-scalar-rejections", 1, lambda: module_campaign_output(
         "check_legacy_helper_scalar_rejections", "legacy-helper-scalar-rejections", 900))]
     items += [(f"legacy-helper-scalars-opt{int(optimized)}", 1,

@@ -57,7 +57,7 @@ def executeBody (oracle : DenoteOracle) (fields : List Field)
   let initial := beginTransaction world
   finishFrame initial (execStmtList oracle fields
     { world := initial, bindings, errors,
-      byteCallAdversary := byteCalls.adversary, byteCallGas := byteCalls.gas } body)
+      byteCallAdversary := byteCalls.adversary, byteCallGas := byteCalls.gas, sourceGas := byteCalls.sourceGas } body)
 
 @[simp] theorem beginTransaction_storage (world : Verity.ContractState) (slot : Nat) :
     (beginTransaction world).storageWords (.slot slot) = world.storageWords (.slot slot) := rfl

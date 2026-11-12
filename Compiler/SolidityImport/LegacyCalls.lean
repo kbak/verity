@@ -47,12 +47,21 @@ def lower? (node : Json) (leaf : Json → M Val) : M (Option Val) := do
       literal? operands[count+1]! == some 0 do
     failAt node "legacy raw calls require an empty output area"
   let mut values : List Expr := []
-  for operand in operands.extract 0 count do
+  let mut pre : Array Stmt := #[]
+  for i in [:count] do
+    let operand := operands[i]!
     let value ← leaf operand
-    unless value.pre.isEmpty do failAt operand "effectful legacy raw call operand"
+    unless value.pre.isEmpty || (i == 0 && (← get).sourceGas &&
+        value.pre.all (fun statement => match statement with
+          | .ecm mod [] => match mod.byteTransport with
+            | some (.sourceGasRead ..) => true
+            | _ => false
+          | _ => false)) do
+      failAt operand "effectful legacy raw call operand"
+    pre := pre ++ value.pre
     values := values ++ [value.expr]
   let result ← fresh
-  return some { pre := #[.ecm (Compiler.ECM.SolidityRawCall.module result delegated) values]
+  return some { pre := pre.push (.ecm (Compiler.ECM.SolidityRawCall.module result delegated) values)
                 expr := .logicalNot (.logicalNot (.localVar result)) }
 
 /-- Exact terminal forwarding block: a local free-pointer snapshot, a complete
