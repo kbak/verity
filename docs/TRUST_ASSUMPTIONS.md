@@ -19,6 +19,19 @@ ABI/dispatcher composition and failure-byte equivalence remain unproved; see
 
 ## Solidity import
 
+`Verity/Core/Model/MemorySlice.lean` proves that the byte reader used by the
+concrete differential hash oracle equals the physical byte slice whenever
+`PhysicalMemory.Coherent` holds. `MemorySliceBridge.lean` proves the same result
+for the actual proof-IR reader under the explicit bound
+`offset + byteWordCount size * 32 ≤ 2^256`. This covers unaligned starts and a
+partial final word, including empty slices. The rounded-window bound is a
+sufficient condition; no equivalence is claimed for wrapping addresses.
+Arbitrary sequences of overlapping physical writes preserve coherence, all bytes
+outside their combined footprints, and every non-memory state field.
+These theorems do not establish coherence for arbitrary external states, admit
+new importer constructs, prove the Keccak implementation faithful to the EVM, or
+discharge `keccak256_memory_slice_matches_evm`.
+
 The name-selected packed-hash replacement has been removed. Reached helper bodies
 use ordinary translation, which rejects the unsupported overlapping memory writes
 with a source location. The existing packed-byte/hash expectations remain unchanged;

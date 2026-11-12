@@ -145,3 +145,23 @@ execution (#30), source-driven memory lowering (#31), and storage-reference
 addressing/state preservation (#32), all tracked in `kbak/verity`. Full proof,
 smoke, loss and mutation gates remain required before an implementation is ready
 to merge. Import coverage is not a source-correspondence proof.
+
+## Coherent byte-slice proof bridge
+
+The Stage 2 lemmas in `Verity/Core/Model/MemorySlice.lean` connect the actual
+chunked reader used by the differential oracle to `Memory.slice` for any start
+address in a coherent world. `Compiler/Proofs/IRGeneration/MemorySliceBridge.lean`
+connects the proof IR's concatenated/truncated reader to the same physical bytes
+when `offset + byteWordCount size * 32 ≤ 2^256`. This sufficient bound covers the
+rounded word window; it excludes wrapping reads and does not require alignment.
+
+The IR reader definitions are extracted unchanged into a small `MemorySlice`
+module. The differential oracle uses the same byte-expression through a shared
+definition, so the bridge targets its real input computation. The generic
+write-sequence lemmas retain coherence, bytes outside every write footprint, and
+all non-memory fields even when the write footprints overlap each other.
+
+These proofs establish byte-input equality and its transport through the existing
+hash function. They add no importer admission, hash injectivity assumption, or
+EVM/solc correspondence claim. The unchanged admission gate remains closed until
+Stage 4. Stage 2 is prepared on top of Stage 1 and must merge after it.

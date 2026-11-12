@@ -5,6 +5,7 @@ import Compiler.Codegen
 import Compiler.Yul.PrettyPrint
 import Compiler.Keccak.Sponge
 import Compiler.Hex
+import Verity.Core.Model.MemorySlice
 import Lean.Data.Json
 
 /-! Test-only runner for an arbitrary covered Solidity slice. The execution path
@@ -39,10 +40,8 @@ private def mappingSlot (base key : Nat) : Nat :=
 Custom-error signatures populate this temporary buffer explicitly. -/
 def oracle : DenoteOracle :=
   { mappingSlot, keccakMemorySlice := fun memory offset size =>
-      let bytes := (List.range size).toArray.map fun index =>
-        UInt8.ofNat ((memory (offset + index / 32 * 32)).val /
-          2^(8*(31-index % 32)) % 256)
-      (KeccakEngine.keccak256 (ByteArray.mk bytes)).data.foldl
+      let bytes := DenoteMemory.wordMemorySliceBytes memory offset size
+      (KeccakEngine.keccak256 bytes).data.foldl
         (fun value byte => value * 256 + byte.toNat) 0 }
 
 private def jsonWords (xs : List Nat) : Json := toJson (xs.map toString)
