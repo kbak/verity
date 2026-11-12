@@ -14,10 +14,36 @@ See the corresponding scope in `TRUST_ASSUMPTIONS.md`.
 
 Removing the name-selected packed-hash replacement adds no axiom or proof shortcut.
 The inline-assembly registry's exact count changes from 18 to 17 with the removed
-entry; its metadata theorems do not prove source-body equivalence. Unsupported
-packed-memory bodies are rejected. The independent byte/hash expectations and
-existing hash premises are unchanged; see `TRUST_ASSUMPTIONS.md` and
-`PACKED_MEMORY_HASH_REPRODUCER.md`.
+entry; its metadata theorems do not prove source-body equivalence. The subsequent
+bounded-memory lowering adds no theorem or axiom: its byte-wise dirty-bit and root
+address audits are trusted frontend checks, with located rejection outside their
+supported fragment. Existing memory lemmas retain their explicit hypotheses;
+finite three-route tests do not discharge source/compiler correspondence or the
+existing hash premises. Independent byte/hash expectations remain unchanged; see
+`TRUST_ASSUMPTIONS.md` and `PACKED_MEMORY_HASH_REPRODUCER.md`.
+
+Storage-reference regression preparation adds no theorem, axiom or importer
+admission. Its independent slot/state oracle and source-EVM mutation campaign
+are finite test evidence only. The CI preparation explicitly reports missing
+Denote/generated-EVM sequence routes and cannot satisfy the Stage 5 milestone
+gate. Existing packed expectations and hash premises remain unchanged.
+
+The explicit-key storage control now runs the actual imported Denote sequence
+and Verity-generated Cancun bytecode against those unchanged state expectations.
+Denote-only and generated-code-only event-deletion mutants establish finite
+instrument sensitivity. This adds no axiom or compiler-correctness theorem;
+packed-reference roots still require separate admission and execution evidence.
+
+The full-cleanup storage-read preparation adds finite source/control evidence
+and located rejection checks, with no new axiom, theorem or admission. Separate
+hash and supplied-key executions do not establish their composition; see
+`PACKED_STORAGE_READ_DESIGN.md` for the pending generic frame obligations.
+
+The tail-only caller-liveness preparation adds no axiom, theorem or admission.
+Controlled upper-bit perturbations provide finite source-EVM sensitivity evidence
+against unchanged packed hashes. All tail-only roots still reject; no Denote or
+generated-EVM agreement is claimed. The relational caller argument in
+`TAIL_CLEANUP_LIVENESS.md` remains a design obligation.
 
 `smoke.covered` and `smoke_step_credit` are ordinary theorems. The import
 path adds no project axiom, `sorry`, or `native_decide`. `covered` is
@@ -651,7 +677,6 @@ external-program correspondence remain separate obligations. Differential and
 mutation checks cover finite callback/copy/execution/payment/rollback sequences.
 No axiom or gas-accounting assumption is added.
 
-
 Metered ABI-v1 void callbacks expose the assumed summary
 `legacy_void_original_bytecode_gas_evidence`, carry their implicit GAS site and retain
 the consumed source-gas cursor even when the callback reverts. Five kernel lemmas
@@ -661,3 +686,15 @@ child programs and local bytecode traces validate forwarding, rollback and
 accounting but do not establish arbitrary callback behavior. Source spans,
 access/memory context and child gas usage retain the original-bytecode meter's
 trust boundary. No project axiom is added; static/signature adapters remain open.
+
+The separate CI Turbo-Lean builder adds no project axiom or proof coverage.
+The established verifier/evaluator and narrow axiom allowlist remain unchanged.
+Declarative Solidity file inputs remain tracked by Lake and cache identity,
+with unsupported dynamic configuration rejected. The operational boundary is
+recorded in [TRUST_ASSUMPTIONS.md](TRUST_ASSUMPTIONS.md).
+
+The scratch-memory composition proofs add no axiom or proof shortcut. They relate
+physical word writes to the existing ordered mapping ABI preimage and prove
+byte/word/non-memory frames with explicit coherence and nonwrapping hypotheses
+where needed. They do not discharge existing hash/collision premises or admit
+combined importer roots. `TRUST_ASSUMPTIONS.md` records the same limited scope.
