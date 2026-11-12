@@ -910,6 +910,15 @@ def source_gas_campaign(optimized: bool) -> None:
                            "--source-campaign", str(saved))
 
 
+
+def typed_callback_gas_campaign(optimized: bool) -> None:
+    saved = module_campaign_output("check_typed_callback_gas", "typed-callback-gas", 1800,
+                                   *(["--optimized"] if optimized else []))
+    module_campaign_output("check_source_gas_mutations", "typed-callback-gas-mutations", 1800,
+                           "--source-campaign", str(saved), "--fixture",
+                           "Contracts/SolidityImportSmoke/LegacyTypedCallGas.sol")
+
+
 def tasks(update_golden: bool) -> list:
     """Independent work items, most expensive first (each runs in its own snapshot).
 
@@ -918,6 +927,27 @@ def tasks(update_golden: bool) -> list:
     """
     items = [("prefix-checks", 2, lambda: prefix_checks(update_golden)),
              ("reference-boundary", 2, reference_boundary_mutations)]
+    items += [("native-value-compilation", 1, lambda: module_campaign_output(
+        "check_native_value_compilation", "native-value-compilation", 1800))]
+    items += [("value-payment-boundaries", 1, lambda: module_campaign_output(
+        "check_value_payment_boundaries", "value-payment-boundaries", 1800))]
+    items += [(f"legacy-value-payments-opt{int(optimized)}", 1,
+               lambda optimized=optimized: module_campaign_output(
+                   "check_legacy_value_payments", "legacy-value-payments", 1800,
+                   *(["--optimized"] if optimized else [])))
+              for optimized in (False, True)]
+    items += [(f"post-call-memory-opt{int(optimized)}", 1,
+               lambda optimized=optimized: module_campaign_output(
+                   "check_post_call_memory_loops", "post-call-memory", 1800,
+                   *(["--optimized"] if optimized else [])))
+              for optimized in (False, True)]
+    items += [("post-call-memory-boundaries", 1, lambda: module_campaign_output(
+        "check_post_call_memory_boundaries", "post-call-memory-boundaries", 900))]
+    items += [(f"typed-callback-gas-opt{int(optimized)}", 1,
+               lambda optimized=optimized: typed_callback_gas_campaign(optimized))
+              for optimized in (False, True)]
+    items += [("typed-callback-gas-boundaries", 1, lambda: module_campaign_output(
+        "check_typed_callback_gas_boundaries", "typed-callback-gas-boundaries", 900))]
     items += [("source-gas-boundaries", 1, lambda: module_campaign_output(
         "check_source_gas_boundaries", "source-gas-boundaries", 1800))]
     items += [(f"source-gas-opt{int(optimized)}", 1,

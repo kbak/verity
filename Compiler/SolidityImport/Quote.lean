@@ -101,8 +101,8 @@ partial def quoteStmt : Stmt → m Term
           `(Compiler.CompilationModel.Stmt.ecm
             (Compiler.ECM.LegacyBoolCall.module $(quote result) $(quote selector) $(quote count))
             $quotedArgs)
-      | some (.legacyVoid selector layout) => do
-          unless module == Compiler.ECM.LegacyVoidCall.module selector layout do
+      | some (.legacyVoid selector layout gasSite) => do
+          unless module == Compiler.ECM.LegacyVoidCall.module selector layout gasSite do
             throwError "closed legacy void call metadata differs"
           let kinds ← layout.mapM fun kind => match kind with
             | .word => `(Compiler.Yul.LegacyVoidCalls.Argument.word)
@@ -110,7 +110,8 @@ partial def quoteStmt : Stmt → m Term
             | .calldataBytes => `(Compiler.Yul.LegacyVoidCalls.Argument.calldataBytes)
           let descriptor ← list kinds
           `(Compiler.CompilationModel.Stmt.ecm
-            (Compiler.ECM.LegacyVoidCall.module $(quote selector) $descriptor) $quotedArgs)
+            (Compiler.ECM.LegacyVoidCall.module $(quote selector) $descriptor $(quote gasSite))
+            $quotedArgs)
       | some (.rawCall resultVar delegated) =>
           unless module == Compiler.ECM.SolidityRawCall.module resultVar delegated do
             throwError "internal: closed raw call metadata differs"
@@ -218,6 +219,9 @@ partial def quoteStmt : Stmt → m Term
             throwError "internal: closed ECM metadata differs from its descriptor"
           `(Compiler.CompilationModel.Stmt.ecm Compiler.ECM.SolidityReturnMemory.module $quotedArgs)
       | none => throwError "internal: the importer cannot quote an opaque ECM"
+  | .returndataCopy dest source size => do
+      `(Compiler.CompilationModel.Stmt.returndataCopy
+        $(← quoteExpr dest) $(← quoteExpr source) $(← quoteExpr size))
   | .mstore offset value => do
       `(Compiler.CompilationModel.Stmt.mstore $(← quoteExpr offset) $(← quoteExpr value))
   | .tstore offset value => do

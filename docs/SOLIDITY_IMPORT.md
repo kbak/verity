@@ -2192,7 +2192,7 @@ parser alone does not authenticate provenance. A downstream proof must assume or
 separately establish that its evidence describes the intended bytecode, input,
 fork and prestate, and that its callee model describes the deployed child.
 
-Typed/static external transports (including signature precompiles), CREATE2,
+Typed calls with return values, static transports (including signature precompiles), CREATE2,
 nested account access/warmth journals, access-list transactions, EIP-7702 trace
 reconstruction, root OOG, and transaction refund/fee accounting are not covered by this adapter. Unmetered
 transports fail closed in `SourceGasRunner`; the ordinary functional mode
@@ -2220,3 +2220,140 @@ Campaign artifacts stay under ignored `.lake/`, not in the source tree.
 Accounting references: [EIP-150](https://eips.ethereum.org/EIPS/eip-150),
 [EIP-2929](https://eips.ethereum.org/EIPS/eip-2929), and
 [EIP-7702](https://eips.ethereum.org/EIPS/eip-7702).
+
+
+### Solidity 0.7.6 native-value and optional-word payments (development)
+
+The importer admits `(bool ok, ) = receiver.call{value: amount}("")` in roots and
+inlined scalar/void helpers. Receiver and value must be effect-free scalars; the
+only option is `value`, calldata must be an empty literal, and the bytes tuple
+component must be discarded. Success is the raw CALL success bit. Failure does
+not implicitly bubble returndata or revert: subsequent source checks determine
+that behavior. The existing raw-call model checks funds, transfers value before
+child execution, commits successful child effects and rolls back failed children.
+An outer revert restores the whole frame, including successful earlier payments.
+
+Discarding the bytes result does **not** discard its memory effect. Solc 0.7.6
+allocates nonempty returndata at the free pointer, with a length word and rounded
+capacity; empty returndata does not advance the pointer. This behavior is lowered
+explicitly and tested with return lengths 0, 1, 31, 32, 33 and 64. No code-existence
+check is inserted: an explicitly modeled empty account can receive payment.
+
+Static `abi.encodeWithSelector` with a numeric four-byte literal and supported
+ABI-v1 scalar arguments constructs selector-prefixed memory bytes. Dynamic
+arguments/selectors and ABI-v2 sites remain rejected. Assembly CALL
+can additionally copy up to one word into scratch offset zero: exactly
+`min(32, returndatasize())` bytes overwrite memory, including on child REVERT.
+Other nonempty output regions, including DELEGATECALL outputs, remain rejected.
+A scratch-word read requires an immediately following returndata-size case that
+establishes at least 32 copied bytes; short and unguarded reads remain rejected. Legacy numeric `switch` cases
+lower to one selector evaluation and scoped conditional branches. Immutable Yul
+locals retain a proven boolean bound; reassigned/unbounded locals cannot be
+assigned to Solidity bools without explicit cleanup.
+
+These constructs preserve source-level optional-word checks. In particular,
+empty returndata or an exact 32-byte nonzero word can be accepted without ABI
+bool decoding, while short/long returndata, zero words and failed children can
+be rejected. The importer neither inserts that policy nor substitutes a strict
+`0`/`1` decoder. Post-call memory stores/copies and terminal memory reverts are allowed when their operands
+read no storage; the ban on post-call persistent/transient reads/writes remains.
+
+With `sourceGas := true`, the native call's compiler-inserted GAS is identified
+by the original call's source site, followed by the existing checked CALL gas
+boundary. SequenceRunner accepts an explicit per-transaction `gasPrice` word for
+`tx.gasprice` observations (zero when omitted for older fixtures). This does not
+add transaction-fee settlement or EVM refund-counter semantics. The payment
+campaign normalizes sender fees and envelope nonce before comparing frame state.
+Gas-sensitive recompilation remains unavailable; typed return/static-call gas adapters
+and other limitations above still apply. Import admission and finite differential
+evidence are not full contract verification or a frontend equivalence theorem.
+
+Run the focused campaigns with the pinned environment:
+
+```sh
+python3 -m solidity_differential.check_legacy_value_payments --output .lake/value-payments
+python3 -m solidity_differential.check_legacy_value_payments --optimized --output .lake/value-payments-opt
+python3 -m solidity_differential.check_value_payment_boundaries --output .lake/value-payment-boundaries
+```
+
+Each payment campaign includes original-bytecode/Denote comparisons of exact
+return/revert bytes, source gas, caller and child storage, balances and rollback,
+plus executable model mutants that remove native, asset and outer-failure guards.
+Compiler errors or missing instrumentation never count as mutation detections.
+
+The gas-free native fixture also runs original/model/generated-bytecode checks:
+
+```sh
+python3 -m solidity_differential.check_native_value_compilation --output .lake/native-value-abc
+```
+
+### Memory-only bounded loops after calls (development)
+
+A closed external call may be followed by a bounded `forEach` loop whose body
+contains only local bindings/assignments, memory stores, conditionals and nested
+loops. `postCallMemoryStmt` and `postCallMemoryList` check this recursively. Every
+operand and loop bound must be storage-free and call-free. Storage/transient
+writes, calls, gas observations, logs and early exits inside these loops remain
+rejected. The existing rules for statements outside loops are unchanged.
+
+This admits the existing Solidity 0.7.6 calldata-to-memory helper conversion
+after a callback. It reuses the same physical byte-copy lowering, allocator
+advance and tail clearing; it does not hoist a copy across an external call.
+
+`PostCallMemoryFrames` proves the exact admission predicate sound for canonical
+Denote execution: all state except local bindings and the two memory views is
+preserved. This includes persistent/transient storage, account balances/code,
+logs, call observations and source-gas state. Failed evaluations have no successor
+state in that frame predicate; transaction rollback is checked separately. The
+proof establishes a model frame, not Solidity-frontend or compiled-code equivalence.
+
+The differential fixture composes callback, calldata copy, CALL/DELEGATECALL,
+fixed native payment and final callback. Original bytecode, Denote and generated
+bytecode are compared on exact return/revert bytes, logs, storage and balances,
+including final-callback rollback. The finite callback oracle and gas-free
+compilation limits remain explicit. Source-gas adapters for static calls
+are still required for whole-transaction gas validation.
+
+```sh
+python3 -m solidity_differential.check_post_call_memory_loops --output .lake/post-call-memory
+python3 -m solidity_differential.check_post_call_memory_loops --optimized --output .lake/post-call-memory-opt
+python3 -m solidity_differential.check_post_call_memory_boundaries --output .lake/post-call-memory-boundaries
+```
+
+### Original-bytecode gas for typed callbacks (development)
+
+The explicit 0.7.6 `sourceGas` profile attaches the Solidity call site's source
+location to ABI-v1, nonpayable interface calls with no return decoder. This
+includes scalar and memory/calldata-byte arguments. The normal profile keeps its
+existing explicit gas environment. Metered callbacks cannot be recompiled, even
+when their root function has no explicit `gasleft()`.
+
+Encoding and the code-existence check precede the implicit GAS observation.
+An empty-code target reverts without consuming a nonexistent GAS/CALL boundary.
+Otherwise the same original-bytecode meter checks the GAS charge, source call
+operand, EIP-150 allowance, child outcome/returndata and returned gas. The
+functional and observing adapters share one execution result. Five kernel lemmas
+pin this execution arm and the completion behavior: success installs the consumed
+cursor, and failure retains it while forwarding exact revert bytes. Transaction
+rollback remains the existing whole-frame operation; remaining frame gas is not
+transaction receipt gas or fee accounting.
+
+The generic fixture composes before/after callbacks, bytes, a native payment,
+events and an outer failure. It also includes an amount/amount/bytes settlement
+callback. Original solc execution and Denote compare gas, exact return/revert
+bytes, logs, storage and balances in both optimizer modes. Fixed child runtimes
+return/revert their observed entry gas, halt exceptionally, or have no code.
+Malformed-evidence controls and executable accounting mutants must fail for their
+intended reasons; compiler/instrumentation errors do not count as detections.
+
+The original-bytecode span meter, access/memory context and child gas consumption
+remain trusted evidence. Typed/static calls with returned values, signature
+precompiles, arbitrary callback code/reentrancy and nested account-access journals
+remain separate work. No full-contract or compiler-equivalence claim is made.
+
+```sh
+python3 -m solidity_differential.check_typed_callback_gas --output .lake/typed-callback-gas
+python3 -m solidity_differential.check_typed_callback_gas --optimized --output .lake/typed-callback-gas-opt
+python3 -m solidity_differential.check_source_gas_mutations --source-campaign .lake/typed-callback-gas --fixture Contracts/SolidityImportSmoke/LegacyTypedCallGas.sol --output .lake/typed-callback-gas-mutants
+python3 -m solidity_differential.check_typed_callback_gas_boundaries --output .lake/typed-callback-gas-boundaries
+```

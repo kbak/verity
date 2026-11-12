@@ -8,7 +8,17 @@ from .engine import HarnessError
 
 
 def source_sites(ast):
-    sites = set()
+    sites, declarations = set(), {}
+    def collect(node):
+        if isinstance(node, list):
+            for child in node:
+                collect(child)
+        elif isinstance(node, dict):
+            if node.get('nodeType') == 'FunctionDefinition':
+                declarations[node.get('id')] = node
+            for child in node.values():
+                collect(child)
+    collect(ast)
     def walk(node):
         if isinstance(node, list):
             for child in node:
@@ -20,7 +30,17 @@ def source_sites(ast):
                     expr.get('referencedDeclaration', 0) < 0)
             low = (node.get('nodeType') == 'YulFunctionCall' and
                    node.get('functionName', {}).get('name') == 'gas')
-            if high or low:
+            implicit = (node.get("nodeType") == "FunctionCall" and
+                        expr.get("nodeType") == "FunctionCallOptions" and
+                        expr.get("names") == ["value"] and
+                        expr.get("expression", {}).get("memberName") == "call")
+            declaration = declarations.get(expr.get('referencedDeclaration'), {})
+            typed_void = (node.get('nodeType') == 'FunctionCall' and
+                          expr.get('nodeType') == 'MemberAccess' and
+                          ' external' in expr.get('typeDescriptions', {}).get('typeString', '') and
+                          declaration.get('stateMutability') == 'nonpayable' and
+                          declaration.get('returnParameters', {}).get('parameters') == [])
+            if high or low or implicit or typed_void:
                 sites.add(node['src'])
             for child in node.values():
                 walk(child)

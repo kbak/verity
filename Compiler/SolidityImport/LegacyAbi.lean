@@ -8,18 +8,35 @@ open Lean Compiler.CompilationModel
 /-- Recognize the resolved standard ABI encoding builtin. -/
 def isEncoding (node : Json) : Bool := LegacyPacked.isEncoding node "encode"
 
+/-- Selector-prefixed encoding is limited to a literal selector and static words. -/
+def isSelectorEncoding (node : Json) : Bool := LegacyPacked.isEncoding node "encodeWithSelector"
+
 /-- Lower a static scalar tuple into physical memory, including its length header.
 Arguments are evaluated before stores; unsigned/address/bool words are right-aligned,
 fixed bytes are left-aligned. No modern allocator or alignment rounding is inserted.
-Only direct hash inputs at ABI-v1 sites are admitted by the declaration boundary. -/
+ABI-v1 sites admit direct hash inputs and selector-prefixed memory locals. -/
 def lower (node : Json) (lowerScalar : Json → M Val) : M EncodedBytes := do
-  unless isEncoding node do failAt node "legacy static encoding requires abi.encode"
+  unless isEncoding node || isSelectorEncoding node do
+    failAt node "legacy static encoding requires abi.encode or abi.encodeWithSelector"
   let env ← get
   if env.legacyAbiV2Files.contains env.currentFile then
     failAt node "legacy static encoding requires ABI coder v1 at the call site"
   let mut pre : Array Stmt := #[]
   let mut words : Array Expr := #[]
-  for arg in (← mArr (← mField node "arguments")) do
+  let arguments ← mArr (← mField node "arguments")
+  let selector ← if isSelectorEncoding node then do
+    unless !arguments.isEmpty && optStr arguments[0]! "nodeType" == some "Literal" do
+      failAt node "legacy selector encoding requires a literal four-byte selector"
+    let value ← lowerScalar arguments[0]!
+    let .literal selector := value.expr
+      | failAt arguments[0]! "legacy selector encoding requires a numeric literal"
+    unless value.pre.isEmpty && selector < 2^32 do
+      failAt arguments[0]! "legacy selector exceeds four bytes"
+    pure (some selector)
+    else pure none
+  let offset := if selector.isSome then 4 else 0
+  let arguments := if selector.isSome then arguments.extract 1 arguments.size else arguments
+  for arg in arguments do
     LegacyPacked.checkScalar arg "static ABI"
     let ty ← mType arg
     let mask ← if let some width := fixedBytesWidth? ty then
@@ -46,10 +63,12 @@ def lower (node : Json) (lowerScalar : Json → M Val) : M EncodedBytes := do
   let headerName ← fresh
   let header := Expr.localVar headerName
   let data := Expr.add header (.literal 32)
-  let size := 32 * words.size
+  let size := offset + 32 * words.size
   pre := pre.push (.letVar headerName (.mload (.literal 64)))
+  if let some selector := selector then
+    pre := pre.push (.mstore data (.literal (selector * 2^224)))
   for (word, index) in words.zipIdx do
-    pre := pre.push (.mstore (.add data (.literal (32 * index))) word)
+    pre := pre.push (.mstore (.add data (.literal (offset + 32 * index))) word)
   pre := pre ++ #[.mstore header (.literal size),
     .mstore (.literal 64) (.add data (.literal size))]
   return { pre, pointer := data, size := .literal size }

@@ -254,7 +254,10 @@ def execute (model : CompilationModel) (oracle : DenoteOracle) (input : Json)
       { sender, txOrigin := sender, thisAddress := account, msgValue := value,
         blockTimestamp := timestamp, blockNumber := number, chainId := 31337,
         functionSelector := selector, args }
-    let context := withTransactionContext world tx
+    let gasPrice ← match transaction.getObjVal? "gasPrice" with
+      | .ok value => word value
+      | .error _ => pure 0
+    let context := withTransactionContext { world with gasPrice := Uint256.ofNat gasPrice } tx
     let context := match exactSize with
       | none => context
       | some size => { context with calldataSize := Uint256.ofNat size }

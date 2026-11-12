@@ -35,7 +35,8 @@ def isClosedRawCall (mod : Compiler.ECM.ExternalCallModule) : Bool :=
 /-- A code-checked ABI-v1 interface call with no return-value decoder. -/
 def isClosedVoidCall (mod : Compiler.ECM.ExternalCallModule) : Bool :=
   match mod.byteTransport with
-  | some (.legacyVoid selector layout) => mod == Compiler.ECM.LegacyVoidCall.module selector layout
+  | some (.legacyVoid selector layout gasSite) =>
+      mod == Compiler.ECM.LegacyVoidCall.module selector layout gasSite
   | _ => false
 
 /-- The closed optional-bool low-level call transport emitted by the importer. -/
@@ -191,11 +192,30 @@ def exprStorageFree (expression : Expr) : Bool :=
 
 abbrev purePostCallExpr := exprStorageFree
 
+mutual
+/-- Call-free local/memory operations admitted inside a bounded post-call loop.
+Every operand, including nested loop bounds, must avoid storage and calls.
+Logs, transports, early exits and persistent/transient writes are excluded. -/
+def postCallMemoryStmt : Stmt → Bool
+  | .letVar _ value | .assignVar _ value => exprStorageFree value
+  | .mstore offset value => exprStorageFree offset && exprStorageFree value
+  | .ite condition yes no =>
+      exprStorageFree condition && postCallMemoryList yes && postCallMemoryList no
+  | .forEach _ count body => exprStorageFree count && postCallMemoryList body
+  | _ => false
+
+/-- Recursive memory-loop body classifier; unknown statement forms fail closed. -/
+def postCallMemoryList : List Stmt → Bool
+  | [] => true
+  | statement :: rest => postCallMemoryStmt statement && postCallMemoryList rest
+end
+
 /-- Statements allowed after a closed low-level call in a trailing-call body:
 local bindings, checks, scalar events, returns and further closed low-level calls.
 Event arguments must read no storage. Logs open no additional reentrancy window;
 post-call persistent/transient storage reads and writes remain rejected. -/
 partial def stmtAfterTrailingCall : Stmt → Bool
+  | .forEach name count body => postCallMemoryStmt (.forEach name count body)
   | .letVar _ value | .assignVar _ value | .require value _ => exprStorageFree value
   | .requireError condition _ args => exprStorageFree condition && args.all exprStorageFree
   | .ite condition yes no =>
@@ -203,8 +223,12 @@ partial def stmtAfterTrailingCall : Stmt → Bool
   | .ecm mod args => (isClosedSourceGasRead mod || isClosedLowLevelCall mod ||
       isClosedRawCall mod || isClosedVoidCall mod ||
       isClosedExtCodeSize mod ||
-      mod == Compiler.ECM.SolidityInvalid.module) &&
+      mod == Compiler.ECM.SolidityInvalid.module ||
+      mod == Compiler.ECM.SolidityRevertMemory.module) &&
       args.all exprStorageFree
+  | .mstore offset value => exprStorageFree offset && exprStorageFree value
+  | .returndataCopy dest source count =>
+      exprStorageFree dest && exprStorageFree source && exprStorageFree count
   | .return value => exprStorageFree value
   | .returnValues values | .emit _ values => values.all exprStorageFree
   | .revertEmpty | .revertReturndata | .stop => true

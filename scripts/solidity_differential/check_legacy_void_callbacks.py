@@ -22,7 +22,7 @@ def encoded(signature, values, *, dirty_enum=False):
 
 
 def transactions(seed, caller, accounts, random_cases, *, guard_slot=1, seeded_guard=None,
-                 before_signature=BEFORE, after_signature=AFTER):
+                 before_signature=BEFORE, after_signature=AFTER, run_lengths=(0, 33)):
     rng = random.Random(seed)
     balances = {caller: FUNDS, accounts[0]: 5, accounts[1]: 17, EMPTY: 0, SENDER: 1 << 200}
     nonces = {caller: 1, accounts[0]: 1, accounts[1]: 1, EMPTY: 0, SENDER: 3}
@@ -148,7 +148,7 @@ def transactions(seed, caller, accounts, random_cases, *, guard_slot=1, seeded_g
         add('readCallback()', [])
         for mode in (0, 1, 31, 32, 33, 65, 200, 201, 202, 203):
             for operation in (0, 1):
-                for length in (0, 33):
+                for length in run_lengths:
                     input_ = b'\x00' + rng.randbytes(length-1) if length else b''
                     add(run, [accounts[1], 7, input_, operation, rng.randbytes(length), mode], incoming=13)
     if seeded_guard is None:
