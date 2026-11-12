@@ -138,7 +138,7 @@ class SequenceAdapter:
     emitted events are observed without normalization.
     """
     def __init__(self, directory, bytecodes, initial_storage=(), calldata_key='data', observer=None,
-                 impersonated_senders=(), initial_balances=(), zero_fee=False):
+                 impersonated_senders=(), initial_balances=(), zero_fee=False, hardfork='osaka'):
         self.directory = Path(directory)
         self.bytecodes = tuple(bytecodes)
         self.initial_storage = tuple(tuple(row) for row in initial_storage)
@@ -151,6 +151,9 @@ class SequenceAdapter:
             raise HarnessError('zero-fee transaction mode must be boolean')
         self.zero_fee = zero_fee
         self.runs = 0
+        if hardfork not in ('osaka', 'cancun'):
+            raise HarnessError('unsupported sequence hardfork')
+        self.hardfork = hardfork
 
     def __call__(self, transactions, plan):
         if len(transactions) != len(plan):
@@ -158,7 +161,7 @@ class SequenceAdapter:
         directory = self.directory / str(self.runs)
         self.runs += 1
         observations, receipts = [], []
-        with Anvil(directory) as node:
+        with Anvil(directory, hardfork=self.hardfork) as node:
             deployer = node.rpc('eth_accounts')[0]
             for code in self.bytecodes:
                 deployment = node.transact({'from': deployer, 'data': code, 'gas': hex(10000000)})

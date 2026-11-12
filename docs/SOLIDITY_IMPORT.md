@@ -2061,6 +2061,54 @@ Executable mutations pass the new value, write twice, omit the write or pass the
 new local value; each must compile and fail runtime checks after a passing control.
 No new primitive, axiom, transport or source-equivalence theorem is introduced.
 
+### Bounded overlapping assembly memory (experimental)
+
+Modern scalar roots can contain straight-line assembly declarations, assignments,
+word operations, physical `mload`/`mstore`, and constant-length `keccak256` slices.
+Writes retain source order, including overlap and cleanup. This path is selected
+by source constructs, independently of helper spelling and unused storage fields.
+It does not change the Solidity 0.7.6 validators.
+
+The frontend tracks unknown bits of narrow Solidity scalars through bitwise
+operations and memory bytes. A hash or Solidity assignment must not observe those
+bits; assembly must overwrite remaining dirty bytes before returning to Solidity.
+Narrow references through older assembly lowering paths are rejected when combined
+with this fragment, because those paths carry no dirty-bit certificate. Full-word
+copies through those paths remain supported.
+A masked narrow word is therefore supported without redundant cleanup. Unknown
+aliases while dirty bytes remain are conservatively rejected. Narrow assignment
+requires an already bounded result. Dirty arithmetic is outside this slice.
+
+The enclosing scalar root must establish every accessed interval within
+`[128, 2^32)`, without word wraparound, or access exactly the free-pointer word at
+`0x40`. Free-pointer writes must retain a bounded pointer. Successful unsigned
+comparison guards can constrain addresses; a guard on a superseded binding cannot
+constrain its replacement. Hash lengths must be literal and at most 4096 bytes.
+Branches, loops, external effects, storage operations combined with this new path,
+and unproved alias or address relationships remain located rejections. Mixing raw
+memory observations with synthetic ABI allocation writes is also rejected: the
+existing scalar hash lowering does not preserve the observable Solidity bytes
+length header and allocator delta. Source-written memory and the structural
+allocator prologue are distinguished by recorded access provenance.
+
+The lowerer and the bounds audit are included in the source digest. Allocator
+initialization follows the structural analysis of the emitted memory reads. These
+frontend checks reuse the physical-memory semantics and existing conditional byte
+lemmas; they do not establish a source/compiler correspondence theorem.
+
+Run both the unchanged packed expectations and the independent construct controls:
+
+```bash
+PYTHONPATH=scripts python3 -m solidity_differential.check_packed_memory_hash_routes \
+  --require-admission --output .lake/packed-memory-routes
+PYTHONPATH=scripts python3 -m solidity_differential.check_bounded_memory \
+  --output .lake/bounded-memory-controls
+```
+
+The second campaign exercises a different overlap layout, explicit masking,
+guarded offsets, and rejection of dirty observations, missing cleanup, unknown
+aliases, out-of-range addresses, stale guards, and unsupported control flow.
+
 
 ### Immutable scalar forwarding into assembly (experimental)
 
