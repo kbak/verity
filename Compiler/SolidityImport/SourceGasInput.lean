@@ -24,7 +24,8 @@ private def call (j : Json) : Except String SourceGas.Call := do
   let kind ← match ← (← j.getObjVal? "kind").getStr? with
     | "call" => pure Kind.call
     | "delegatecall" => pure Kind.delegatecall
-    | _ => throw "source gas requires CALL or DELEGATECALL"
+    | "staticcall" => pure Kind.staticcall
+    | _ => throw "source gas requires CALL, DELEGATECALL or STATICCALL"
   let c ← j.getObjVal? "context"
   let delegationWarm : Option Bool ← match ← c.getObjVal? "delegationWarm" with
     | .null => pure none

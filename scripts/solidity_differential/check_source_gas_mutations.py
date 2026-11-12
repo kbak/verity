@@ -20,6 +20,9 @@ MUTANTS = {
     'call-return-gas': ('state.reservedGas + left', 'state.reservedGas + left + 1'),
     'source-span-cost': ('some (available - cost)', 'some available'),
 }
+# Legacy typed STATICCALL targets are warm after EXTCODESIZE (or precompile warmth).
+# Keep this opt-in so existing campaigns retain their original six required mutants.
+STATIC_MUTANTS = {'call-warm-access': ('then 100 else 2600', 'then 101 else 2600')}
 DRIVER = r'''
 open Lean Compiler.CompilationModel
 private def accounting (input : Json) : Except String Json := do
@@ -71,6 +74,8 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--fixture', type=Path,
                         default=Path('Contracts/SolidityImportSmoke/LegacyGasObservations.sol'))
+    parser.add_argument('--mutant', action='append', choices=sorted(MUTANTS | STATIC_MUTANTS),
+                        help='Select applicable arithmetic mutations; default runs the original six')
     args = parser.parse_args()
     out = args.output.resolve()
     out.mkdir(parents=True, exist_ok=False)
@@ -124,7 +129,8 @@ def main():
     if execute('baseline', source, payload['transactions']) != expected:
         raise HarnessError('unmodified gas accounting differs from original EVM')
     results = []
-    for name, (before, after) in MUTANTS.items():
+    for name in (args.mutant or MUTANTS):
+        before, after = (MUTANTS | STATIC_MUTANTS)[name]
         if source.count(before) != 1:
             raise HarnessError('nonunique gas mutation anchor: ' + name)
         code = source.replace(before, after)

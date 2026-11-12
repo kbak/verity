@@ -77,6 +77,15 @@ def prepareCall (state : State) (request : Request) :
     throw "exceptional source child has a success bit or return bytes"
   return ({ request with gas := charged.childGas }, witness, { remaining, events := rest })
 
+/-- Recovery at precompile 1 costs 3000 gas even for invalid signatures. A
+smaller allowance fails exceptionally; it is not a successful zero signer. -/
+def checkRecoveryGas (witness : Call) : Except String Unit := do
+  let exhausted := witness.allowance < 3000
+  let remaining := if exhausted then 0 else witness.allowance - 3000
+  unless witness.exceptional == exhausted && witness.success == !exhausted &&
+      witness.gasLeft == remaining do
+    throw "source recovery gas differs from precompile cost"
+
 /-- Check functional child behavior against the same source call whose gas was
 accounted. A response from a different execution cannot be substituted. -/
 def checkResponse (witness : Call) (success : Bool) (data : Bytes) : Except String Unit := do

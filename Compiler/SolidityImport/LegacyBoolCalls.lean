@@ -1,4 +1,5 @@
 import Compiler.SolidityImport.LegacyMemory
+import Compiler.SolidityImport.SourceGasCalls
 
 /-! Resolved ABI-v1 bool-returning static calls with captured scalar arguments.
 No newer strict bool decoder or allocator behavior is reused for legacy sources. -/
@@ -78,7 +79,8 @@ def lower (node decl : Json) (scalar : Json → M Val) : M Val := do
     values := values ++ [word]
   let result ← fresh
   modify fun e => { e with encodingMemory := true }
-  return { pre := #[.ecm (Compiler.ECM.LegacyBoolCall.module result selector params.size) values]
+  let mod ← SourceGasCalls.module node result (.bool selector params.size)
+  return { pre := #[.ecm mod values]
            expr := .localVar result }
 
 end Compiler.CompilationModel.SolidityImport.LegacyBoolCalls

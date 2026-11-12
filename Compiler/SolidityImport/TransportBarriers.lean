@@ -79,6 +79,8 @@ def isClosedRevertMemory (mod : Compiler.ECM.ExternalCallModule) : Bool :=
 /-- The closed typed-interface `staticcall` transport emitted by the importer. -/
 def isClosedStaticCall (mod : Compiler.ECM.ExternalCallModule) : Bool :=
   match mod.byteTransport with
+  | some (.sourceStatic result kind site) =>
+      mod == Compiler.ECM.SourceStaticCall.module result kind site
   | some (.legacyBool result selector count) =>
       mod == Compiler.ECM.LegacyBoolCall.module result selector count
   | some (.legacyRecover resultVar) =>

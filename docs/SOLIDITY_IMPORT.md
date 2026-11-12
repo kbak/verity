@@ -2216,8 +2216,8 @@ boundary. SequenceRunner accepts an explicit per-transaction `gasPrice` word for
 `tx.gasprice` observations (zero when omitted for older fixtures). This does not
 add transaction-fee settlement or EVM refund-counter semantics. The payment
 campaign normalizes sender fees and envelope nonce before comparing frame state.
-Gas-sensitive recompilation remains unavailable; typed return/static-call gas adapters
-and other limitations above still apply. Import admission and finite differential
+Gas-sensitive recompilation remains unavailable; the supported static return layouts
+are described below, and other limitations above still apply. Import admission and finite differential
 evidence are not full contract verification or a frontend equivalence theorem.
 
 Run the focused campaigns with the pinned environment:
@@ -2263,8 +2263,8 @@ The differential fixture composes callback, calldata copy, CALL/DELEGATECALL,
 fixed native payment and final callback. Original bytecode, Denote and generated
 bytecode are compared on exact return/revert bytes, logs, storage and balances,
 including final-callback rollback. The finite callback oracle and gas-free
-compilation limits remain explicit. Source-gas adapters for static calls
-are still required for whole-transaction gas validation.
+compilation limits remain explicit. The supported static-call gas adapters are described below; arbitrary return layouts
+and complete whole-transaction gas validation remain outside this scope.
 
 ```sh
 python3 -m solidity_differential.check_post_call_memory_loops --output .lake/post-call-memory
@@ -2299,9 +2299,9 @@ Malformed-evidence controls and executable accounting mutants must fail for thei
 intended reasons; compiler/instrumentation errors do not count as detections.
 
 The original-bytecode span meter, access/memory context and child gas consumption
-remain trusted evidence. Typed/static calls with returned values, signature
-precompiles, arbitrary callback code/reentrancy and nested account-access journals
-remain separate work. No full-contract or compiler-equivalence claim is made.
+remain trusted evidence. The static return/signature layouts described below extend
+this profile. Other typed return layouts, arbitrary callback code/reentrancy and nested
+account-access journals remain separate work. No full-contract or compiler-equivalence claim is made.
 
 ```sh
 python3 -m solidity_differential.check_typed_callback_gas --output .lake/typed-callback-gas
@@ -2309,3 +2309,60 @@ python3 -m solidity_differential.check_typed_callback_gas --optimized --output .
 python3 -m solidity_differential.check_source_gas_mutations --source-campaign .lake/typed-callback-gas --fixture Contracts/SolidityImportSmoke/LegacyTypedCallGas.sol --output .lake/typed-callback-gas-mutants
 python3 -m solidity_differential.check_typed_callback_gas_boundaries --output .lake/typed-callback-gas-boundaries
 ```
+
+
+### Original-bytecode gas for legacy static calls (development)
+
+The explicit 0.7.6 `sourceGas` profile now covers `ecrecover`, external
+`(bytes32,bytes) -> bytes4` validators and scalar-argument external bool predicates.
+Each uses a closed `sourceStatic` descriptor with an AST source location. The
+ordinary profile retains its existing constructors; both profiles share the exact
+legacy memory preparation and return decoder. Short return words revert, dirty
+bool words normalize only at the binding, and bytes4 decoding preserves its legacy
+padding behavior. Revert payloads are forwarded exactly. These transports are
+static: the existing checked byte-call boundary requires world preservation.
+
+The source meter recognizes STATICCALL's six operands, zero value and no stipend.
+The original compiler's code-existence check precedes implicit GAS for interface
+calls; recovery bypasses that check because precompile 1 has no account code.
+The same EIP-150/access/memory boundary calculation checks forwarding and returned
+gas. Recovery additionally checks the precompile's fixed 3000-gas cost, including
+invalid signatures: an allowance below 3000 fails exceptionally, while invalid
+signatures with sufficient gas succeed with empty returndata. This follows
+[EIP-214](https://eips.ethereum.org/EIPS/eip-214) and the versioned geth
+[precompile implementation](https://github.com/ethereum/go-ethereum/blob/v1.16.5/core/vm/contracts.go)
+and [gas constant](https://github.com/ethereum/go-ethereum/blob/v1.16.5/params/protocol_params.go).
+
+`StaticCallGasFrames` proves five model laws for canonical execution and meter
+attachment, including exact failure bytes and cursor retention. It does not prove
+frontend correspondence, recovery cryptography or an application's authorization
+properties. The transport exposes the assumed summary
+`legacy_static_original_bytecode_gas_evidence`; original traces, span costs and
+access/memory context remain trusted. Ordinary validator gas usage also remains
+trace evidence, even when its functional behavior has an independent model.
+Gas-sensitive recompilation is rejected.
+
+The generic campaign compares original bytecode and Denote on frame gas, exact
+return/revert bytes, events and storage in both optimizer modes. It includes
+valid/invalid/high-s recovery, repeated recovery, bytes padding/length boundaries,
+dirty bool words, absent code, callee reverts, exceptional static writes and
+GAS-observing children. Malformed evidence must reject for the intended reason;
+accounting mutants must produce completed numerical mismatches. Isolated EVM
+precompile probes at 2999/3000/3001 gas are reported separately: parent out-of-gas
+execution is still unsupported and is never counted as a complete frame replay.
+
+Low-level arbitrary STATICCALL, other return layouts, nested access journals,
+arbitrary validator correspondence/reentrancy, root out-of-gas and transaction
+fees/refund counters remain outside this slice. Application-specific replay and
+authorization proofs belong downstream, using pinned source and callee evidence.
+
+```sh
+python3 -m solidity_differential.check_static_call_gas --output .lake/static-call-gas
+python3 -m solidity_differential.check_static_call_gas --optimized --output .lake/static-call-gas-opt
+python3 -m solidity_differential.check_static_call_gas_boundaries --output .lake/static-call-gas-boundaries
+```
+
+The registered `static-call-gas-opt0` and `static-call-gas-opt1` mutation tasks also
+run the five applicable accounting mutants (GAS cost, EIP-150 cap, warm access,
+returned gas and source spans). These typed targets are warm after the code check,
+or inherently warm as precompile 1. STATICCALL has no value stipend to mutate.

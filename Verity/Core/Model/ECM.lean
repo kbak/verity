@@ -118,11 +118,31 @@ structure CompilationContext where
   /-- Whether dynamic data comes from calldata (external functions) or memory (internal). -/
   isDynamicFromCalldata : Bool := true
 
+/-- Legacy static ABI layouts supported by the original-bytecode gas profile. -/
+inductive LegacyStaticKind where
+  | recover
+  | bytes4 (selector : Nat)
+  | bool (selector numStaticArgs : Nat)
+  deriving Repr, BEq, DecidableEq
+
+/-- Number of already lowered operands, including the target for interface calls. -/
+def LegacyStaticKind.arity : LegacyStaticKind → Nat
+  | .recover => 4
+  | .bytes4 _ => 3
+  | .bool _ count => count + 1
+
+/-- Selector bound for the two ABI layouts; recovery has no selector. -/
+def LegacyStaticKind.valid : LegacyStaticKind → Bool
+  | .recover => true
+  | .bytes4 selector | .bool selector _ => decide (selector < 2^32)
+
 /-- Data-only external transport that has canonical compilation/denotation.
 Tagged modules do not execute an arbitrary compilation closure. -/
 inductive ByteTransport where
   /-- Original-bytecode GAS observation; no recompilation equivalence is asserted. -/
   | sourceGasRead (resultVar site : String)
+  /-- Original-bytecode STATICCALL with a closed legacy layout and source site. -/
+  | sourceStatic (resultVar : String) (kind : LegacyStaticKind) (site : String)
   /-- Solidity 0.7.6 ECDSA precompile call, with explicit byte-world semantics. -/
   | legacyRecover (resultVar : String)
   /-- Raw CALL/DELEGATECALL over memory with an empty output area. -/
@@ -1078,6 +1098,28 @@ def bytes4Module (resultVar : String) (selector : Nat) : ExternalCallModule wher
 
 end LegacySignatureCall
 
+namespace SourceStaticCall
+
+/-- A metered legacy static transport. Evidence belongs to original bytecode;
+there is deliberately no compiler path or gas-sensitive recompilation claim. -/
+def module (result : String) (kind : LegacyStaticKind) (site : String) : ExternalCallModule where
+  name := "soliditySourceStaticCall"
+  numArgs := kind.arity
+  resultVars := [result]
+  readsState := true
+  writesState := false
+  compile := fun _ _ =>
+    .error "source gas observations require original bytecode; recompilation unsupported"
+  byteTransport := some (.sourceStatic result kind site)
+  proofStatus := .assumed
+  summaryName := "legacy_static_original_bytecode_gas_evidence"
+  summaryMutability := .staticcall
+  summarySelector := match kind with
+    | .recover => none
+    | .bytes4 selector | .bool selector _ => some selector
+
+end SourceStaticCall
+
 namespace ExternalCallModule
 
 /-- Compile closed byte transports from their data descriptor. Their metadata
@@ -1087,6 +1129,10 @@ def compileCanonical (module : ExternalCallModule) (context : CompilationContext
     (args : List YulExpr) : Except String (List YulStmt) := do
   match module.byteTransport with
   | none => module.compile context args
+  | some (.sourceStatic result kind site) =>
+      unless module == SourceStaticCall.module result kind site do
+        throw "closed source static call metadata differs"
+      throw "source gas observations require original bytecode; recompilation unsupported"
   | some (.sourceGasRead ..) =>
       throw "source gas observations require original bytecode; recompilation unsupported"
   | some (.legacyBool result selector count) =>

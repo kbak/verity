@@ -45,6 +45,40 @@ class SourceGasTraceTests(unittest.TestCase):
         internal['expression']['typeDescriptions']['typeString'] = 'function () internal'
         self.assertEqual(source_sites([internal, declaration]), set())
 
+    def test_static_and_recovery_sites_require_resolved_calls(self):
+        decl = {'id': 19, 'nodeType': 'FunctionDefinition', 'stateMutability': 'view',
+                'returnParameters': {'parameters': [{'type': 'bytes4'}]}}
+        call = {'nodeType': 'FunctionCall', 'src': '20:10:0', 'expression': {
+            'nodeType': 'MemberAccess', 'referencedDeclaration': 19,
+            'typeDescriptions': {'typeString': 'function () view external returns (bytes4)'}}}
+        self.assertEqual(source_sites([call, decl]), {'20:10:0'})
+        self.assertEqual(source_sites(call), set())
+        recovery = {'nodeType': 'FunctionCall', 'src': '30:10:0', 'expression': {
+            'nodeType': 'Identifier', 'name': 'ecrecover', 'referencedDeclaration': -5}}
+        self.assertEqual(source_sites(recovery), {'30:10:0'})
+        recovery['expression']['referencedDeclaration'] = 5
+        self.assertEqual(source_sites(recovery), set())
+
+    def test_staticcall_uses_six_operands_and_zero_value(self):
+        trace = {'structLogs': [
+            {'depth': 1, 'pc': 0, 'op': 'GAS', 'gas': 10000, 'gasCost': 2,
+             'stack': [], 'memory': []},
+            {'depth': 1, 'pc': 1, 'op': 'STATICCALL', 'gas': 9998, 'gasCost': 103,
+             'stack': ['20', '0', '0', '0', '1', '270e'], 'memory': []},
+            {'depth': 1, 'pc': 2, 'op': 'STOP', 'gas': 6895, 'gasCost': 0,
+             'stack': ['1'], 'memory': []}]}
+        call = {'gas': '0x2710', 'from': '0x100', 'to': '0x200', 'value': '0x99',
+                'calls': [{'type': 'STATICCALL', 'to': '0x1', 'gas': '0x260d',
+                           'gasUsed': '0xbb8', 'input': '0x', 'output': '0x'}]}
+        meter, _, _ = evidence(trace, call, {}, '5afa00', '0:1:0;;', {'0:1:0'}, coinbase=0)
+        event = meter['events'][1]
+        self.assertEqual((event['kind'], event['value']), ('staticcall', 0))
+        self.assertFalse(event['context']['transfersValue'])
+        self.assertTrue(event['context']['targetWarm'])
+        self.assertEqual(event['context']['outputSize'], 32)
+        self.assertEqual(event['context']['inputSize'], 0)
+        self.assertEqual(event['gasLeft'], 9741 - 3000)
+
     def fixture(self):
         logs = [{'depth': 1, 'pc': 0, 'op': 'GAS', 'gas': 100, 'gasCost': 2,
                  'stack': [], 'memory': []},

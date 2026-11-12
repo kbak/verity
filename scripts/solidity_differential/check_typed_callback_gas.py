@@ -21,10 +21,10 @@ def address(n):
     return '0x' + n.to_bytes(20, 'big').hex()
 
 
-def replay(out, payload, optimized):
+def replay(out, payload, optimized, *, model=None):
     out.mkdir(exist_ok=False)
     write_json(out / 'input.json', payload)
-    code = MODEL.read_text()
+    code = (model or MODEL).read_text()
     if optimized:
         code = code.replace('optimizerRuns := none', 'optimizerRuns := some 200')
     driver = out / 'Run.lean'

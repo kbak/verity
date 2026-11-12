@@ -2,7 +2,7 @@
 
 The pinned local EVM is the trusted meter for ordinary instruction spans. This
 adapter does not claim to prove EVM execution or to derive costs from Solidity.
-The Lean checker independently computes GAS and raw CALL boundary accounting.
+The Lean checker independently computes GAS and CALL/STATICCALL boundary accounting.
 """
 from .engine import HarnessError
 
@@ -40,7 +40,15 @@ def source_sites(ast):
                           ' external' in expr.get('typeDescriptions', {}).get('typeString', '') and
                           declaration.get('stateMutability') == 'nonpayable' and
                           declaration.get('returnParameters', {}).get('parameters') == [])
-            if high or low or implicit or typed_void:
+            recovery = (node.get('nodeType') == 'FunctionCall' and
+                        expr.get('nodeType') == 'Identifier' and expr.get('name') == 'ecrecover' and
+                        expr.get('referencedDeclaration', 0) < 0)
+            typed_static = (node.get('nodeType') == 'FunctionCall' and
+                            expr.get('nodeType') == 'MemberAccess' and
+                            ' external' in expr.get('typeDescriptions', {}).get('typeString', '') and
+                            declaration.get('stateMutability') in ('view', 'pure') and
+                            len(declaration.get('returnParameters', {}).get('parameters', [])) == 1)
+            if high or low or implicit or typed_void or recovery or typed_static:
                 sites.add(node['src'])
             for child in node.values():
                 walk(child)
@@ -110,8 +118,8 @@ def evidence(trace, call, prestate, runtime, mapping, sites, *, coinbase):
             events.append({'type': 'read', 'site': positions[pc], 'cost': cost})
             previous = step['gas'] - 2
             accounting.append({'kind': 'read', 'remaining': previous})
-        elif op in ('CALL', 'DELEGATECALL'):
-            if code[pc] != (0xf1 if op == 'CALL' else 0xf4):
+        elif op in ('CALL', 'DELEGATECALL', 'STATICCALL'):
+            if code[pc] != {'CALL': 0xf1, 'DELEGATECALL': 0xf4, 'STATICCALL': 0xfa}[op]:
                 raise HarnessError('source call opcode differs from pinned runtime')
             try:
                 child = next(children)
@@ -119,8 +127,9 @@ def evidence(trace, call, prestate, runtime, mapping, sites, *, coinbase):
                 raise HarnessError('missing original child call trace') from exc
             delegated = op == 'DELEGATECALL'
             requested, target = stack[-1], stack[-2] % (1 << 160)
-            amount = int(call.get('value', '0x0'), 16) if delegated else stack[-3]
-            start = 3 if delegated else 4
+            amount = (int(call.get('value', '0x0'), 16) if delegated else
+                      stack[-3] if op == 'CALL' else 0)
+            start = 4 if op == 'CALL' else 3
             offset, size, out_offset, out_size = (stack[-i] for i in range(start, start + 4))
             memory = bytes.fromhex(''.join(step['memory']))
             payload = memory[offset:offset + size].ljust(size, b'\0') if size else b''
@@ -142,7 +151,7 @@ def evidence(trace, call, prestate, runtime, mapping, sites, *, coinbase):
             if cost < 0:
                 raise HarnessError('source gas increased before call')
             event = {'type': 'call', 'cost': cost,
-                     'kind': 'delegatecall' if delegated else 'call', 'caller': caller,
+                     'kind': op.lower(), 'caller': caller,
                      'target': target, 'value': amount, 'gas': requested,
                      'calldata': list(payload), 'allowance': allowance,
                      'exceptional': exceptional, 'gasLeft': left,
@@ -152,7 +161,7 @@ def evidence(trace, call, prestate, runtime, mapping, sites, *, coinbase):
                                  'inputOffset': offset, 'inputSize': size,
                                  'outputOffset': out_offset, 'outputSize': out_size,
                                  'targetWarm': target in warm, 'targetDead': dead,
-                                 'transfersValue': not delegated and amount != 0,
+                                 'transfersValue': op == 'CALL' and amount != 0,
                                  'delegationWarm': None}}
             events.append(event)
             # Read the actual resumed parent gas independently of the Lean formula.
@@ -161,7 +170,7 @@ def evidence(trace, call, prestate, runtime, mapping, sites, *, coinbase):
             previous = root[position + 1]['gas']
             accounting.append({'kind': 'call', 'allowance': allowance, 'remaining': previous})
             warm.add(target)
-            if not delegated and 'error' not in child and amount:
+            if op == 'CALL' and 'error' not in child and amount:
                 balances[caller] = balances.get(caller, 0) - amount
                 balances[target] = balances.get(target, 0) + amount
     if next(children, None) is not None:
