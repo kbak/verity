@@ -927,6 +927,13 @@ def tasks(update_golden: bool) -> list:
                    "check_legacy_value_payments", "legacy-value-payments", 1800,
                    *(["--optimized"] if optimized else [])))
               for optimized in (False, True)]
+    items += [(f"post-call-memory-opt{int(optimized)}", 1,
+               lambda optimized=optimized: module_campaign_output(
+                   "check_post_call_memory_loops", "post-call-memory", 1800,
+                   *(["--optimized"] if optimized else [])))
+              for optimized in (False, True)]
+    items += [("post-call-memory-boundaries", 1, lambda: module_campaign_output(
+        "check_post_call_memory_boundaries", "post-call-memory-boundaries", 900))]
     items += [("source-gas-boundaries", 1, lambda: module_campaign_output(
         "check_source_gas_boundaries", "source-gas-boundaries", 1800))]
     items += [(f"source-gas-opt{int(optimized)}", 1,

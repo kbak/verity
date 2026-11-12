@@ -2238,3 +2238,36 @@ The gas-free native fixture also runs original/model/generated-bytecode checks:
 ```sh
 python3 -m solidity_differential.check_native_value_compilation --output .lake/native-value-abc
 ```
+
+### Memory-only bounded loops after calls (development)
+
+A closed external call may be followed by a bounded `forEach` loop whose body
+contains only local bindings/assignments, memory stores, conditionals and nested
+loops. `postCallMemoryStmt` and `postCallMemoryList` check this recursively. Every
+operand and loop bound must be storage-free and call-free. Storage/transient
+writes, calls, gas observations, logs and early exits inside these loops remain
+rejected. The existing rules for statements outside loops are unchanged.
+
+This admits the existing Solidity 0.7.6 calldata-to-memory helper conversion
+after a callback. It reuses the same physical byte-copy lowering, allocator
+advance and tail clearing; it does not hoist a copy across an external call.
+
+`PostCallMemoryFrames` proves the exact admission predicate sound for canonical
+Denote execution: all state except local bindings and the two memory views is
+preserved. This includes persistent/transient storage, account balances/code,
+logs, call observations and source-gas state. Failed evaluations have no successor
+state in that frame predicate; transaction rollback is checked separately. The
+proof establishes a model frame, not Solidity-frontend or compiled-code equivalence.
+
+The differential fixture composes callback, calldata copy, CALL/DELEGATECALL,
+fixed native payment and final callback. Original bytecode, Denote and generated
+bytecode are compared on exact return/revert bytes, logs, storage and balances,
+including final-callback rollback. The finite callback oracle and gas-free
+compilation limits remain explicit. Source-gas adapters for typed/static calls
+are still required for whole-transaction gas validation.
+
+```sh
+python3 -m solidity_differential.check_post_call_memory_loops --output .lake/post-call-memory
+python3 -m solidity_differential.check_post_call_memory_loops --optimized --output .lake/post-call-memory-opt
+python3 -m solidity_differential.check_post_call_memory_boundaries --output .lake/post-call-memory-boundaries
+```
