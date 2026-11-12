@@ -13,6 +13,7 @@ import Compiler.SolidityImport.TransportBarriers
 import Compiler.SolidityImport.LibraryCallGuard
 import Compiler.SolidityImport.Legacy
 import Compiler.SolidityImport.LegacyNativeCalls
+import Compiler.SolidityImport.LegacyStaticCalls
 import Compiler.SolidityImport.LegacyCallArguments
 import Compiler.SolidityImport.LegacyBytePointers
 import Compiler.SolidityImport.ExprHelpers
@@ -5477,12 +5478,21 @@ private partial def lowerAbiDecodeItems (j : Json) : M (Array Stmt × Array AbiD
   let mut items : Array AbiDecodeTypeItem := #[]
   for comp in typeComps do
     items := items.push (← parseAbiDecodeItem comp)
+  if (← get).legacyWrapping then
+    if (← get).legacyAbiV2Files.contains (← get).currentFile then
+      failAt j "legacy abi.decode requires ABI coder v1"
+    unless items.size == 1 do failAt j "legacy abi.decode requires one uint256 word"
+    match items[0]! with
+    | .scalar "uint256" _ none => pure ()
+    | _ => failAt j "legacy abi.decode requires one uint256 word"
   let decodesDynamicStruct := items.any fun
     | .dynamicStruct .. => true
     | _ => false
   if decodesDynamicStruct && items.size != 1 then
     failAt typeArg "abi.decode of a dynamic struct requires it as the only target type"
   let (srcPre, fromCalldata, basePtr, lenExpr) ← lowerAbiDecodeDataSource args[0]! callee
+  if (← get).legacyWrapping && fromCalldata then
+    failAt j "legacy abi.decode requires memory bytes"
   if decodesDynamicStruct && fromCalldata then
     failAt args[0]! "abi.decode of a dynamic struct requires a bytes memory source"
   let mut totalHeadSize : Nat := 0
@@ -13015,6 +13025,8 @@ private partial def lowerLocal (s : Json) : M (Array Stmt) := do
   withAdmittedInterfaceCall (if single then field? s "initialValue" else none) (lowerLocalCore s)
 
 private partial def lowerLocalCore (s : Json) : M (Array Stmt) := do
+  if LegacyStaticCalls.applies s then
+    return ← LegacyStaticCalls.lower s lowerExpr lowerEncodedBytes
   if LegacyNativeCalls.applies s then return ← LegacyNativeCalls.lower s lowerExpr
   let assignedHere := bodyAssignedIds s
   if !assignedHere.isEmpty then
@@ -15804,6 +15816,7 @@ private def importSlice
   let callWorldSrc ← moduleText sourceRoot "Verity/Core/Model/CallWorld.lean"
   let legacyCallsSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyCalls.lean"
   let nativeCallsSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyNativeCalls.lean"
+  let staticCallsSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyStaticCalls.lean"
   let ecmSrc ← moduleText sourceRoot "Verity/Core/Model/ECM.lean"
   let denoteSrc ← moduleText sourceRoot "Verity/Core/Model/Denote.lean"
   -- JSON framing prevents distinct file/signature lists from sharing a
@@ -15844,6 +15857,7 @@ private def importSlice
       ("CallWorld.lean", Json.str callWorldSrc),
       ("LegacyCalls.lean", Json.str legacyCallsSrc),
       ("LegacyNativeCalls.lean", Json.str nativeCallsSrc),
+      ("LegacyStaticCalls.lean", Json.str staticCallsSrc),
       ("ECM.lean", Json.str ecmSrc), ("Denote.lean", Json.str denoteSrc)])]
   let digest := sha256Hex digestInput.compress.toUTF8
   let report : ImportReport :=

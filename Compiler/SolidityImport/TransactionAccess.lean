@@ -108,6 +108,10 @@ def statementAccesses (oracle : DenoteOracle) (fields : List Field)
           let (_, touched) ←
             executeLegacyVoidCall oracle fields state mod selector layout args gasSite
           return reads.flatten ++ touched
+      | some (.rawStaticCall result) =>
+          let reads ← args.mapM (expressionAccesses oracle fields state)
+          let (_, touched) ← executeRawStaticCall oracle fields state mod result args
+          return reads.flatten ++ touched
       | some (.rawCall resultVar delegated) =>
           let reads ← args.mapM (expressionAccesses oracle fields state)
           let (_, touched) ← executeRawCall oracle fields state mod resultVar delegated args

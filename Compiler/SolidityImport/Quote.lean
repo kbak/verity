@@ -123,6 +123,11 @@ partial def quoteStmt : Stmt → m Term
           `(Compiler.CompilationModel.Stmt.ecm
             (Compiler.ECM.LegacyVoidCall.module $(quote selector) $descriptor $(quote gasSite))
             $quotedArgs)
+      | some (.rawStaticCall result) =>
+          unless module == Compiler.ECM.SolidityRawStaticCall.module result do
+            throwError "internal: closed raw static call metadata differs"
+          `(Compiler.CompilationModel.Stmt.ecm
+            (Compiler.ECM.SolidityRawStaticCall.module $(quote result)) $quotedArgs)
       | some (.rawCall resultVar delegated) =>
           unless module == Compiler.ECM.SolidityRawCall.module resultVar delegated do
             throwError "internal: closed raw call metadata differs"

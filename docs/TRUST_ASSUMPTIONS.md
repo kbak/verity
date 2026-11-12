@@ -2752,3 +2752,23 @@ memory/access context remain trusted; other validator child gas consumption
 remains original-trace evidence. Isolated precompile threshold probes do not
 establish complete parent out-of-gas execution. Gas-sensitive recompilation,
 arbitrary low-level static calls and other typed return layouts remain unsupported.
+
+
+Raw Solidity 0.7.6 ABI-v1 STATICCALL tuple initializers expose the assumed summary
+`raw_static_call_byte_response`. The checked byte-call boundary requires world
+preservation and retains success plus all bytes, with no automatic code check,
+revert forwarding or decoder. `RawStaticCallFrames` adds six kernel-checked model
+laws and no project axiom. Importer memory allocation, type-qualified selector
+resolution, source guards and one-word uint256 decoding retain the frontend trust
+boundary; finite three-route checks and guard mutations are not an equivalence
+proof. Original-bytecode gas uses the existing evidence boundary, now including
+cold raw targets. Spans, memory/access context and child gas consumption remain
+trusted. Generated gas equivalence, arbitrary callee correspondence, nested access
+journals, root OOG and whole-application verification are not established.
+
+This new raw-static path rejects contracts containing unresolved immutables,
+including indirectly referenced targets, rather than inheriting the general
+frontend's existing multi-immutable caller-address substitution. Supporting
+actual deployed immutable values requires a separate, explicit binding/provenance
+adapter. Unchanged helper bodies in a parameterized harness do not validate the
+original deployment context or the full application.

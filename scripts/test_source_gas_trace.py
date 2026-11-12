@@ -59,6 +59,23 @@ class SourceGasTraceTests(unittest.TestCase):
         recovery['expression']['referencedDeclaration'] = 5
         self.assertEqual(source_sites(recovery), set())
 
+    def test_raw_static_site_requires_builtin_address_call_without_options(self):
+        import copy
+        call = {'nodeType': 'FunctionCall', 'src': '40:30:0', 'expression': {
+            'nodeType': 'MemberAccess', 'memberName': 'staticcall', 'expression': {
+                'typeDescriptions': {'typeString': 'address'}}}}
+        self.assertEqual(source_sites(call), {'40:30:0'})
+        resolved = copy.deepcopy(call)
+        resolved['expression']['referencedDeclaration'] = 42
+        self.assertEqual(source_sites(resolved), set())
+        options = copy.deepcopy(call)
+        options['expression'] = {'nodeType': 'FunctionCallOptions', 'names': ['gas'],
+                                 'expression': options['expression']}
+        self.assertEqual(source_sites(options), set())
+        wrong_type = copy.deepcopy(call)
+        wrong_type['expression']['expression']['typeDescriptions']['typeString'] = 'contract C'
+        self.assertEqual(source_sites(wrong_type), set())
+
     def test_staticcall_uses_six_operands_and_zero_value(self):
         trace = {'structLogs': [
             {'depth': 1, 'pc': 0, 'op': 'GAS', 'gas': 10000, 'gasCost': 2,

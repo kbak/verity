@@ -174,6 +174,9 @@ def closedTransportCovered (mod : Compiler.ECM.ExternalCallModule) (args : List 
       mod == Compiler.ECM.LegacyVoidCall.module selector layout gasSite &&
         decide (selector < 2^32) &&
         args.length == Compiler.Yul.LegacyVoidCalls.arity layout && exprListCovered args
+  | some (.rawStaticCall result) =>
+      mod == Compiler.ECM.SolidityRawStaticCall.module result &&
+        args.length == 4 && exprListCovered args
   | some (.rawCall resultVar delegated) =>
       mod == Compiler.ECM.SolidityRawCall.module resultVar delegated &&
         args.length == (if delegated then 4 else 5) && exprListCovered args
