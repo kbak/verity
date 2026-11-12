@@ -370,3 +370,9 @@ rejections. `--require-packed-reference` exits 1 after the successful control
 campaign: #32 remains incomplete until its actual packed-reference sequences and
 pinned downstream wrapper pass. Infrastructure failures use exit 2. A passing
 control, or a later successful import alone, cannot open that milestone gate.
+
+
+The next [full-cleanup storage-read preparation](PACKED_STORAGE_READ_DESIGN.md)
+isolates the combined read rejection from supported hash and supplied-key
+controls. It preserves the existing expectation archives and changes no importer
+admission. Its proposed scratch-memory/storage composition remains gated on #39.

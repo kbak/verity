@@ -54,6 +54,13 @@ computation or admit the still-blocked packed-reference helper. Full initial and
 expected state archives remain unchanged. This is finite execution evidence, not
 constructor, gas, whole-world, importer or compiler correspondence.
 
+The full-cleanup read preparation retains both frozen state archives and the
+packed archive. It executes their unmodified initial-read prefix, but reports
+combined Denote/generated execution as missing. Separate successful hash and
+supplied-key controls do not justify admitting the combined root. The proposed
+scratch/storage effect analysis and frame obligations in
+`PACKED_STORAGE_READ_DESIGN.md` are unimplemented and add no current proof coverage.
+
 The modern bounded-memory frontend now translates supported straight-line source
 operations directly to physical `mload`, `mstore`, and `keccak256`. A byte-wise
 unknown-bit analysis requires observed bytes to be independent of dirty narrow

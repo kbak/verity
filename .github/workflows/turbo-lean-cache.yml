@@ -171,13 +171,14 @@ jobs:
           PYTHONPATH=scripts python3 -m solidity_differential.check_bounded_memory --prepared --output .lake/bounded-memory/constructs
           PYTHONPATH=scripts python3 -m solidity_differential.check_storage_reference --prepared --output .lake/bounded-memory/storage-reference
 
-      - name: Verify three-route storage controls
+      - name: Verify storage controls and read-composition preparation
         timeout-minutes: 15
         run: |
           TURBO_LEAN_HOME="$RUNNER_TEMP/verity-input-build-cas" \
             .lake/turbo-input-builder/target/release/turbo-lean --json build \
             Compiler.SolidityImport.SequenceRunner --project-dir .
           PYTHONPATH=scripts python3 -m solidity_differential.check_storage_reference_routes --prepared --output .lake/bounded-memory/storage-routes
+          PYTHONPATH=scripts python3 -m solidity_differential.check_packed_storage_read --prepared --output .lake/bounded-memory/packed-storage-read
 
       - name: Archive bounded memory execution and rejection evidence
         if: always()
