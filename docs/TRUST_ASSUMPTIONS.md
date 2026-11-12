@@ -61,6 +61,13 @@ supplied-key controls do not justify admitting the combined root. The proposed
 scratch/storage effect analysis and frame obligations in
 `PACKED_STORAGE_READ_DESIGN.md` are unimplemented and add no current proof coverage.
 
+The tail-only caller probes compare controlled upper-bit perturbations against
+the unchanged packed hashes. They retain both complete state archives without
+executing their transactions in this stateless campaign. All current tail-only
+rejections remain mandatory; source sensitivity establishes no caller-liveness
+theorem, gas equivalence, storage sequence or source/compiler correspondence.
+Actual Denote/generated routes remain absent; see `TAIL_CLEANUP_LIVENESS.md`.
+
 The modern bounded-memory frontend now translates supported straight-line source
 operations directly to physical `mload`, `mstore`, and `keccak256`. A byte-wise
 unknown-bit analysis requires observed bytes to be independent of dirty narrow
