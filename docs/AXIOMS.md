@@ -662,6 +662,15 @@ finite child programs; it does not establish arbitrary token or receiver behavio
 Contract reimbursement is distinct from EVM refund-counter and transaction-fee
 accounting, which remain outside the frame model. No project axiom is added.
 
+
+Post-call memory loops use a recursive, storage-free/call-free admission predicate.
+`PostCallMemoryFrames` proves that the admitted statements preserve all Denote
+state except local bindings and memory, for arbitrary initial states. This is a
+model frame theorem; frontend correspondence, compiled execution and arbitrary
+external-program correspondence remain separate obligations. Differential and
+mutation checks cover finite callback/copy/execution/payment/rollback sequences.
+No axiom or gas-accounting assumption is added.
+
 The separate CI Turbo-Lean builder adds no project axiom or proof coverage.
 The established verifier/evaluator and narrow axiom allowlist remain unchanged.
 Declarative Solidity file inputs remain tracked by Lake and cache identity,
