@@ -171,6 +171,12 @@ jobs:
           PYTHONPATH=scripts python3 -m solidity_differential.check_bounded_memory --prepared --output .lake/bounded-memory/constructs
           PYTHONPATH=scripts python3 -m solidity_differential.check_storage_reference --prepared --output .lake/bounded-memory/storage-reference
 
+      - name: Verify three-route storage controls
+        timeout-minutes: 15
+        run: |
+          turbo-lean --json build Compiler.SolidityImport.SequenceRunner --project-dir .
+          PYTHONPATH=scripts python3 -m solidity_differential.check_storage_reference_routes --prepared --output .lake/bounded-memory/storage-routes
+
       - name: Archive bounded memory execution and rejection evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

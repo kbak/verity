@@ -28,6 +28,12 @@ are finite test evidence only. The CI preparation explicitly reports missing
 Denote/generated-EVM sequence routes and cannot satisfy the Stage 5 milestone
 gate. Existing packed expectations and hash premises remain unchanged.
 
+The explicit-key storage control now runs the actual imported Denote sequence
+and Verity-generated Cancun bytecode against those unchanged state expectations.
+Denote-only and generated-code-only event-deletion mutants establish finite
+instrument sensitivity. This adds no axiom or compiler-correctness theorem;
+packed-reference roots still require separate admission and execution evidence.
+
 `smoke.covered` and `smoke_step_credit` are ordinary theorems. The import
 path adds no project axiom, `sorry`, or `native_decide`. `covered` is
 `decide` on the whitelist. `smoke_step_credit` is `simp` plus `decide` on the

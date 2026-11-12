@@ -307,7 +307,66 @@ only that the source preparation and its mutation controls passed.
 
 Stage 5 remains open. After fork PRs #37 and #39 merge, remaining work is the
 partial-cleanup liveness argument, storage/mapping memory composition, connection
+of the packed-reference roots
 to real Denote/generated-EVM sequences, and validation of the pinned downstream
 helper/lookup wrapper. Required root admission alone is not semantic acceptance.
 No importer or proof implementation is changed by this preparation; no complete
 pool, fee-accounting, callback, gas or arbitrary-memory claim is made.
+
+
+## Stateful three-route storage control
+
+`StorageReferenceControl.sol` uses the same three-word record, struct-relative
+mapping, individual writes, logs and rollback operations, with an already
+supported helper accepting a `bytes32` key. Its always-reverting entrypoint is
+void, avoiding the compiler's return-path restriction without changing the
+expected revert bytes or state. No importer or compiler admission is changed.
+
+`check_storage_reference_routes.py` preserves the complete expectation archives
+from the preparation, including literal SHA-256 guards for both storage layouts
+and the packed archive. For this separate control it replaces only transaction
+calldata and argument words: the key comes from the existing independent hash
+expectation. Transaction IDs, call environments, initial storage, and every
+expected state/return/revert/log observation are unchanged. The original packed
+transactions remain in their frozen archive; converted control inputs are saved
+separately. This control does not execute packed-key computation.
+
+The original control, helper rename and shifted-layout variant each replay all
+29 transactions through:
+
+1. Solidity 0.8.26/Cancun source bytecode on a fresh owned node.
+2. The actual imported model through `SequenceRunner.execute`, using the ordinary
+   Denote oracle and existing transaction adapter. A test-only Turbo-Lean JSON
+   bridge embeds each real input payload and saves returned observations from
+   stdout, so evaluation caching cannot omit filesystem effects.
+3. Bytecode compiled from that same imported model by Verity for Cancun, then
+   assembled with the pinned solc and deployed on another fresh owned node.
+
+All three routes use one cumulative discovery/replay slot plan with independent
+sentinels and compare against the independent state oracle. Initial storage is
+installed explicitly; constructor, gas, balance/nonce and whole-world equivalence
+are outside this control. The model adapter also checks selector/calldata identity
+and flat/account storage coherence. Each model snapshot records every root,
+selector, parameter count, source/compiler/settings identity, imported and
+executed model, unavailable compiler-proof status, and actual generated Yul.
+Deployment/runtime checks and immutable implementation snapshots retain execution
+provenance; missing observations and tool failures cannot satisfy a mutation test.
+
+Two negative runs remove event statements from the executed model. One uses that
+model only for Denote; the other compiles it only for generated-EVM execution.
+Each must produce actual log mismatches in exactly its selected route, while the
+other two routes still satisfy every independent expectation. These mutations
+never edit importer code, source expectations or the baseline imported model.
+
+```bash
+PYTHONPATH=scripts python3 -m solidity_differential.check_storage_reference_routes \
+  --output .lake/storage-routes
+```
+
+`--prepared` reuses built importer, differential and sequence-runner interfaces.
+CI runs and archives this campaign alongside the earlier source preparation.
+The packed-reference fixture is probed separately and still reports its located
+rejections. `--require-packed-reference` exits 1 after the successful control
+campaign: #32 remains incomplete until its actual packed-reference sequences and
+pinned downstream wrapper pass. Infrastructure failures use exit 2. A passing
+control, or a later successful import alone, cannot open that milestone gate.

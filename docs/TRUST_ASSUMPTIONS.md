@@ -43,6 +43,17 @@ mutations establish finite test sensitivity; they do not prove storage-reference
 correspondence or justify relaxing the partial-cleanup guard. See the Stage 5
 preparation in `PACKED_MEMORY_HASH_REPRODUCER.md`.
 
+The explicit-key storage control connects that oracle to the actual imported
+model via `SequenceRunner.execute` and to Cancun bytecode compiled from that
+same model. Source, Denote and generated-EVM observations are independently
+checked, including cumulative cross-route slots, rollback and exact logs. Model
+snapshots retain their original import report and unavailable compiler-proof
+status; event-deletion mutants are labeled as modified models. Precomputed keys
+are supplied as control inputs, so these runs do not validate packed-key
+computation or admit the still-blocked packed-reference helper. Full initial and
+expected state archives remain unchanged. This is finite execution evidence, not
+constructor, gas, whole-world, importer or compiler correspondence.
+
 The modern bounded-memory frontend now translates supported straight-line source
 operations directly to physical `mload`, `mstore`, and `keccak256`. A byte-wise
 unknown-bit analysis requires observed bytes to be independent of dirty narrow
