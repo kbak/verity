@@ -218,6 +218,9 @@ partial def quoteStmt : Stmt → m Term
             throwError "internal: closed ECM metadata differs from its descriptor"
           `(Compiler.CompilationModel.Stmt.ecm Compiler.ECM.SolidityReturnMemory.module $quotedArgs)
       | none => throwError "internal: the importer cannot quote an opaque ECM"
+  | .returndataCopy dest source size => do
+      `(Compiler.CompilationModel.Stmt.returndataCopy
+        $(← quoteExpr dest) $(← quoteExpr source) $(← quoteExpr size))
   | .mstore offset value => do
       `(Compiler.CompilationModel.Stmt.mstore $(← quoteExpr offset) $(← quoteExpr value))
   | .tstore offset value => do

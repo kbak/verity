@@ -211,6 +211,8 @@ def closedTransportCovered (mod : Compiler.ECM.ExternalCallModule) (args : List 
 meaning and its original world-preservation theorems. -/
 mutual
   def executableStmtCovered : Stmt → Bool
+    | .returndataCopy dest source size =>
+        exprCovered dest && exprCovered source && exprCovered size
     | .mstore offset value => exprCovered offset && exprCovered value
     | .tstore offset value => exprCovered offset && exprCovered value
     | .panicCode code => exprCovered code
@@ -369,6 +371,23 @@ theorem evalExpr_signextend_arm (oracle : DenoteOracle) (fields : List Field)
 theorem evalExpr_msgValue_arm (oracle : DenoteOracle) (fields : List Field)
     (state : DenoteState) :
     evalExpr oracle fields state .msgValue = some state.world.msgValue.val := rfl
+
+/-- Bounded copies from a raw call overwrite only the requested physical bytes.
+Out-of-bounds copies and unsupported operands fail rather than padding. -/
+theorem exec_stmt_returndata_copy_raw_arm (oracle : DenoteOracle) (fields : List Field)
+    (state : DenoteState) (dest source size : Expr) (bytes : List UInt8)
+    (hraw : state.rawReturndata = some bytes) :
+    execStmt oracle fields state (.returndataCopy dest source size) =
+      (match evalExpr oracle fields state dest, evalExpr oracle fields state source,
+          evalExpr oracle fields state size with
+       | some dst, some src, some count =>
+           if src + count ≤ bytes.length then
+             .continue { state with
+               world := state.world.copyPhysicalMemory (rawPhysicalByte bytes) dst src count }
+           else .revert
+       | _, _, _ => .revert) := by
+  simp only [execStmt, hraw]
+  rfl
 
 theorem execStmt_mstore_arm (oracle : DenoteOracle) (fields : List Field)
     (state : DenoteState) (offset value : Expr) :
