@@ -218,3 +218,28 @@ whose hashes differ from the unchanged independent expectations.
 
 Stage 4 enables the bounded memory fragment and must pass this admission gate.
 The later storage-reference campaign remains a separate Stage 5 obligation.
+
+
+## Bounded source lowering (Stage 4)
+
+`BoundedMemory` lowers the source-selected writes and hash slice without a padded
+replacement. `MemoryBounds` checks the resulting address bindings against the
+root's successful guards and allocator writes. Narrow scalar unknown bits are
+tracked per byte, with stable pointer snapshot identities; observed bytes must
+be clean and the block must overwrite all remaining dirty bytes before exit.
+The original fixture, renamed helper, vectors, literal anchors, scratch shifts,
+and source mutations are unchanged. The admission gate is now required in the
+Turbo-Lean workflow alongside the independent construct controls.
+
+Raw observations of synthetic ABI allocation are outside this slice. In
+particular, the padded inspector remains a located rejection: scalar ABI hash
+lowering omits the Solidity bytes length header, so its memory layout and
+allocator delta are not interchangeable with the source's. The padded digest
+still supplies a complete three-route mutation control.
+
+The combined storage fixture also remains a located rejection. Its helper clears
+only the tail word, leaving dirty upper bytes before the selected hash slice.
+Admitting that body requires a later liveness/frame argument across the caller,
+not a weaker hash expectation or a helper-name exception. Storage lookup and
+state preservation remain Stage 5 work. The current analyses are trusted frontend
+checks; existing memory proofs and hash assumptions retain their original scope.

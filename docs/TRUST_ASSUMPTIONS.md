@@ -32,13 +32,23 @@ These theorems do not establish coherence for arbitrary external states, admit
 new importer constructs, prove the Keccak implementation faithful to the EVM, or
 discharge `keccak256_memory_slice_matches_evm`.
 
-The name-selected packed-hash replacement has been removed. Reached helper bodies
-use ordinary translation, which rejects the unsupported overlapping memory writes
-with a source location. The existing packed-byte/hash expectations remain unchanged;
-no packed-memory support or source-equivalence theorem is added by this correction.
-The inline-assembly registry now has 17 entries. Its flag/count theorems establish
-metadata consistency only, not source-to-model correctness. See
-`PACKED_MEMORY_HASH_REPRODUCER.md` for the remaining admission and execution gates.
+The name-selected packed-hash replacement remains removed; the inline-assembly
+registry has 17 entries. Its metadata theorems do not establish source equivalence.
+The modern bounded-memory frontend now translates supported straight-line source
+operations directly to physical `mload`, `mstore`, and `keccak256`. A byte-wise
+unknown-bit analysis requires observed bytes to be independent of dirty narrow
+scalar bits and requires all remaining dirty bytes to be overwritten before leaving
+assembly. A separate root audit bounds nonwrapping addresses using scalar bindings,
+successful guards, and preceding free-pointer writes. Unsupported aliases, effects,
+control flow, bounds, or interactions with synthetic ABI allocation layouts remain
+source-located rejections. Narrow references through older assembly paths are
+also rejected in roots using this fragment. Legacy validators are
+unchanged. Both analyses are trusted frontend checks, not kernel-certified abstract
+interpretations or source/importer correspondence theorems. Existing byte/hash
+expectations and cryptographic premises are unchanged. The three-route Cancun
+campaign supplies finite execution evidence; it does not prove arbitrary Solidity
+assembly, storage frames, gas/resource adequacy, or deployed-bytecode equivalence.
+See `PACKED_MEMORY_HASH_REPRODUCER.md` and `SOLIDITY_IMPORT.md` for executable gates.
 
 `Compiler/SolidityImport/Import.lean` selects functions from a solc project,
 closes over the definitions solc's declaration ids actually reach, and elaborates

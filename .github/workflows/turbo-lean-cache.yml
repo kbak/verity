@@ -9,6 +9,9 @@ on:
       - 'Verity.lean'
       - 'Compiler/**'
       - 'Compiler.lean'
+      - 'scripts/solidity_differential/**'
+      - 'scripts/keccak256.py'
+      - 'scripts/setup_solc_import.py'
       - 'Contracts/**'
       - 'Contracts.lean'
       - 'lakefile.lean'
@@ -22,6 +25,9 @@ on:
       - 'Verity.lean'
       - 'Compiler/**'
       - 'Compiler.lean'
+      - 'scripts/solidity_differential/**'
+      - 'scripts/keccak256.py'
+      - 'scripts/setup_solc_import.py'
       - 'Contracts/**'
       - 'Contracts.lean'
       - 'lakefile.lean'
@@ -116,3 +122,25 @@ jobs:
           turbo-lean --json check Verity/Proofs/Stdlib --project-dir .
           turbo-lean --json pr-verify --base "$BASE_REF" --project-dir . --receipt /tmp/verity-ci-receipt.json
           turbo-lean --json verify-receipt /tmp/verity-ci-receipt.json
+
+      - name: Install Foundry for bounded memory regressions
+        uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1
+        with:
+          version: v1.5.0
+
+      - name: Verify bounded memory against independent Cancun expectations
+        timeout-minutes: 20
+        run: |
+          python3 scripts/setup_solc_import.py --version 0.8.26 --output .lake/solidity-import/solc-0.8.26
+          turbo-lean --json build Compiler.SolidityImport.Import Compiler.SolidityImport.Differential --project-dir .
+          PYTHONPATH=scripts python3 -m solidity_differential.check_packed_memory_hash_routes --prepared --require-admission --output .lake/bounded-memory/packed
+          PYTHONPATH=scripts python3 -m solidity_differential.check_bounded_memory --prepared --output .lake/bounded-memory/constructs
+
+      - name: Archive bounded memory execution and rejection evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: bounded-memory-regressions
+          path: .lake/bounded-memory/**
+          include-hidden-files: true
+          retention-days: 14

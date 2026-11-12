@@ -14,10 +14,13 @@ See the corresponding scope in `TRUST_ASSUMPTIONS.md`.
 
 Removing the name-selected packed-hash replacement adds no axiom or proof shortcut.
 The inline-assembly registry's exact count changes from 18 to 17 with the removed
-entry; its metadata theorems do not prove source-body equivalence. Unsupported
-packed-memory bodies are rejected. The independent byte/hash expectations and
-existing hash premises are unchanged; see `TRUST_ASSUMPTIONS.md` and
-`PACKED_MEMORY_HASH_REPRODUCER.md`.
+entry; its metadata theorems do not prove source-body equivalence. The subsequent
+bounded-memory lowering adds no theorem or axiom: its byte-wise dirty-bit and root
+address audits are trusted frontend checks, with located rejection outside their
+supported fragment. Existing memory lemmas retain their explicit hypotheses;
+finite three-route tests do not discharge source/compiler correspondence or the
+existing hash premises. Independent byte/hash expectations remain unchanged; see
+`TRUST_ASSUMPTIONS.md` and `PACKED_MEMORY_HASH_REPRODUCER.md`.
 
 `smoke.covered` and `smoke_step_credit` are ordinary theorems. The import
 path adds no project axiom, `sorry`, or `native_decide`. `covered` is
