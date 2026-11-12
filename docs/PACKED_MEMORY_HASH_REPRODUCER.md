@@ -243,3 +243,71 @@ Admitting that body requires a later liveness/frame argument across the caller,
 not a weaker hash expectation or a helper-name exception. Storage lookup and
 state preservation remain Stage 5 work. The current analyses are trusted frontend
 checks; existing memory proofs and hash assumptions retain their original scope.
+
+## Storage-reference regression preparation (Stage 5)
+
+`PackedStorageReference.sol` is a generic mapping/storage-reference fixture. Its
+record contains one `uint128` followed by two `uint256` fields. An internal helper
+returns a storage reference selected by the packed key. The original helper
+retains tail-only memory cleanup; the preparation does not relax its rejection.
+
+The independent specification in `storage_reference_oracle.py` defines the
+mapping base as slot 2: the enclosing struct starts at slot 1 and the mapping is
+its second member. The shifted-layout control adds one preceding slot, giving
+base 3. Neither expectation is read from solc's storage layout or an imported
+model. Physical addresses are computed as
+`keccak256(word32(key) ++ word32(mappingBase))`; literal anchors for the concrete
+packed key were cross-checked with the separately installed Ethereum Keccak
+implementation. The existing 54 packed byte/hash expectations are reused without
+changes. Six selected keys cover concrete, signed/unsigned boundary, salt and
+seeded inputs in the state sequence; this does not replace the full packed
+campaign or its seven scratch shifts.
+
+The 29-transaction sequence covers:
+
+- Reads and individual writes through the returned reference, including zero and
+  maximum-width values, repeated updates and interleaved keys.
+- Nonzero initial record fields and high `uint128` padding, other keys, outer and
+  struct sentinels, and adjacent physical words on both sides of each record.
+- Three write-then-revert calls, including an absent record, with exact custom
+  error bytes, unchanged persistent state and no surviving logs.
+- Exact return bytes and event topics/data after each successful transaction.
+
+Every route starts from the same explicit physical storage snapshot. Constructor
+correspondence is outside this experiment. Discovery is followed by replay with
+the cumulative union of every supplied route's touched slots, including reverted
+accesses, plus independently selected observation slots. Every resulting state
+is compared against the independent specification. Extra observed slots are
+expected to retain their initial zero value; missing observations, missing
+routes, nondeterminism, compiler failures and resource failures are instrument
+errors, never successful mutation detection.
+
+Run the preparation after installing the pinned compiler and building the importer:
+
+```bash
+PYTHONPATH=scripts python3 -m solidity_differential.check_storage_reference \
+  --output .lake/storage-reference
+```
+
+`--prepared` reuses built importer interfaces. Four positive source variants
+(original, helper rename, shifted layout and full cleanup) must satisfy the
+specification. Five separately compiled source mutants must fail unchanged
+expectations: wrong mapping base, wrong field, clobbered padding, dropped revert
+and dropped event. The cleanup variant isolates later storage-composition gaps;
+it is not a replacement for the actual partial-cleanup path.
+
+The campaign archives source/compiler/runtime/node identities, complete initial
+and per-step expected state, actual transactions/receipts/traces, discovery and
+replay plans, mutation mismatches and located importer diagnostics. CI runs this
+source-only preparation and archives it beside the packed memory evidence.
+Add `--require-three-routes` for a closed milestone gate: exit 1 while actual
+Denote/generated-EVM sequence adapters are absent, even if source execution and
+all imports succeed. Infrastructure failures use exit 2. Default exit 0 means
+only that the source preparation and its mutation controls passed.
+
+Stage 5 remains open. After fork PRs #37 and #39 merge, remaining work is the
+partial-cleanup liveness argument, storage/mapping memory composition, connection
+to real Denote/generated-EVM sequences, and validation of the pinned downstream
+helper/lookup wrapper. Required root admission alone is not semantic acceptance.
+No importer or proof implementation is changed by this preparation; no complete
+pool, fee-accounting, callback, gas or arbitrary-memory claim is made.

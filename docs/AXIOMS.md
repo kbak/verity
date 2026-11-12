@@ -22,6 +22,12 @@ finite three-route tests do not discharge source/compiler correspondence or the
 existing hash premises. Independent byte/hash expectations remain unchanged; see
 `TRUST_ASSUMPTIONS.md` and `PACKED_MEMORY_HASH_REPRODUCER.md`.
 
+Storage-reference regression preparation adds no theorem, axiom or importer
+admission. Its independent slot/state oracle and source-EVM mutation campaign
+are finite test evidence only. The CI preparation explicitly reports missing
+Denote/generated-EVM sequence routes and cannot satisfy the Stage 5 milestone
+gate. Existing packed expectations and hash premises remain unchanged.
+
 `smoke.covered` and `smoke_step_credit` are ordinary theorems. The import
 path adds no project axiom, `sorry`, or `native_decide`. `covered` is
 `decide` on the whitelist. `smoke_step_credit` is `simp` plus `decide` on the

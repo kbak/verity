@@ -34,6 +34,15 @@ discharge `keccak256_memory_slice_matches_evm`.
 
 The name-selected packed-hash replacement remains removed; the inline-assembly
 registry has 17 entries. Its metadata theorems do not establish source equivalence.
+Storage-reference regression preparation uses independent mapping-slot and
+per-transaction state expectations, explicit initial storage, and source EVM
+execution with cumulative discovery/replay observations. The CI campaign adds
+no importer admission or proof coverage: actual Denote/generated-EVM sequence
+execution and the pinned downstream lookup wrapper remain pending. Source
+mutations establish finite test sensitivity; they do not prove storage-reference
+correspondence or justify relaxing the partial-cleanup guard. See the Stage 5
+preparation in `PACKED_MEMORY_HASH_REPRODUCER.md`.
+
 The modern bounded-memory frontend now translates supported straight-line source
 operations directly to physical `mload`, `mstore`, and `keccak256`. A byte-wise
 unknown-bit analysis requires observed bytes to be independent of dirty narrow

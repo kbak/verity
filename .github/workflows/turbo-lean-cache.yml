@@ -169,6 +169,7 @@ jobs:
             Compiler.SolidityImport.Import Compiler.SolidityImport.Differential --project-dir .
           PYTHONPATH=scripts python3 -m solidity_differential.check_packed_memory_hash_routes --prepared --require-admission --output .lake/bounded-memory/packed
           PYTHONPATH=scripts python3 -m solidity_differential.check_bounded_memory --prepared --output .lake/bounded-memory/constructs
+          PYTHONPATH=scripts python3 -m solidity_differential.check_storage_reference --prepared --output .lake/bounded-memory/storage-reference
 
       - name: Archive bounded memory execution and rejection evidence
         if: always()
