@@ -38,9 +38,11 @@ MUTANTS = {
             '        let converted := if pty.startsWith "enum " then\n'
             '          { converted with expr := .add converted.expr (.literal 1) }\n'
             '          else converted\n        if (bodyCompoundAssignedIds')),
+    # Add the incorrect check at the first helper boundary. Nested event argument
+    # helpers must stay total so this mutant reaches execution instead of rejection.
     'helper-scalar-enum-check': ('Compiler/SolidityImport/Import.lean', HELPER_SCALAR_BINDING,
         HELPER_SCALAR_BINDING.replace('        if (bodyCompoundAssignedIds',
-            '        let converted ← if pty.startsWith "enum " then\n'
+            '        let converted ← if pty.startsWith "enum " && caller.stack.length == 2 then\n'
             '          LegacyMemory.checkedEnum argNode pty converted else pure converted\n'
             '        if (bodyCompoundAssignedIds')),
     'postincrement-new-value': ('Compiler/SolidityImport/Import.lean', POSTINCREMENT_STORAGE,
