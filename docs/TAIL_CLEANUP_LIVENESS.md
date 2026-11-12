@@ -96,6 +96,39 @@ where their hypotheses hold. They do not prove this relational caller contract,
 source/importer equivalence, or permission to admit arbitrary scratch reads.
 Keep all production logic construct-generic and independent of fixture names.
 
+## Proof-only caller observations
+
+`Verity/Core/Model/MemoryObservation.lean` proves a two-run overwrite law using
+pointwise physical-byte equality, compatible with the existing `OwnedEq` memory
+frames. For a common list of word writes, a queried byte needs initial agreement
+only if every write misses it. The exact slice and coherent word-read lemmas lift
+that law to arbitrary, including unaligned, observation windows.
+
+The residual-set form assumes the initial memories agree outside an explicit
+set of byte addresses. Every residual byte within the later read range must be
+covered by a write. It does not require cleanup of bytes that remain unobserved.
+The set is a conservative byte-level parameter, not an implemented dirty-bit
+analysis. Equal byte observations do not require equal allocated memory sizes.
+
+`Compiler/Proofs/IRGeneration/CallerMemoryComposition.lean` transports the byte
+agreement through the existing proof-IR slice reader and concrete memory hash.
+Both coherent word views and the reader's rounded, nonwrapping address bound
+are explicit hypotheses. Equal hash inputs give equal outputs without a new
+hash axiom or a change to the existing hash faithfulness/collision premises.
+
+These theorems require the same **evaluated addresses and values, in the same
+order**, in both executions, followed by the observation. Syntactically identical
+caller code does not establish that premise. They do not erase a previously
+captured scalar, infer an alias, prove a caller's residual set, compare memory
+sizes/gas, or establish equality of other world fields. Existing non-memory and
+allocator frames remain separate obligations. Core addresses are natural numbers;
+consumers connecting writes to modular EVM addresses must establish their bounds.
+
+This supplies proof ingredients for the earlier design. A complete caller effect
+analysis, ABI-return/allocator reasoning and source/importer correspondence are
+still pending. No importer rule, fixture, independent expectation or current
+rejection changes; the full-cleanup admission slice still comes first after #39.
+
 ## Subsequent implementation acceptance
 
 After #39 and the preceding full-cleanup slice merge, first prove the minimal
