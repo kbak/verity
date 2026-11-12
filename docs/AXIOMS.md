@@ -633,3 +633,10 @@ explicit assumed evidence boundary. The original EVM/trace meter and frontend
 are trusted, generated-code gas equivalence is unavailable, and unsupported
 transports fail closed in the source runner. `TRUST_ASSUMPTIONS.md` records the
 same boundary; no new global axiom or proof shortcut is introduced.
+
+
+The separate CI Turbo-Lean builder adds no project axiom or proof coverage.
+The established verifier/evaluator and narrow axiom allowlist remain unchanged.
+Declarative Solidity file inputs remain tracked by Lake and cache identity,
+with unsupported dynamic configuration rejected. The operational boundary is
+recorded in [TRUST_ASSUMPTIONS.md](TRUST_ASSUMPTIONS.md).

@@ -393,6 +393,20 @@ The fork does not provision the upstream
 OCR model service: OCR is explicitly skipped and supplies no semantic-review
 evidence. See [fork CI operations](FORK_CI.md) for rollout and limitations.
 
+CI retains its established Turbo-Lean proof-verifier pin and narrow axiom
+allowlist. A separately pinned builder supports declarative Lake `input_dir` /
+`input_file` inputs and Lean 4.31 artifacts. Solidity inputs remain connected
+through `needs` and participate in build-cache identity; unsupported dynamic
+Lake configuration still fails closed. The builder uses a separate CAS after all existing verification commands
+have completed. Proof checks and regression evaluation retain the established
+verifier/evaluator and its cache.
+This changes operational build tooling, not proof assumptions or coverage.
+Local proof workflows retain their documented tool pin.
+The two C source repositories already declared by EVMYulLean are checked out
+at immutable revisions before offline recipe materialization; their existing
+FFI trust boundary is unchanged. This setup does not authorize network access
+inside the offline build gate.
+
 ## Compilation Pipeline
 
 ```
