@@ -37,7 +37,7 @@ CASES = {
     'unresolved-immutables': ('',
         'address immutable first; address immutable second; '
         'constructor(address a,address b) { first=a; second=b; } ' +
-        BODY.replace('target.staticcall(', 'first.staticcall('), 'without unresolved immutables'),
+        BODY.replace('target.staticcall(', 'first.staticcall('), 'requires a checked deployed binding'),
     'gas-option': ('', BODY.replace('target.staticcall(', 'target.staticcall{gas:100000}('),
                    'raw static call options'),
     'missing-bool': ('', BODY.replace('(bool ok,bytes memory data)', '(,bytes memory data)').replace(

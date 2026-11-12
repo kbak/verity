@@ -25,11 +25,6 @@ def lower (node : Json) (leaf : Json → M Val) (bytes : Json → M EncodedBytes
   unless (← get).legacyWrapping do failAt node "raw static tuples require Solidity 0.7.6"
   if (← get).legacyAbiV2Files.contains (← get).currentFile then
     failAt node "raw static tuples require ABI coder v1"
-  -- The general frontend has a caller-address shortcut for some immutables.
-  -- Raw calls must not inherit that substitution for an unknown deployed target.
-  if (← get).stateVars.toList.any (fun (_, decl) =>
-      optStr decl "mutability" == some "immutable") then
-    failAt node "raw static calls require a contract without unresolved immutables"
   let init ← mField node "initialValue"
   let member ← mField init "expression"
   unless optStr member "nodeType" == some "MemberAccess" do

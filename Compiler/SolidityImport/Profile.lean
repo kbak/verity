@@ -26,6 +26,9 @@ structure Profile where
   bytecodeHash : String
   /-- Verify gas against original bytecode evidence. Gas reads cannot be recompiled. -/
   sourceGas : Bool := false
+  /-- Deployment evidence JSON, relative to the Solidity project root. The immutable
+      words are checked against freshly compiled runtime references and code bytes. -/
+  deployedImmutables : Option String := none
   deriving Repr, BEq, Inhabited
 
 end Compiler.CompilationModel.SolidityImport

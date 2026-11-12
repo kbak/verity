@@ -72,6 +72,8 @@ structure ImportReport where
   solcSha256 : String
   settingsJson : String
   sourceDigest : String
+  /-- Checked deployment identity and typed words; submitted chain identity remains trusted. -/
+  deploymentSummary : Option String := none
   contract : String
   /-- The imported functions, in `solidity_import` order. -/
   roots : List String
@@ -94,6 +96,8 @@ def ImportReport.toText (r : ImportReport) : String := Id.run do
   let mut lines := [s!"importer {r.importerVersion}", s!"solc {r.solcLongVersion}",
     s!"solcSha256 {r.solcSha256}", s!"digest {r.sourceDigest}",
     s!"contract {r.contract}"] ++ r.roots.map (s!"root {·}") ++ [s!"settings {r.settingsJson}"]
+  if let some deployment := r.deploymentSummary then
+    lines := lines ++ [s!"deployment {deployment}"]
   for st in r.functions do
     lines := lines ++ [s!"status {st.function} importable denoteCovered {st.denoteCovered} compilerProof {st.compilerProof.toText}"]
   for fn in r.includedFunctions do
