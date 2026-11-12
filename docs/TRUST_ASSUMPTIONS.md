@@ -2690,3 +2690,15 @@ local snapshots may be stale. Consumers must establish callee correspondence and
 truthful query semantics: staticness alone does not imply an honest balance.
 The finite payer/ledger differential and mutation campaign assumes adequate gas;
 original-bytecode gas evidence and generated gas limitations are unchanged.
+
+
+Assignment expressions beside protected local reads add no project axiom or ECM
+summary. The new admission path uses the existing `prefixList` checker with the
+sibling binding protected in every branch. `local_assignment_sibling_frame`
+derives world and sibling-value preservation on successful continuation from its
+existing frame theorem. This justifies that local read's independence within the
+model; AST lowering, declaration-to-binding correspondence and compiled bytecode
+remain trusted and validated by finite differential tests. Conflicting bindings,
+sibling preludes and unmodeled prefix effects stay rejected. Existing atom and
+short-circuit rules are unchanged. Solidity 0.7.6 wrapping and explicit overflow
+reverts retain their source semantics; no gas-equivalence assumption is added.
