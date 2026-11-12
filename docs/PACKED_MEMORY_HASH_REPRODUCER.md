@@ -218,3 +218,161 @@ whose hashes differ from the unchanged independent expectations.
 
 Stage 4 enables the bounded memory fragment and must pass this admission gate.
 The later storage-reference campaign remains a separate Stage 5 obligation.
+
+
+## Bounded source lowering (Stage 4)
+
+`BoundedMemory` lowers the source-selected writes and hash slice without a padded
+replacement. `MemoryBounds` checks the resulting address bindings against the
+root's successful guards and allocator writes. Narrow scalar unknown bits are
+tracked per byte, with stable pointer snapshot identities; observed bytes must
+be clean and the block must overwrite all remaining dirty bytes before exit.
+The original fixture, renamed helper, vectors, literal anchors, scratch shifts,
+and source mutations are unchanged. The admission gate is now required in the
+Turbo-Lean workflow alongside the independent construct controls.
+
+Raw observations of synthetic ABI allocation are outside this slice. In
+particular, the padded inspector remains a located rejection: scalar ABI hash
+lowering omits the Solidity bytes length header, so its memory layout and
+allocator delta are not interchangeable with the source's. The padded digest
+still supplies a complete three-route mutation control.
+
+The combined storage fixture also remains a located rejection. Its helper clears
+only the tail word, leaving dirty upper bytes before the selected hash slice.
+Admitting that body requires a later liveness/frame argument across the caller,
+not a weaker hash expectation or a helper-name exception. Storage lookup and
+state preservation remain Stage 5 work. The current analyses are trusted frontend
+checks; existing memory proofs and hash assumptions retain their original scope.
+
+## Storage-reference regression preparation (Stage 5)
+
+`PackedStorageReference.sol` is a generic mapping/storage-reference fixture. Its
+record contains one `uint128` followed by two `uint256` fields. An internal helper
+returns a storage reference selected by the packed key. The original helper
+retains tail-only memory cleanup; the preparation does not relax its rejection.
+
+The independent specification in `storage_reference_oracle.py` defines the
+mapping base as slot 2: the enclosing struct starts at slot 1 and the mapping is
+its second member. The shifted-layout control adds one preceding slot, giving
+base 3. Neither expectation is read from solc's storage layout or an imported
+model. Physical addresses are computed as
+`keccak256(word32(key) ++ word32(mappingBase))`; literal anchors for the concrete
+packed key were cross-checked with the separately installed Ethereum Keccak
+implementation. The existing 54 packed byte/hash expectations are reused without
+changes. Six selected keys cover concrete, signed/unsigned boundary, salt and
+seeded inputs in the state sequence; this does not replace the full packed
+campaign or its seven scratch shifts.
+
+The 29-transaction sequence covers:
+
+- Reads and individual writes through the returned reference, including zero and
+  maximum-width values, repeated updates and interleaved keys.
+- Nonzero initial record fields and high `uint128` padding, other keys, outer and
+  struct sentinels, and adjacent physical words on both sides of each record.
+- Three write-then-revert calls, including an absent record, with exact custom
+  error bytes, unchanged persistent state and no surviving logs.
+- Exact return bytes and event topics/data after each successful transaction.
+
+Every route starts from the same explicit physical storage snapshot. Constructor
+correspondence is outside this experiment. Discovery is followed by replay with
+the cumulative union of every supplied route's touched slots, including reverted
+accesses, plus independently selected observation slots. Every resulting state
+is compared against the independent specification. Extra observed slots are
+expected to retain their initial zero value; missing observations, missing
+routes, nondeterminism, compiler failures and resource failures are instrument
+errors, never successful mutation detection.
+
+Run the preparation after installing the pinned compiler and building the importer:
+
+```bash
+PYTHONPATH=scripts python3 -m solidity_differential.check_storage_reference \
+  --output .lake/storage-reference
+```
+
+`--prepared` reuses built importer interfaces. Four positive source variants
+(original, helper rename, shifted layout and full cleanup) must satisfy the
+specification. Five separately compiled source mutants must fail unchanged
+expectations: wrong mapping base, wrong field, clobbered padding, dropped revert
+and dropped event. The cleanup variant isolates later storage-composition gaps;
+it is not a replacement for the actual partial-cleanup path.
+
+The campaign archives source/compiler/runtime/node identities, complete initial
+and per-step expected state, actual transactions/receipts/traces, discovery and
+replay plans, mutation mismatches and located importer diagnostics. CI runs this
+source-only preparation and archives it beside the packed memory evidence.
+Add `--require-three-routes` for a closed milestone gate: exit 1 while actual
+Denote/generated-EVM sequence adapters are absent, even if source execution and
+all imports succeed. Infrastructure failures use exit 2. Default exit 0 means
+only that the source preparation and its mutation controls passed.
+
+Stage 5 remains open. After fork PRs #37 and #39 merge, remaining work is the
+partial-cleanup liveness argument, storage/mapping memory composition, connection
+of the packed-reference roots
+to real Denote/generated-EVM sequences, and validation of the pinned downstream
+helper/lookup wrapper. Required root admission alone is not semantic acceptance.
+No importer or proof implementation is changed by this preparation; no complete
+pool, fee-accounting, callback, gas or arbitrary-memory claim is made.
+
+
+## Stateful three-route storage control
+
+`StorageReferenceControl.sol` uses the same three-word record, struct-relative
+mapping, individual writes, logs and rollback operations, with an already
+supported helper accepting a `bytes32` key. Its always-reverting entrypoint is
+void, avoiding the compiler's return-path restriction without changing the
+expected revert bytes or state. No importer or compiler admission is changed.
+
+`check_storage_reference_routes.py` preserves the complete expectation archives
+from the preparation, including literal SHA-256 guards for both storage layouts
+and the packed archive. For this separate control it replaces only transaction
+calldata and argument words: the key comes from the existing independent hash
+expectation. Transaction IDs, call environments, initial storage, and every
+expected state/return/revert/log observation are unchanged. The original packed
+transactions remain in their frozen archive; converted control inputs are saved
+separately. This control does not execute packed-key computation.
+
+The original control, helper rename and shifted-layout variant each replay all
+29 transactions through:
+
+1. Solidity 0.8.26/Cancun source bytecode on a fresh owned node.
+2. The actual imported model through `SequenceRunner.execute`, using the ordinary
+   Denote oracle and existing transaction adapter. A test-only Turbo-Lean JSON
+   bridge embeds each real input payload and saves returned observations from
+   stdout, so evaluation caching cannot omit filesystem effects.
+3. Bytecode compiled from that same imported model by Verity for Cancun, then
+   assembled with the pinned solc and deployed on another fresh owned node.
+
+All three routes use one cumulative discovery/replay slot plan with independent
+sentinels and compare against the independent state oracle. Initial storage is
+installed explicitly; constructor, gas, balance/nonce and whole-world equivalence
+are outside this control. The model adapter also checks selector/calldata identity
+and flat/account storage coherence. Each model snapshot records every root,
+selector, parameter count, source/compiler/settings identity, imported and
+executed model, unavailable compiler-proof status, and actual generated Yul.
+Deployment/runtime checks and immutable implementation snapshots retain execution
+provenance; missing observations and tool failures cannot satisfy a mutation test.
+
+Two negative runs remove event statements from the executed model. One uses that
+model only for Denote; the other compiles it only for generated-EVM execution.
+Each must produce actual log mismatches in exactly its selected route, while the
+other two routes still satisfy every independent expectation. These mutations
+never edit importer code, source expectations or the baseline imported model.
+
+```bash
+PYTHONPATH=scripts python3 -m solidity_differential.check_storage_reference_routes \
+  --output .lake/storage-routes
+```
+
+`--prepared` reuses built importer, differential and sequence-runner interfaces.
+CI runs and archives this campaign alongside the earlier source preparation.
+The packed-reference fixture is probed separately and still reports its located
+rejections. `--require-packed-reference` exits 1 after the successful control
+campaign: #32 remains incomplete until its actual packed-reference sequences and
+pinned downstream wrapper pass. Infrastructure failures use exit 2. A passing
+control, or a later successful import alone, cannot open that milestone gate.
+
+
+The next [full-cleanup storage-read preparation](PACKED_STORAGE_READ_DESIGN.md)
+isolates the combined read rejection from supported hash and supplied-key
+controls. It preserves the existing expectation archives and changes no importer
+admission. Its proposed scratch-memory/storage composition remains gated on #39.

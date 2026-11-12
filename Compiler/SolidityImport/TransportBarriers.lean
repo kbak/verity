@@ -242,8 +242,8 @@ def ecmRequiresFreePointerInit (mod : Compiler.ECM.ExternalCallModule) : Bool :=
 
 mutual
 
-/-- True when a statement or any nested branch/loop body invokes a byte-transport
-external call module (`mod.byteTransport.isSome`). -/
+/-- Scalar statements detect allocator reads structurally. Nested bodies recurse,
+while ECM modules retain their existing closed byte-transport requirement. -/
 def stmtRequiresFreePointerInit : Stmt → Bool
   | .ecm mod _ => ecmRequiresFreePointerInit mod
   | .ite _ yes no =>
@@ -253,9 +253,10 @@ def stmtRequiresFreePointerInit : Stmt → Bool
   | .unsafeBlock _ body => stmtListRequiresFreePointerInit body
   | .matchAdt _ _ branches =>
       stmtBranchesRequireFreePointerInit branches
-  | _ => false
+  | s => s.directMetadata.subexpressions.any fun expr =>
+      expr.foldBool (fun e => match e with | .mload (.literal 64) => true | _ => false)
 
-/-- True when any statement in `stmts` invokes a byte-transport external call module. -/
+/-- True when any statement reads allocator metadata or invokes a byte transport. -/
 def stmtListRequiresFreePointerInit : List Stmt → Bool
   | [] => false
   | s :: rest => stmtRequiresFreePointerInit s || stmtListRequiresFreePointerInit rest
