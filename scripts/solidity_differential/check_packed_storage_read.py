@@ -1,4 +1,4 @@
-"""Prepare full-cleanup packed-hash/storage-read composition without changing admission."""
+"""Require full-cleanup packed-hash/storage reads on three actual execution routes."""
 import argparse
 import copy
 import json
@@ -55,6 +55,13 @@ def source_variants(source):
         'renamed': source.replace('packedKey', 'deriveKey').replace('locate', 'findRecord'),
         'shifted-layout': source.replace('uint256 private outerBefore;',
                                        'uint256 private extra; uint256 private outerBefore;'),
+        'caller-buffer-read': source.replace(
+            'Record storage row = locate(account, left, right, salt);',
+            'Record storage row = locate(account, left, right, salt);\n'
+            '        uint256 observed; assembly ("memory-safe") {\n'
+            '            let p := mload(0x40)\n'
+            '            observed := or(mload(p), or(mload(add(p, 32)), mload(add(p, 64))))\n'
+            '        } require(observed == 0);'),
         'wrong-mapping-base': source.replace('uint256 private outerBefore;',
                                             'uint256[2] private outerBefore;'),
         'short-hash': source.replace('keccak256(add(base, 12), 58)',
@@ -89,6 +96,28 @@ def rejected_sources(source):
     observed = observed.replace('return (row.count, row.accumulator, row.checkpoint);\n    }\n}',
         'return (row.count, row.accumulator, scratch);\n    }\n}')
     yield 'scratch-after-read', observed, READ, 'unsupported Yul builtin mload'
+    caller = 'Record storage row = locate(account, left, right, salt);'
+    for name, statements, reason in (
+        ('storage-write', 'row.accumulator = 1;',
+         'bounded memory requires a straight-line scalar root with successful guards'),
+        ('storage-pointer', 'uint256 pointer = row.accumulator; '
+         'assembly { mstore(pointer, 0) }',
+         'bounded memory requires nonwrapping addresses in [128, 2^32), or word 0x40'),
+        ('storage-free-pointer', 'uint256 pointer = row.accumulator; '
+         'assembly { mstore(0x40, pointer) }',
+         'bounded memory requires a bounded free pointer'),
+        ('unregistered-scratch', 'bytes32 scratch; assembly { '
+         'mstore(0, salt) mstore(32, salt) let _verity_slice_tmp_0 := keccak256(0, 64) '
+         'scratch := _verity_slice_tmp_0 }',
+         COMPOSITION_REJECTION),
+    ):
+        text = source.replace(caller, caller + '\n        ' + statements)
+        if name == 'storage-write':
+            text = text.replace('external view returns', 'external returns')
+        if name == 'unregistered-scratch':
+            text = text.replace('return (row.count, row.accumulator, row.checkpoint);\n    }\n}',
+                                'return (row.count, row.accumulator, uint256(scratch));\n    }\n}')
+        yield name, text, READ, reason
 
 
 def compile_variant(directory, source, solc):
@@ -120,7 +149,21 @@ def require_source(result, mutant=False):
         raise HarnessError('source read or mandatory return-data mutation evidence failed')
 
 
-def run(output, *, prepared=False, require_composition=False):
+def require_combined(result, mutant=False):
+    """All routes must execute; source defects must remain observable in every route."""
+    if not mutant:
+        require_outcome(result)
+        return
+    routes = ['source', 'model', 'compiled']
+    if (result.get('routes') != routes or set(result.get('mismatches', {})) != set(routes)
+            or result.get('divergences') != []):
+        raise HarnessError('missing or divergent combined mutation execution')
+    for route in routes:
+        require_source({'routes': ['source'], 'mismatches': {'source': result['mismatches'][route]}},
+                       mutant=True)
+
+
+def run(output, *, prepared=False):
     output = output.resolve()
     if not output.is_relative_to(ROOT):
         raise HarnessError('output must be inside the checkout')
@@ -154,11 +197,14 @@ def run(output, *, prepared=False, require_composition=False):
         require_source(result, mutant)
         results[name] = {'sourceSha256': file_sha256(path), 'sourceReads': 6,
                          'mismatches': result['mismatches'], 'combinedThreeRouteAgreement': False}
-        if mutant:
-            continue
-        admission = observe(directory, path.name, CONTRACT, READ)
-        require_rejection(admission, COMPOSITION_REJECTION)
-        results[name]['admission'] = admission
+        driver, snapshot = prepare_model(directory / 'combined-model', path, CONTRACT,
+                                         [READ], compiler)
+        compiled = compile_generated(directory / 'combined-model', snapshot, solc)
+        combined = run_routes(directory / 'combined-routes', spec, path, built, driver, compiled)
+        require_combined(combined, mutant)
+        results[name].update({'combinedThreeRouteAgreement': not mutant,
+                              'mutationDetectedOnAllRoutes': mutant,
+                              'mismatches': combined['mismatches']})
         if name == 'original':
             digest = run_root(directory / 'digest', path.name, CONTRACT, DIGEST,
                 packed_cases('digest', spec['packedExpectations']), built, solc, compiler, False)
@@ -174,11 +220,6 @@ def run(output, *, prepared=False, require_composition=False):
             require_outcome(key_result)
             results[name]['controls'] = {'hashThreeRouteCases': len(spec['packedExpectations']),
                                         'suppliedKeyThreeRouteReads': 6}
-    original = results['original']['admission']
-    renamed = results['renamed']['admission']
-    for key in ('node', 'reason', 'closure'):
-        if original[key] != renamed[key].replace('deriveKey', 'packedKey').replace('findRecord', 'locate'):
-            raise HarnessError('helper spelling changed the composition rejection')
     for name, text, signature, reason in rejected_sources(source):
         directory = output / name
         path, _ = compile_variant(directory, text, solc)
@@ -193,27 +234,27 @@ def run(output, *, prepared=False, require_composition=False):
         'compiler': compiler, 'settings': SETTINGS, 'fork': 'cancun',
         'stateArchivesSha256': STATE_ARCHIVES, 'packedArchiveSha256': PACKED_ARCHIVE_SHA256,
         'readProjection': 'unchanged first six transactions and observations from each full archive',
-        'scope': 'full-cleanup read-only preparation; no importer admission change',
-        'missingCombinedRoutes': ['model', 'compiled'],
-        'limits': ['separate controls do not establish composition',
+        'scope': 'full-cleanup packed-hash and storage-read composition',
+        'missingCombinedRoutes': [],
+        'limits': ['execution regression evidence is not an importer correspondence theorem',
                    'no tail-only cleanup, write/log, constructor, gas or whole-world equivalence',
                    'pinned downstream wrapper and compiler correspondence remain pending'],
     })
-    write_json(output / 'results.json', {'preparationPassed': True,
-        'combinedThreeRouteAgreement': False, 'variants': results})
-    print('3 source read variants, 2 source mutants, 9 located rejections; '
-          '54 hash cases and 6 supplied-key reads pass three routes; composition remains blocked')
-    return 1 if require_composition else 0
+    write_json(output / 'results.json', {'combinedThreeRouteAgreement': True, 'variants': results})
+    print('Full-cleanup reads and controls agree across source, Denote and generated EVM; '
+          'source defects remain detectable and excluded roots remain rejected')
+    return 0
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--prepared', action='store_true')
-    parser.add_argument('--require-composition', action='store_true')
+    parser.add_argument('--require-composition', action='store_true',
+                        help='compatibility flag: composition is now always required')
     args = parser.parse_args()
     try:
-        return run(args.output, prepared=args.prepared, require_composition=args.require_composition)
+        return run(args.output, prepared=args.prepared)
     except (HarnessError, OSError, ValueError) as exc:
         print(json.dumps({'infrastructureFailure': str(exc)}))
         return 2

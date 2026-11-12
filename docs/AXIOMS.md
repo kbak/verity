@@ -34,10 +34,13 @@ Denote-only and generated-code-only event-deletion mutants establish finite
 instrument sensitivity. This adds no axiom or compiler-correctness theorem;
 packed-reference roots still require separate admission and execution evidence.
 
-The full-cleanup storage-read preparation adds finite source/control evidence
-and located rejection checks, with no new axiom, theorem or admission. Separate
-hash and supplied-key executions do not establish their composition; see
-`PACKED_STORAGE_READ_DESIGN.md` for the pending generic frame obligations.
+The full-cleanup storage-read slice admits complete generated mapping scratch
+sequences and scalar storage reads within the bounded-memory root audit. It adds
+no axiom or theorem: recognition remains trusted frontend code. Existing physical
+scratch-frame lemmas retain their assumptions; combined source/Denote/generated
+execution against the frozen expectations is finite regression evidence, not
+source/importer or compiler correspondence. Tail-only cleanup and writes remain
+excluded; see `PACKED_STORAGE_READ_DESIGN.md` and `TRUST_ASSUMPTIONS.md`.
 
 `smoke.covered` and `smoke_step_credit` are ordinary theorems. The import
 path adds no project axiom, `sorry`, or `native_decide`. `covered` is

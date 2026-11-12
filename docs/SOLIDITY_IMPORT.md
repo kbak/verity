@@ -2084,12 +2084,22 @@ The enclosing scalar root must establish every accessed interval within
 `0x40`. Free-pointer writes must retain a bounded pointer. Successful unsigned
 comparison guards can constrain addresses; a guard on a superseded binding cannot
 constrain its replacement. Hash lengths must be literal and at most 4096 bytes.
-Branches, loops, external effects, storage operations combined with this new path,
+Branches, loops, external effects, storage writes combined with this new path,
 and unproved alias or address relationships remain located rejections. Mixing raw
 memory observations with synthetic ABI allocation writes is also rejected: the
 existing scalar hash lowering does not preserve the observable Solidity bytes
 length header and allocator delta. Source-written memory and the structural
 allocator prologue are distinguished by recorded access provenance.
+
+Full-cleanup roots may combine these operations with scalar storage reads and
+generated mapping-address scratch sequences. The root audit requires each entire
+key/store, base/store, 64-byte hash sequence in order, identified by its fresh
+lowering binding; arbitrary source scratch writes remain excluded. Its `[0,64)`
+footprint preserves the allocator, zero word and source buffers above 128.
+Storage/hash results remain unknown words for pointer bounds. Tail-only cleanup,
+writes and observations of synthetic memory layouts remain unsupported. The
+combined three-route regression uses unchanged independent expectations; see
+[the full-cleanup read design](PACKED_STORAGE_READ_DESIGN.md).
 
 The lowerer and the bounds audit are included in the source digest. Allocator
 initialization follows the structural analysis of the emitted memory reads. These
