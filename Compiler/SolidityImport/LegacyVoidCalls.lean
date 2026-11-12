@@ -83,8 +83,13 @@ def lower (node decl : Json) (scalar : Json → M Val) : M Val := do
         values := values ++ [LegacyMemory.cleanScalar scalarTy value.expr]
       layout := layout ++ [.word]
   modify fun e => { e with encodingMemory := true }
+  let gasSite ← if env.sourceGas then do
+    let site ← mStr (← mField node "src")
+    if site.isEmpty then failAt node "typed callback source gas site is missing"
+    pure (some site)
+    else pure none
   return {
-    pre := pre.push (.ecm (Compiler.ECM.LegacyVoidCall.module selector layout) values)
+    pre := pre.push (.ecm (Compiler.ECM.LegacyVoidCall.module selector layout gasSite) values)
     expr := .literal 0 }
 
 end Compiler.CompilationModel.SolidityImport.LegacyVoidCalls

@@ -131,8 +131,8 @@ inductive ByteTransport where
   | legacyBytes4 (resultVar : String) (selector : Nat)
   /-- ABI-v1 scalar STATICCALL with nonzero-word bool decoding. -/
   | legacyBool (resultVar : String) (selector numStaticArgs : Nat)
-  /-- Value-free ABI-v1 interface CALL with no return-value decoder. -/
-  | legacyVoid (selector : Nat) (layout : List LegacyVoidCalls.Argument)
+  /-- Value-free ABI-v1 interface CALL; optional source site meters its implicit GAS. -/
+  | legacyVoid (selector : Nat) (layout : List LegacyVoidCalls.Argument) (gasSite : Option String)
   | staticUint256 (resultVar : String) (selector numStaticArgs : Nat)
   | staticBool (resultVar : String) (selector numStaticArgs : Nat)
   | staticBytesUint256 (resultVar : String) (selector : Nat)
@@ -1028,15 +1028,20 @@ namespace LegacyVoidCall
 
 /-- A closed, state-changing interface call. The environment owns callee semantics;
 legacy code-existence checks and exact failure forwarding are part of the transport. -/
-def module (selector : Nat) (layout : List LegacyVoidCalls.Argument) : ExternalCallModule where
+def module (selector : Nat) (layout : List LegacyVoidCalls.Argument)
+    (gasSite : Option String := none) : ExternalCallModule where
   name := "solidityLegacyVoidCall"
   numArgs := LegacyVoidCalls.arity layout
   writesState := true
   readsState := true
-  compile := fun _ args => LegacyVoidCalls.compile selector layout args
-  byteTransport := some (.legacyVoid selector layout)
+  compile := fun _ args =>
+    if gasSite.isSome then
+      .error "source gas observations require original bytecode; recompilation unsupported"
+    else LegacyVoidCalls.compile selector layout args
+  byteTransport := some (.legacyVoid selector layout gasSite)
   proofStatus := .assumed
-  summaryName := "legacy_void_byte_response"
+  summaryName := if gasSite.isSome then "legacy_void_original_bytecode_gas_evidence"
+    else "legacy_void_byte_response"
   summaryMutability := .call
   summarySelector := some selector
 
@@ -1088,9 +1093,11 @@ def compileCanonical (module : ExternalCallModule) (context : CompilationContext
       unless module == LegacyBoolCall.module result selector count do
         throw "closed legacy bool call metadata differs"
       LegacyBoolCalls.compile result selector count args
-  | some (.legacyVoid selector layout) =>
-      unless module == LegacyVoidCall.module selector layout do
+  | some (.legacyVoid selector layout gasSite) =>
+      unless module == LegacyVoidCall.module selector layout gasSite do
         throw "closed legacy void call metadata differs"
+      if gasSite.isSome then
+        throw "source gas observations require original bytecode; recompilation unsupported"
       LegacyVoidCalls.compile selector layout args
   | some (.rawCall resultVar delegated) =>
       unless module == SolidityRawCall.module resultVar delegated do
