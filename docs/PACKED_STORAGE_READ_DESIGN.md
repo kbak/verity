@@ -87,6 +87,26 @@ The mapping-slot preimage remains the independent `word32(key) ++ word32(base)`
 expectation. Layout resolution and field extraction must remain construct-generic;
 fixture slot numbers and identifiers must never enter production admission logic.
 
+## Proof-only composition foundation
+
+`Verity/Core/Model/MemoryComposition.lean` composes the existing physical word
+writer into an ordered adjacent pair. Its generic byte-slice and coherent-word
+frames preserve disjoint observations; its complete non-memory frame preserves
+storage, events and the other world components while allowing memory expansion.
+
+`Compiler/Proofs/IRGeneration/ScratchMemoryComposition.lean` identifies that pair's
+64 bytes with the existing `abiEncodeMappingSlot` encoder in key-then-base order.
+Under explicit nonwrapping bounds, the actual proof-IR memory reader and hash
+consume this preimage. Scratch writes at 0 and 32 preserve the free-pointer and
+zero words under initial coherence, and preserve arbitrary buffers above 128.
+The disjoint-slice hash frame also handles unaligned buffers.
+
+This is a foundation for the proposed admission slice. It does not recognize
+lowered mapping operations, connect arbitrary source execution to the pair,
+justify tail-only cleanup, or supply a storage-reference correspondence theorem.
+The combined-root rejection remains required until the admission implementation
+is separately accepted after #39 merges. All independent expectations are unchanged.
+
 ## Proof obligations and acceptance
 
 Existing reusable results include `memory_writes_coherent`,

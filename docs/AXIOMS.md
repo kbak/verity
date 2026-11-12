@@ -657,3 +657,9 @@ The established verifier/evaluator and narrow axiom allowlist remain unchanged.
 Declarative Solidity file inputs remain tracked by Lake and cache identity,
 with unsupported dynamic configuration rejected. The operational boundary is
 recorded in [TRUST_ASSUMPTIONS.md](TRUST_ASSUMPTIONS.md).
+
+The scratch-memory composition proofs add no axiom or proof shortcut. They relate
+physical word writes to the existing ordered mapping ABI preimage and prove
+byte/word/non-memory frames with explicit coherence and nonwrapping hypotheses
+where needed. They do not discharge existing hash/collision premises or admit
+combined importer roots. `TRUST_ASSUMPTIONS.md` records the same limited scope.

@@ -434,6 +434,16 @@ at immutable revisions before offline recipe materialization; their existing
 FFI trust boundary is unchanged. This setup does not authorize network access
 inside the offline build gate.
 
+The proof-only scratch composition modules establish ordered mapping preimages
+and frames for the existing physical word writer. Coherent word observations and
+nonwrapping proof-IR reads have explicit hypotheses. The canonical scratch pair
+preserves allocator/zero words, disjoint byte buffers and non-memory world state;
+its preimage equals the existing key-then-base ABI encoder. These are local
+composition theorems, not importer admission, source/compiler correspondence,
+storage-reference validity, or gas/memory-expansion equivalence. Existing hash
+faithfulness and collision premises remain unchanged. See
+[the read-composition design](PACKED_STORAGE_READ_DESIGN.md).
+
 ## Compilation Pipeline
 
 ```
