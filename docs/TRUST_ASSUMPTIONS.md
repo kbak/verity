@@ -2702,3 +2702,16 @@ remain trusted and validated by finite differential tests. Conflicting bindings,
 sibling preludes and unmodeled prefix effects stay rejected. Existing atom and
 short-circuit rules are unchanged. Solidity 0.7.6 wrapping and explicit overflow
 reverts retain their source semantics; no gas-equivalence assumption is added.
+
+Direct Solidity 0.7.6 scalar storage-struct members add no project axiom, ECM
+summary or new storage semantics. Admission checks the state variable, its struct
+and the member declaration by AST identity before exempting only the direct
+receiver from the legacy struct-value ban. Existing layout validation and scalar
+projection lowering remain responsible for physical slots, offsets and widths.
+The existing `execStmt_setStorage_storage_frame` law applies to lowered writes
+outside their destination slots; it does not establish Solidity AST/bytecode
+correspondence or same-slot neighbor preservation. Those frontend and packed-bit
+claims are exercised by finite source/model/generated differential tests, including
+unchanged signed neighbors and dirty narrow inputs. Whole structs, aliases, nested
+paths, signed member operations and post-callback storage remain outside this
+admission path. No reentrancy-safety or gas-equivalence claim is added.

@@ -994,6 +994,17 @@ def tasks(update_golden: bool) -> list:
               for optimized in (False, True)]
     items += [("deployed-immutable-guard-mutation", 1, lambda: module_campaign_output(
         "check_deployed_immutables", "deployed-immutable-guard-mutation", 1800, "--mutant"))]
+    items += [(f"legacy-storage-members-opt{int(optimized)}", 1,
+               lambda optimized=optimized: module_campaign_output(
+                   "check_legacy_storage_members", "legacy-storage-members", 1800,
+                   *(["--optimized"] if optimized else [])))
+              for optimized in (False, True)]
+    items += [(f"legacy-storage-members-{mutation}", 1,
+               lambda mutation=mutation: module_campaign_output(
+                   "check_legacy_storage_members", "legacy-storage-members-mutation", 1800,
+                   "--mutation", mutation)) for mutation in ("neighbor-clobber", "missing-restore")]
+    items += [("legacy-storage-member-boundaries", 1, lambda: module_campaign_output(
+        "check_legacy_storage_member_boundaries", "legacy-storage-member-boundaries", 900))]
     items += [(f"assignment-siblings-opt{int(optimized)}", 1,
                lambda optimized=optimized: module_campaign_output(
                    "check_legacy_assignment_siblings", "assignment-siblings", 1800, "--prepared",

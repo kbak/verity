@@ -2560,3 +2560,35 @@ counterexamples on all routes. The post-callback balance fixture also uses the
 combined assignment/guard expression. No new gas equivalence claim is made.
 
 Semantic reference: [Solidity 0.7.6 expression evaluation order](https://docs.soliditylang.org/en/v0.7.6/control-structures.html#order-of-evaluation-of-expressions).
+
+
+### Direct legacy scalar storage-struct members (development)
+
+Solidity 0.7.6 now admits direct member reads and writes on top-level storage
+structs for unsigned integers, bool, address and bytes32. The receiver must be a
+plain identifier resolved to a state-variable declaration. Its struct and selected
+member must agree by declaration ID, name and scalar type. Only this receiver is
+exempted from the legacy struct-value rejection; each surrounding expression and
+statement still passes normal legacy validation.
+
+The shared solc-layout projection supplies the member's physical slot and bit
+range. Writes reuse existing scalar storage lowering, including read/modify/write
+for packed fields. Unaccessed signed neighbors may remain in the layout, but
+reading or writing a signed member still rejects. Whole-struct values and copies,
+storage aliases, nested member paths, struct arrays/mappings and other member
+types remain outside this slice. The existing post-callback storage restriction
+is unchanged: a modifier's restoration can execute in call-free bodies but does
+not yet admit restoration after a state-changing callback.
+
+Generic sequences compare original bytecode, canonical Denote and generated
+bytecode for dirty narrow inputs, wrapping updates, bool cleanup, distinct struct
+instances, inherited slot offsets, multi-slot layouts, exact errors/events and
+modifier restoration on normal/early return or revert. Full physical words and
+unmodified slots are compared against an independent layout-based oracle; clearing
+a packed neighbor or omitting restoration must yield completed counterexamples.
+The existing scalar-write frame proof covers other destination-independent slots.
+Frontend correspondence and packed neighbor preservation are validated by these
+finite tests, not established as a new end-to-end theorem.
+
+Semantic references: [Solidity 0.7.6 storage layout](https://docs.soliditylang.org/en/v0.7.6/internals/layout_in_storage.html)
+and [function modifiers](https://docs.soliditylang.org/en/v0.7.6/contracts.html#function-modifiers).

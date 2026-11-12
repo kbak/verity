@@ -7,6 +7,7 @@ import Compiler.SolidityImport.LegacyVoidCalls
 import Compiler.SolidityImport.LegacyBoolCalls
 import Compiler.SolidityImport.LegacyStaticCalls
 import Compiler.SolidityImport.LegacyStorage
+import Compiler.SolidityImport.LegacyStorageMembers
 import Compiler.SolidityImport.StorageLayout
 
 /-! Conservative admission for the initial Solidity 0.7.6 scalar slice.
@@ -306,8 +307,10 @@ partial def validateLegacyDeclaration (node : Json) (encodingInput : Bool := fal
       optStr callee "nodeType" == some "Identifier" &&
       optStr callee "name" == some "keccak256" &&
       ((field? callee "referencedDeclaration").bind (·.getInt?.toOption)) == some (-8)
+    let scalarMember := legacyScalarStorageMember node (← get)
     for (key, child) in fields do
-      validateLegacyDeclaration child (isHash && key == "arguments")
+      unless scalarMember && key == "expression" do
+        validateLegacyDeclaration child (isHash && key == "arguments")
   | _ => pure ()
 
 /-- Solidity 0.7.6 defaults to ABI coder v1. External decoding uses the
