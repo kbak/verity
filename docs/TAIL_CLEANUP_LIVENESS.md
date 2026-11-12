@@ -96,6 +96,71 @@ where their hypotheses hold. They do not prove this relational caller contract,
 source/importer equivalence, or permission to admit arbitrary scratch reads.
 Keep all production logic construct-generic and independent of fixture names.
 
+## Proof-only caller observations
+
+`Verity/Core/Model/MemoryObservation.lean` proves a two-run overwrite law using
+pointwise physical-byte equality, compatible with the existing `OwnedEq` memory
+frames. For a common list of word writes, a queried byte needs initial agreement
+only if every write misses it. The exact slice and coherent word-read lemmas lift
+that law to arbitrary, including unaligned, observation windows.
+
+The residual-set form assumes the initial memories agree outside an explicit
+set of byte addresses. Every residual byte within the later read range must be
+covered by a write. It does not require cleanup of bytes that remain unobserved.
+The set is a conservative byte-level parameter, not an implemented dirty-bit
+analysis. Equal byte observations do not require equal allocated memory sizes.
+
+`Compiler/Proofs/IRGeneration/CallerMemoryComposition.lean` transports the byte
+agreement through the existing proof-IR slice reader and concrete memory hash.
+Both coherent word views and the reader's rounded, nonwrapping address bound
+are explicit hypotheses. Equal hash inputs give equal outputs without a new
+hash axiom or a change to the existing hash faithfulness/collision premises.
+
+These theorems require the same **evaluated addresses and values, in the same
+order**, in both executions, followed by the observation. Syntactically identical
+caller code does not establish that premise. They do not erase a previously
+captured scalar, infer an alias, prove a caller's residual set, compare memory
+sizes/gas, or establish equality of other world fields. Existing non-memory and
+allocator frames remain separate obligations. Core addresses are natural numbers;
+consumers connecting writes to modular EVM addresses must establish their bounds.
+
+This supplies proof ingredients for the earlier design. A complete caller effect
+analysis, ABI-return/allocator reasoning and source/importer correspondence are
+still pending. No importer rule, fixture, independent expectation or current
+rejection changes; the full-cleanup admission slice still comes first after #39.
+
+## Bounded literal execution bridge
+
+`BoundedMstoreExecution.lean` connects a straight-line list of literal `mstore`
+statements to the canonical source interpreter, `execStmtsCanonical`. Execution
+continues with exactly the ordered physical-write fold used above. Every write
+must fit its entire 32-byte footprint below the EVM address modulus, and word
+values are typed `Uint256` literals. These conditions make the evaluated operands
+identical in both runs without assuming equality of their initial memories or
+bindings. Empty lists, overlapping writes and unaligned addresses are included.
+
+The exact poststate also gives a complete runtime frame: after erasing both
+memory views, the initial and final runtime states are equal. This preserves
+bindings, immutable values, external-call bookkeeping and all non-memory world
+fields, including storage and events. It permits memory expansion and does not
+claim that two different initial states have equal non-memory fields.
+
+`BoundedMstoreObservation.lean` then compares actual canonical `mload` and
+`keccak256` expression results after successful executions of that block. Initial
+physical bytes must agree within the observation range wherever every write
+misses. Both initial word views must be coherent. Literal offset and size bounds
+prevent modular truncation, and the existing rounded nonwrapping hash-reader
+bound remains explicit. The load observes all 32 bytes; the hash observes its
+exact selected slice. No hash premise is added or weakened.
+
+This bridge proves source execution and observations for literal blocks. It does
+not derive equal operands for arbitrary expressions, infer aliases or residual
+masks, erase earlier captured scalar values, prove ABI return/allocator behavior,
+or establish source/compiler correspondence or generated-EVM equivalence. The
+existing rejection gates and independent expectations remain unchanged. Importer
+admission still waits for #39, with full-cleanup composition before tail-only
+caller analysis.
+
 ## Subsequent implementation acceptance
 
 After #39 and the preceding full-cleanup slice merge, first prove the minimal
