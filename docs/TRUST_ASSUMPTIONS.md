@@ -2462,3 +2462,34 @@ assumed; gas/resource/depth adequacy and external-program correspondence belong 
 the supplied environment. `VoidCallMocks` is a finite validation program, excluded
 from the verified population consistently with the other external mocks. All new
 core encoder, transport and coverage modules remain in the generated axiom inventory.
+
+
+### Legacy bool static-query and fixed-slot store boundary (experimental)
+
+`LegacyBoolCall.module` remains `proofStatus.assumed`. Canonical metadata, selector
+range and arity are checked at compilation, quotation, coverage and execution.
+The ABI-v1 transport checks code existence, sends STATICCALL with zero value,
+preserves exact failed-call bytes, rejects short successful responses and normalizes
+all nonzero words to true. It writes only the returned 32 bytes into the outgoing
+scratch area and preserves the free pointer. Denote's raw memory and returndata are
+separate observations. The supplied adversary must satisfy the existing static-call
+world restriction; static calls may be followed by caller storage operations.
+
+The importer admits only constant-slot assembly stores with already-supported safe
+scalar reads and straight-line literal/identifier operands. Dirty narrow assembly
+reads, untracked narrow helper arguments and dynamic slots remain unsupported.
+Resolved interface IDs exclude inherited selectors. The source compiler profile,
+external-code/program correspondence and gas/resource/depth adequacy remain trusted
+inputs. Three-route comparisons and independent expectations/mutations are finite
+evidence; the added dispatch equation does not prove source/compiler equivalence.
+
+`SequenceRunner.selfCallExperiment` is explicit test instrumentation mirroring Anvil
+impersonation. It requires the zero-fee envelope and only permits a zero-value
+self-sender context, preserving the nonce advance even on failure. It does not
+relax ordinary EOA transaction admission or establish a reachable application call
+path. Positive and negative controls cover this distinction. These experiments
+must not be presented as complete transaction authorization proofs.
+
+Only the finite `StaticBoolMocks` validation program is excluded from the verified
+population, consistently with existing external mocks. Core encoding, dispatch and
+storage lowering remain in the generated axiom inventory. No project axiom is added.

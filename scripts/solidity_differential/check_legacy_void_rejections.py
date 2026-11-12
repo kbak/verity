@@ -44,18 +44,21 @@ CASES = {
                      '{ address a; assembly { a := sload(7) } assembly { v := a } }',
                      'run()', 'assembly reads require full-word or literal scalars'),
     'storage-write': ('', 'function run() public { assembly { sstore(7,1) } }',
-                     'run()', 'requires a terminal memory revert or read-only decoding'),
+                     'run()', None),
+    'dynamic-storage-write': ('', 'function run(uint256 slot) public { assembly { sstore(slot,1) } }',
+                     'run(uint256)', 'storage writes require a constant slot'),
 }
 
 
-def run(output, prepared=False):
+def run(output, prepared=False, cases=None):
     output = Path(output).resolve()
     output.mkdir(parents=True, exist_ok=False)
     if not prepared:
         command(['turbo-lean', '--json', 'build', 'Compiler.SolidityImport.Import', '--project-dir', '.'],
                 timeout=1800, log=output / 'build.log')
     reports, failures = [], []
-    for name, (interface, body, signature, reason) in CASES.items():
+    selected = CASES if cases is None else cases
+    for name, (interface, body, signature, reason) in selected.items():
         (output / f'{name}.sol').write_text('pragma solidity 0.7.6; ' + interface + 'contract P { ' + HEADER + body + ' }')
         driver = output / f'{name}.lean'
         driver.write_text('import Compiler.SolidityImport.Import\n'

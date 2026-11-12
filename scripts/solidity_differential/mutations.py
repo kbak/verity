@@ -8,6 +8,14 @@ import sys
 from .engine import ROOT, WORKSPACE, MUTANT_BUILD_TIMEOUT, HarnessError, command, write_json
 
 MUTANTS = {
+    'legacy-bool-code': ('Verity/Core/Model/LegacyBoolCalls.lean', '.if_ (.call "iszero" [.call "extcodesize" [target]])', '.if_ (.lit 0)'),
+    'legacy-bool-truth': ('Verity/Core/Model/LegacyBoolCalls.lean', '.assign result (.call "iszero" [.call "iszero" [.call "mload" [ptr]]])', '.assign result (.call "eq" [.call "mload" [ptr], .lit 1])'),
+    'legacy-bool-short': ('Verity/Core/Model/LegacyBoolCalls.lean', '.if_ (.call "lt" [.call "returndatasize" [], .lit 32])', '.if_ (.call "lt" [.call "returndatasize" [], .lit 1])'),
+    'legacy-bool-failure': ('Verity/Core/Model/LegacyBoolCalls.lean', '.exprStmt (.call "revert" [.lit 0, .call "returndatasize" []])', '.exprStmt (.call "revert" [.lit 0, .lit 0])'),
+    'legacy-bool-selector': ('Verity/Core/Model/LegacyBoolCalls.lean', '.lit (selector * 2^224)', '.lit ((selector + 1) * 2^224)'),
+    'legacy-bool-static': ('Verity/Core/Model/LegacyBoolCalls.lean', '.call "staticcall" [\n       .call "gas" [], target, ptr,', '.call "call" [\n       .call "gas" [], target, .lit 0, ptr,'),
+    'legacy-bool-pointer': ('Verity/Core/Model/LegacyBoolCalls.lean', '.assign result (.call "iszero" [.call "iszero" [.call "mload" [ptr]]])', '.exprStmt (.call "mstore" [.lit 64, .call "add" [ptr, .lit 32]]),\n     .assign result (.call "iszero" [.call "iszero" [.call "mload" [ptr]]])'),
+    'legacy-store-slot': ('Compiler/SolidityImport/Import.lean', '.setStorageArrayElement rawStorageFieldName slotVal.expr valVal.expr', '.setStorageArrayElement rawStorageFieldName (.add slotVal.expr (.literal 1)) valVal.expr'),
     'void-call-offset': ('Verity/Core/Model/LegacyVoidCalls.lean', 'store head (.call "sub" [tail, add ptr 4])', 'store head (.call "sub" [tail, ptr])'),
     'void-call-code': ('Verity/Core/Model/LegacyVoidCalls.lean', '.if_ (.call "iszero" [.call "extcodesize" [target]])', '.if_ (.lit 0)'),
     'void-call-failure': ('Verity/Core/Model/LegacyVoidCalls.lean', '.exprStmt (.call "revert" [.lit 0, .call "returndatasize" []])', '.exprStmt (.call "revert" [.lit 0, .lit 0])'),
@@ -302,6 +310,9 @@ def mutation_campaign(output, selected=None):
                         "import sys; sys.path.insert(0, 'scripts'); "
                         "from solidity_differential.check_legacy_calldata_hash import main; sys.exit(main())",
                         "--output", str(directory / ".lake/campaign")]
+            if name.startswith(("legacy-bool-", "legacy-store-")):
+                argv = [sys.executable, "-m", "solidity_differential.check_legacy_static_installation",
+                        "--output", str(directory / ".lake/campaign"), "--random-cases", "0"]
             if name.startswith("void-call-"):
                 argv = [sys.executable, "-m", "solidity_differential.check_legacy_void_callbacks",
                         "--output", str(directory / ".lake/campaign")]

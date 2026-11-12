@@ -162,6 +162,9 @@ low-level `call`, `<address>.code.length`, `<address>.code` and the memory
 canonical module. -/
 def closedTransportCovered (mod : Compiler.ECM.ExternalCallModule) (args : List Expr) : Bool :=
   match mod.byteTransport with
+  | some (.legacyBool result selector count) =>
+      mod == Compiler.ECM.LegacyBoolCall.module result selector count &&
+        decide (selector < 2^32) && args.length == count + 1 && exprListCovered args
   | some (.legacyVoid selector layout) =>
       mod == Compiler.ECM.LegacyVoidCall.module selector layout && decide (selector < 2^32) &&
         args.length == Compiler.Yul.LegacyVoidCalls.arity layout && exprListCovered args
@@ -240,6 +243,16 @@ theorem execStmt_ecm_rawCall_arm (oracle : DenoteOracle) (fields : List Field)
         (.ecm (Compiler.ECM.SolidityRawCall.module resultVar delegated) args) =
       (match executeRawCall oracle fields state
           (Compiler.ECM.SolidityRawCall.module resultVar delegated) resultVar delegated args with
+       | .ok (outcome, _) => outcome
+       | .error _ => .revert) := rfl
+
+/-- Pin canonical legacy bool dispatch, including instrumentation failures. -/
+theorem execStmt_ecm_legacyBool_arm (oracle : DenoteOracle) (fields : List Field)
+    (state : DenoteState) (result : String) (selector count : Nat) (args : List Expr) :
+    execStmt oracle fields state
+        (.ecm (Compiler.ECM.LegacyBoolCall.module result selector count) args) =
+      (match executeLegacyBoolCall oracle fields state
+          (Compiler.ECM.LegacyBoolCall.module result selector count) result selector count args with
        | .ok (outcome, _) => outcome
        | .error _ => .revert) := rfl
 

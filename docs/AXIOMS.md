@@ -569,3 +569,12 @@ remain in the generated inventories. Only the finite `VoidCallMocks` validation
 program is excluded, consistently with existing external mocks. The added physical
 ABI ordering, constant-slot address cleanup and callback environment obligations are
 specified in [TRUST_ASSUMPTIONS.md](TRUST_ASSUMPTIONS.md).
+
+
+The legacy bool static-query and constant-slot store extension adds no project axiom.
+The closed transport is assumed; its canonical dispatch equation establishes a
+model property, not Solidity/importer/compiler correspondence. Core modules remain
+in the generated inventory. Only the finite `StaticBoolMocks` validation program is
+excluded. The explicit self-call impersonation experiment is test instrumentation,
+not a transaction-reachability proof. These boundaries are synchronized with
+[TRUST_ASSUMPTIONS.md](TRUST_ASSUMPTIONS.md).

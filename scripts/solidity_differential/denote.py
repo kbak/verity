@@ -34,7 +34,7 @@ def _calldata(tx):
 class SequenceAdapter:
     def __init__(self, directory, driver, account, initial_storage=(), identity=None, byte_call_environment=None,
                  lean_command=('lake', 'env', 'lean', '--run'), account_nonce=None, timeout=600,
-                 account_code=(), initial_balances=(), account_nonces=(), value_transactions=False):
+                 account_code=(), initial_balances=(), account_nonces=(), value_transactions=False, self_call_experiment=False):
         self.directory = Path(directory).resolve()
         self.driver = Path(driver).resolve()
         if not isinstance(lean_command, (list, tuple)) or not lean_command or any(
@@ -64,6 +64,9 @@ class SequenceAdapter:
         if type(value_transactions) is not bool:
             raise HarnessError('value transaction mode must be boolean')
         self.value_transactions = value_transactions
+        if type(self_call_experiment) is not bool or (self_call_experiment and not value_transactions):
+            raise HarnessError('self-call experiment requires an explicit zero-fee envelope')
+        self.self_call_experiment = self_call_experiment
         # Foreign runtime code as deployed on the EVM routes (observed by code-length reads).
         self.account_code = []
         for owner, code in account_code:
@@ -123,6 +126,7 @@ class SequenceAdapter:
         payload = {'account': str(int(self.account, 16)),
                    'storage': self.initial_storage, 'transactions': converted}
         payload['valueTransactions'] = self.value_transactions
+        payload['selfCallExperiment'] = self.self_call_experiment
         payload['initialBalances'] = self.initial_balances
         payload['accountNonces'] = self.account_nonces
         if self.account_nonce is not None:

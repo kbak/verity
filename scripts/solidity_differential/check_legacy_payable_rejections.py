@@ -33,7 +33,19 @@ def run(output):
     assert rows[0]['data'] == '0x' + encode(['uint256'] * 4, [1, 21, 1, 1]).hex()
     assert deployment['creator']['balance'] == 21
     assert deployment['accounts'][0]['balance'] == 9 and deployment['accounts'][0]['nonce'] == 1
+    # Explicit impersonation is an experiment only; ordinary EOA admission stays strict.
+    rows = replay('self-experiment', {'sender': caller, 'value': '0x0'}, {'self_call_experiment': True})
+    assert rows[0]['status'] == 'ok'
+    assert rows[0]['deployment']['creator']['balance'] == 20
+    assert rows[0]['deployment']['creator']['nonce'] == 2
     cases = [
+        ('self-experiment-mode', {}, {'self_call_experiment': True, 'value_transactions': False},
+         'explicit zero-fee envelope'),
+        ('self-experiment-value', {'sender': caller}, {'self_call_experiment': True}, 'zero value'),
+        ('self-experiment-nonce', {'sender': caller, 'value': '0x0'},
+         {'self_call_experiment': True, 'account_nonce': (1 << 64)-1}, 'nonce exhausted'),
+        ('foreign-code-experiment', {}, {'self_call_experiment': True, 'account_code': [(SENDER, '0x00')]},
+         'code-free sender'),
         ('unfunded', {'value': '0xb'}, {}, 'insufficient transaction balance'),
         ('implicit-mode', {}, {'value_transactions': False}, 'explicit zero-fee'),
         ('nonce-exhausted', {}, {'account_nonces': [(SENDER, (1 << 64)-1)]}, 'nonce exhausted'),
@@ -52,7 +64,7 @@ def run(output):
             report.append({'name': name, 'diagnostic': diagnostic})
         else:
             raise HarnessError(f'{name}: invalid envelope was admitted')
-    write_json(output / 'results.json', {'passed': True, 'controls': 1, 'rejections': report})
+    write_json(output / 'results.json', {'passed': True, 'controls': 2, 'rejections': report})
     print(f'{len(report)} envelope rejection controls passed', flush=True)
 
 

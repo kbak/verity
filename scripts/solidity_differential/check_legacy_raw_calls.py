@@ -139,7 +139,7 @@ def campaign(directory, *, optimized=False, seed=7401, random_cases=24,
              fixture=FIXTURE, driver_template=DRIVER, extra_sources=None,
              make_transactions=transactions, value_transactions=False, contract_name=None,
              oracle_fixture=ORACLE, mock_module="RawCallMocks", mock_program="raw-context-echo-v1",
-             initial_storage=(), extra_environment=None):
+             initial_storage=(), extra_environment=None, self_sender=False):
     directory = Path(directory).resolve()
     directory.mkdir(parents=True, exist_ok=False)
     command(['turbo-lean', '--json', 'build', 'Compiler.SolidityImport.Import',
@@ -212,7 +212,7 @@ def campaign(directory, *, optimized=False, seed=7401, random_cases=24,
         account_code=[(a, '0x' + mock['deployedBytecode']['object']) for a in accounts],
         account_nonce=1, account_nonces=[(a, 1) for a in accounts] + ([(SENDER, 3)] if value_transactions else []),
         initial_balances=balances, initial_storage=initial_storage,
-        timeout=1800, value_transactions=value_transactions)
+        timeout=1800, value_transactions=value_transactions, self_call_experiment=self_sender)
 
     def model_adapter(txs, slots):
         copied = copy.deepcopy(txs)
@@ -225,11 +225,13 @@ def campaign(directory, *, optimized=False, seed=7401, random_cases=24,
     adapters = {
         'source': EVM(directory / 'A', ['0x' + source_contract['evm']['bytecode']['object'],
             *deployments], observer=observe('source'), initial_balances=balances,
-            initial_storage=initial_storage, zero_fee=value_transactions),
+            initial_storage=initial_storage, zero_fee=value_transactions,
+            impersonated_senders=[caller] if self_sender else []),
         'model': model_adapter,
         'compiled': EVM(directory / 'C', ['0x' + next(iter(model.values()))['evm']['bytecode']['object'],
             *deployments], observer=observe('compiled'), initial_balances=balances,
-            initial_storage=initial_storage, zero_fee=value_transactions)}
+            initial_storage=initial_storage, zero_fee=value_transactions,
+            impersonated_senders=[caller] if self_sender else [])}
     result = replay_three_routes(calls, adapters)
     observations = {route: [{**row, 'deployment': deployment_rows[route][row['id']]} for row in rows]
                     for route, rows in result['observations'].items()}

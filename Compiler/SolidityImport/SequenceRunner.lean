@@ -13,6 +13,21 @@ Unsupported observations fail instead of supplying synthetic values. -/
 namespace Compiler.CompilationModel.SolidityImport.SequenceRunner
 open Lean Denote Transactions Verity.Core
 
+/-- Explicit Anvil impersonation experiment, not an admissible EOA transaction.
+Only zero-value self calls are allowed; the synthetic envelope advances the nonce
+exactly like Anvil. This supplies a call context, not evidence of its reachability. -/
+private def prepareSelfExperiment (world : Verity.ContractState) :
+    Except String ValueTransactions.Prepared := do
+  unless world.sender == world.thisAddress && world.msgValue == 0 do
+    throw "self-call experiment requires zero value and the same caller/target"
+  let account := world.accountWorld world.thisAddress
+  unless world.selfBalance == account.balance do throw "incoherent self-call balance"
+  let some nonce := (if h : account.nonce.val + 1 < 2^64 then
+    some (⟨account.nonce.val + 1, h⟩ : Fin (2^64)) else none)
+    | throw "self-call experiment nonce exhausted"
+  let next := world.writeAccount world.thisAddress { account with nonce }
+  return { rollbackWorld := next, callWorld := next }
+
 private def word (j : Json) : Except String Nat := do
   let s ← j.getStr?
   let some n := s.toNat? | throw "expected decimal model word"
@@ -180,6 +195,11 @@ def execute (model : CompilationModel) (oracle : DenoteOracle) (input : Json)
   let valueTransactions ← match input.getObjVal? "valueTransactions" with
     | .error _ => pure false
     | .ok enabled => enabled.getBool?
+  let selfCallExperiment ← match input.getObjVal? "selfCallExperiment" with
+    | .error _ => pure false
+    | .ok enabled => enabled.getBool?
+  unless !selfCallExperiment || valueTransactions do
+    throw "self-call experiment requires the explicit zero-fee envelope"
   let transactions ← (← input.getObjVal? "transactions").getArr?
   let mut rows := #[]
   let mut ids : List String := []
@@ -232,7 +252,8 @@ def execute (model : CompilationModel) (oracle : DenoteOracle) (input : Json)
       | none => context
       | some size => { context with calldataSize := Uint256.ofNat size }
     let entry := beginTransaction context
-    let prepared ← if valueTransactions then ValueTransactions.prepare entry
+    let prepared ← if selfCallExperiment && sender == account then prepareSelfExperiment entry
+      else if valueTransactions then ValueTransactions.prepare entry
       else pure ({ rollbackWorld := entry, callWorld := entry } : ValueTransactions.Prepared)
     let initial := prepared.callWorld
     let publicResult := ValueTransactions.denotePrepared oracle model fn tx initial

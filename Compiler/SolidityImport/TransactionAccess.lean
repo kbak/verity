@@ -92,6 +92,10 @@ def statementAccesses (oracle : DenoteOracle) (fields : List Field)
       return addressReads ++ valueReads ++ [.transient (wordNormalize slot)]
   | .ecm mod args => do
       match mod.byteTransport with
+      | some (.legacyBool result selector count) =>
+          let reads ← args.mapM (expressionAccesses oracle fields state)
+          let (_, touched) ← executeLegacyBoolCall oracle fields state mod result selector count args
+          return reads.flatten ++ touched
       | some (.legacyVoid selector layout) =>
           let reads ← args.mapM (expressionAccesses oracle fields state)
           let (_, touched) ← executeLegacyVoidCall oracle fields state mod selector layout args
