@@ -132,7 +132,8 @@ with mandatory three-route execution and allow the composition gate to pass.
 A supplied-key control or successful import alone can never satisfy that gate.
 Run exact-head repository, warning, proof, differential and mutation gates.
 
-Tail-only cleanup needs a separate caller liveness/frame argument. Writes,
+Tail-only cleanup needs a separate caller liveness/frame argument, prepared in
+[the caller-liveness design](TAIL_CLEANUP_LIVENESS.md). Writes,
 events, rollback and the always-reverting value-return root remain later work,
 followed by validation of the pinned downstream wrapper tracked in #32. Full
 cleanup does not substitute for any of those acceptance criteria.
