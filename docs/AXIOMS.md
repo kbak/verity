@@ -614,3 +614,19 @@ transport. They reuse the existing increment, helper and rollback lowering under
 a conservative sibling-independence guard. Finite runtime and mutation checks are
 not a source-equivalence proof; the remaining obligations and exclusions are
 recorded in [TRUST_ASSUMPTIONS.md](TRUST_ASSUMPTIONS.md).
+
+
+### Original-bytecode gas accounting
+
+`CallGasProofs` adds kernel-checked accounting laws and no project axiom:
+forwarded operand bounds, gas partition, returned gas bounded by initial gas,
+GAS/span charging and rejection of excess child gas. The `GasCallMocks` adversary validity field proves
+only the admissibility of a finite test child model. These are included in the
+axiom audit. They do not prove that an EVM trace is genuine, that its measured
+spans have the right costs, or that imported Solidity matches its bytecode.
+
+The `sourceGas` profile and source observation transport therefore retain an
+explicit assumed evidence boundary. The original EVM/trace meter and frontend
+are trusted, generated-code gas equivalence is unavailable, and unsupported
+transports fail closed in the source runner. `TRUST_ASSUMPTIONS.md` records the
+same boundary; no new global axiom or proof shortcut is introduced.

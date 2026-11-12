@@ -62,6 +62,8 @@ input_dir solidityImportSmokeSources where
 lean_lib «SolidityImportSmoke» where
   globs := #[.one `Contracts.SolidityImportSmoke.AccountStorageBridgeChecks,
     .one `Contracts.SolidityImportSmoke.Create2ParentGasChecks,
+    .one `Contracts.SolidityImportSmoke.CallGasChecks,
+    .one `Contracts.SolidityImportSmoke.LegacyGasObservationsModel,
     .one `Contracts.SolidityImportSmoke.Create2OpcodeChecks,
     .one `Contracts.SolidityImportSmoke.Smoke,
     .one `Contracts.SolidityImportSmoke.AbiCanonicalityModel,

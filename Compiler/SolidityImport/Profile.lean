@@ -24,6 +24,8 @@ structure Profile where
   optimizerRuns : Option Nat
   /-- solc `metadata.bytecodeHash`, e.g. `"none"` or `"ipfs"`. -/
   bytecodeHash : String
+  /-- Verify gas against original bytecode evidence. Gas reads cannot be recompiled. -/
+  sourceGas : Bool := false
   deriving Repr, BEq, Inhabited
 
 end Compiler.CompilationModel.SolidityImport

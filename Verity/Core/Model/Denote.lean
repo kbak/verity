@@ -1,3 +1,4 @@
+import Verity.Core.Model.SourceGas
 import Verity.Core.Model.VoidCalls
 import Verity.Core
 import Verity.Core.Uint256
@@ -268,11 +269,15 @@ def lookupBinding? (bindings : Env) (name : String) : Option Nat :=
 /-- Explicit external execution boundary shared by public and traced callers.
 The default supplies no adversary: unsupported/unconfigured calls fail closed. -/
 structure ByteCallEnvironment where
+  /-- Original-bytecode meter for this frame; no gas observations without evidence. -/
+  sourceGas : Option SourceGas.State := none
   adversary : Option (ByteExternalCall.Adversary Verity.ContractState Verity.StorageKey) := none
   gas : Option Nat := none
 
 /-- Mirrors `SourceSemantics.RuntimeState`. -/
 structure DenoteState where
+  /-- Original source bytecode gas, independent of functional statement count. -/
+  sourceGas : Option SourceGas.State := none
   world : Verity.ContractState
   immutable : String → Verity.Core.Uint256 := fun _ => 0
   bindings : Env
@@ -1321,6 +1326,17 @@ def executeByteStaticCall (oracle : DenoteOracle) (fields : List Field)
   }
   return (.continue next, observed.touched)
 
+/-- Execute a source GAS observation only against ordered original-bytecode evidence. -/
+def executeSourceGasRead (state : DenoteState) (mod : Compiler.ECM.ExternalCallModule)
+    (result site : String) (args : List Expr) : Except String StmtOutcome := do
+  unless mod == Compiler.ECM.SourceGasRead.module result site && args.isEmpty do
+    throw "source gas observation metadata differs"
+  let some meter := state.sourceGas | throw "original bytecode gas evidence missing"
+  let (value, next) ← SourceGas.read meter site
+  return .continue { state with
+    sourceGas := some next
+    bindings := bindValue state.bindings result value }
+
 /-- Read an exact input-memory slice and execute a closed raw call. The low-level
 success bit is returned even on child failure; its return buffer is overwritten
 on every attempt, including insufficient funds and exceptional child halts. -/
@@ -1344,8 +1360,16 @@ def executeRawCall (oracle : DenoteOracle) (fields : List Field) (state : Denote
     gas := values[0]!
     calldata := (List.range size).map fun i =>
       UInt8.ofNat (state.world.physicalByte (pointer + i)).val }
+  let (request, witness, meter) ← match state.sourceGas with
+    | none => pure (request, none, none)
+    | some meter => do
+        let (actual, witness, next) ← SourceGas.prepareCall meter request
+        pure (actual, some witness, some next)
   let observed ← RawCalls.execute adversary request state.world
+  if let some witness := witness then
+    SourceGas.checkResponse witness observed.success observed.returndata
   let next := { state with
+    sourceGas := meter
     world := observed.world
     bindings := bindValue state.bindings resultVar (if observed.success then 1 else 0)
     rawReturndata := some observed.returndata
@@ -2309,6 +2333,10 @@ mutual
         | none => .revert
     | state, .ecm mod args =>
         match mod.byteTransport with
+        | some (.sourceGasRead result site) =>
+            match executeSourceGasRead state mod result site args with
+            | .ok outcome => outcome
+            | .error _ => .revert
         | some (.legacyBool result selector count) =>
             match executeLegacyBoolCall oracle fields state mod result selector count args with
             | .ok (outcome, _) => outcome
@@ -2588,7 +2616,7 @@ def denoteFunction (oracle : DenoteOracle) (spec : CompilationModel) (fn : Funct
             externalCallReturnValues := externalCallReturnValues,
             externalCallPostWorld := externalCallPostWorld,
             byteCallAdversary := byteCalls.adversary,
-            byteCallGas := byteCalls.gas }
+            byteCallGas := byteCalls.gas, sourceGas := byteCalls.sourceGas }
           fn.body with
       | .continue state => successResult oracle spec state.world none
       | .stop state =>

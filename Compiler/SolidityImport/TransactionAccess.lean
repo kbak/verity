@@ -92,6 +92,9 @@ def statementAccesses (oracle : DenoteOracle) (fields : List Field)
       return addressReads ++ valueReads ++ [.transient (wordNormalize slot)]
   | .ecm mod args => do
       match mod.byteTransport with
+      | some (.sourceGasRead result site) =>
+          discard (executeSourceGasRead state mod result site args)
+          return []
       | some (.legacyBool result selector count) =>
           let reads ← args.mapM (expressionAccesses oracle fields state)
           let (_, touched) ← executeLegacyBoolCall oracle fields state mod result selector count args
@@ -312,7 +315,7 @@ def executeTracedBody (oracle : DenoteOracle) (fields : List Field)
   let initial := beginTransaction world
   let traced ← traceStraightLine oracle fields
     { world := initial, bindings, errors, selector,
-      byteCallAdversary := byteCalls.adversary, byteCallGas := byteCalls.gas } body events
+      byteCallAdversary := byteCalls.adversary, byteCallGas := byteCalls.gas, sourceGas := byteCalls.sourceGas } body events
   let frame ← finishFrame initial traced.outcome
   return ⟨frame, traced.touched⟩
 

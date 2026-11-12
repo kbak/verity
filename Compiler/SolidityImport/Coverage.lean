@@ -162,6 +162,8 @@ low-level `call`, `<address>.code.length`, `<address>.code` and the memory
 canonical module. -/
 def closedTransportCovered (mod : Compiler.ECM.ExternalCallModule) (args : List Expr) : Bool :=
   match mod.byteTransport with
+  | some (.sourceGasRead result site) =>
+      mod == Compiler.ECM.SourceGasRead.module result site && args.isEmpty
   | some (.legacyBool result selector count) =>
       mod == Compiler.ECM.LegacyBoolCall.module result selector count &&
         decide (selector < 2^32) && args.length == count + 1 && exprListCovered args

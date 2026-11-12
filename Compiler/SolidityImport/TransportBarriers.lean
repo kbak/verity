@@ -122,13 +122,20 @@ def isClosedLog (mod : Compiler.ECM.ExternalCallModule) : Bool :=
   | some (.log eventName topicCount) => mod == Compiler.ECM.SolidityLog.module eventName topicCount
   | _ => false
 
+/-- A gas read consumes source evidence but touches no world storage or account. -/
+def isClosedSourceGasRead (mod : Compiler.ECM.ExternalCallModule) : Bool :=
+  match mod.byteTransport with
+  | some (.sourceGasRead result site) => mod == Compiler.ECM.SourceGasRead.module result site
+  | _ => false
+
 /-- Replace every closed transport except the low-level `CALL` by a call-free
 statement: a staticcall, `create2`, code length or code copy by its
 zero-initialised result binding, a log by an empty branch, a memory return by
 `stop`. -/
 partial def eraseClosedTransports : Stmt → Stmt
   | .ecm mod args =>
-      if isClosedStaticCall mod || isClosedCreate2 mod || isClosedExtCodeSize mod ||
+      if isClosedSourceGasRead mod || isClosedStaticCall mod || isClosedCreate2 mod ||
+          isClosedExtCodeSize mod ||
           isClosedExtCodeCopy mod || isClosedLowLevelCall mod then
         .letVar (mod.resultVars.headD "") (.literal 0)
       else if isClosedLog mod then .ite (.literal 0) [] []
@@ -193,7 +200,8 @@ partial def stmtAfterTrailingCall : Stmt → Bool
   | .requireError condition _ args => exprStorageFree condition && args.all exprStorageFree
   | .ite condition yes no =>
       exprStorageFree condition && yes.all stmtAfterTrailingCall && no.all stmtAfterTrailingCall
-  | .ecm mod args => (isClosedLowLevelCall mod || isClosedRawCall mod || isClosedVoidCall mod ||
+  | .ecm mod args => (isClosedSourceGasRead mod || isClosedLowLevelCall mod ||
+      isClosedRawCall mod || isClosedVoidCall mod ||
       isClosedExtCodeSize mod ||
       mod == Compiler.ECM.SolidityInvalid.module) &&
       args.all exprStorageFree
