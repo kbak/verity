@@ -630,3 +630,14 @@ explicit assumed evidence boundary. The original EVM/trace meter and frontend
 are trusted, generated-code gas equivalence is unavailable, and unsupported
 transports fail closed in the source runner. `TRUST_ASSUMPTIONS.md` records the
 same boundary; no new global axiom or proof shortcut is introduced.
+
+
+The Solidity 0.7.6 payment extension reuses the raw-call response and original
+bytecode gas evidence boundaries. Native value calls observe the compiler's
+implicit GAS; discarded nonempty returndata still allocates memory. Selector
+encoding, bounded output copies and Yul switches are trusted importer lowering,
+covered by finite differential and mutation checks rather than a new equivalence
+axiom. `PaymentCallMocks` proves admissibility only for its explicitly configured
+finite child programs; it does not establish arbitrary token or receiver behavior.
+Contract reimbursement is distinct from EVM refund-counter and transaction-fee
+accounting, which remain outside the frame model. No project axiom is added.

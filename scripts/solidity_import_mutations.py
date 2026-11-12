@@ -918,6 +918,15 @@ def tasks(update_golden: bool) -> list:
     """
     items = [("prefix-checks", 2, lambda: prefix_checks(update_golden)),
              ("reference-boundary", 2, reference_boundary_mutations)]
+    items += [("native-value-compilation", 1, lambda: module_campaign_output(
+        "check_native_value_compilation", "native-value-compilation", 1800))]
+    items += [("value-payment-boundaries", 1, lambda: module_campaign_output(
+        "check_value_payment_boundaries", "value-payment-boundaries", 1800))]
+    items += [(f"legacy-value-payments-opt{int(optimized)}", 1,
+               lambda optimized=optimized: module_campaign_output(
+                   "check_legacy_value_payments", "legacy-value-payments", 1800,
+                   *(["--optimized"] if optimized else [])))
+              for optimized in (False, True)]
     items += [("source-gas-boundaries", 1, lambda: module_campaign_output(
         "check_source_gas_boundaries", "source-gas-boundaries", 1800))]
     items += [(f"source-gas-opt{int(optimized)}", 1,

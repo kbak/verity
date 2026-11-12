@@ -20,7 +20,11 @@ def source_sites(ast):
                     expr.get('referencedDeclaration', 0) < 0)
             low = (node.get('nodeType') == 'YulFunctionCall' and
                    node.get('functionName', {}).get('name') == 'gas')
-            if high or low:
+            implicit = (node.get("nodeType") == "FunctionCall" and
+                        expr.get("nodeType") == "FunctionCallOptions" and
+                        expr.get("names") == ["value"] and
+                        expr.get("expression", {}).get("memberName") == "call")
+            if high or low or implicit:
                 sites.add(node['src'])
             for child in node.values():
                 walk(child)

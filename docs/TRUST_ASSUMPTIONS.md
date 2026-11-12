@@ -2591,3 +2591,14 @@ need further adapters. A fixed test child's proved admissibility establishes its
 model boundary, not correspondence to every deployed program. Source provenance
 and callee correspondence must be supplied by downstream verification. See the
 original-bytecode section of `SOLIDITY_IMPORT.md` for scope and reproduction.
+
+
+The Solidity 0.7.6 payment extension reuses the raw-call response and original
+bytecode gas evidence boundaries. Native value calls observe the compiler's
+implicit GAS; discarded nonempty returndata still allocates memory. Selector
+encoding, bounded output copies and Yul switches are trusted importer lowering,
+covered by finite differential and mutation checks rather than a new equivalence
+axiom. `PaymentCallMocks` proves admissibility only for its explicitly configured
+finite child programs; it does not establish arbitrary token or receiver behavior.
+Contract reimbursement is distinct from EVM refund-counter and transaction-fee
+accounting, which remain outside the frame model. No project axiom is added.
