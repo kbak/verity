@@ -866,7 +866,7 @@ solidity_import tested from "{directory}" entry "Fixture.sol"
          "pragma solidity 0.8.34;\ncontract C {\n  function checked(uint256 x) external pure returns (uint256 r) {\n    assembly {\n      mstore(0x40, x)\n      r := x\n    }\n  }\n}\n",
          None,
          '{ evmVersion := "osaka", viaIR := true, optimizerRuns := some 466, bytecodeHash := "none" }',
-         'YulFunctionCall: [solidity-import:unsupported] only scratch-space mstore at 0x00 or 0x20 is supported'),
+         'YulFunctionCall: [solidity-import:unsupported] bounded memory requires a bounded free pointer'),
         ('yul-keccak256-unwritten-scratch-rejected',
          "pragma solidity 0.8.34;\ncontract C {\n  function checked(uint256 x) external pure returns (bytes32 r) {\n    assembly {\n      mstore(0x00, x)\n      r := keccak256(0x00, 0x40)\n    }\n  }\n}\n",
          None,

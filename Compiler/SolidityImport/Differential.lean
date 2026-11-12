@@ -50,7 +50,9 @@ private def jsonBytes (bytes : List UInt8) : Json :=
   toJson ("0x" ++ String.ofList (bytes.flatMap fun byte =>
     [Compiler.Hex.hexDigit (byte.toNat / 16), Compiler.Hex.hexDigit (byte.toNat % 16)]))
 
-private def execute (model : CompilationModel) (fn : FunctionSpec) (j : Json) : Except String Json := do
+private def execute (model : CompilationModel) (fn : FunctionSpec) (j : Json)
+    (context : DenoteTransaction := { sender := 0, functionSelector := 0x12345678, args := [] }) :
+    Except String Json := do
   let ident ← j.getObjValAs? String "id"
   let args ← words (← j.getObjVal? "args")
   let storage ← pairs (← j.getObjVal? "storage")
@@ -62,8 +64,7 @@ private def execute (model : CompilationModel) (fn : FunctionSpec) (j : Json) : 
     (fun current entry => current.writePhysicalSlot entry.1 (Uint256.ofNat entry.2))
     Verity.defaultState
   let tx : DenoteTransaction :=
-    { sender := 0, functionSelector := 0x12345678, args := args,
-      blockTimestamp := Uint256.ofNat timestamp }
+    { context with args := args, blockTimestamp := Uint256.ofNat timestamp }
   let worldWithTx := withTransactionContext world tx
   let publicResult := denoteFunction oracle model fn tx world
   let (status, output, data, finalWorld) ←
@@ -93,6 +94,31 @@ placeholder selector. Success means the compiler accepts the function; it says
 nothing about agreement with Denote or solc (that is what `run` samples). -/
 def compileRoot (model : CompilationModel) (fn : FunctionSpec) :=
   Compiler.CompilationModel.compile { model with functions := [fn] } [0x12345678] .osaka
+
+/-- Evaluate and compile the actual imported root with an explicit fork and call frame.
+Returns artifacts on stdout through a caller's JSON driver, so cached evaluation
+cannot omit filesystem effects. This is finite execution evidence, not a proof. -/
+def snapshotRoot (model : CompilationModel) (report : ImportReport) (name : String)
+    (targetFork : Intrinsics.HardFork) (context : DenoteTransaction) (input : Json) :
+    Except String Json := do
+  unless modelImportCovered model do throw "unsupported Denote slice"
+  let some fn := model.functions.find? (·.name == name) | throw "missing imported root"
+  let some status := report.functions.find? (·.function == name) | throw "missing root status"
+  unless status.denoteCovered do throw "root is not Denote-covered"
+  unless report.projections.isEmpty do throw "snapshot requires direct ABI parameters"
+  let ir ← Compiler.CompilationModel.compile { model with functions := [fn] }
+    [context.functionSelector] targetFork
+  let results ← (← input.getArr?).toList.mapM fun row => execute model fn row context
+  return Json.mkObj [
+    ("model", toJson (toString (repr model))), ("report", toJson report.toText),
+    ("digest", toJson report.sourceDigest), ("settings", toJson report.settingsJson),
+    ("solcLongVersion", toJson report.solcLongVersion), ("solcSha256", toJson report.solcSha256),
+    ("function", toJson name), ("params", toJson (fn.params.map (·.name))),
+    ("denoteCovered", toJson status.denoteCovered),
+    ("compilerProof", toJson status.compilerProof.toText),
+    ("targetFork", toJson targetFork.toString), ("selector", toJson context.functionSelector),
+    ("context", toJson (toString (repr context))),
+    ("yul", toJson (Compiler.Yul.render (Compiler.emitYul ir))), ("results", toJson results)]
 
 /-- The four statuses of every root, one block per root. `importable` holds for
 every listed root; `denoteCovered` and `compilerProofCovered` come from the
