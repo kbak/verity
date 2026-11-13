@@ -1,4 +1,4 @@
-"""Closed static queries may follow callbacks; direct storage and forged effects may not."""
+"""Closed static queries may follow callbacks; direct storage reads and forged effects may not."""
 import argparse
 import json
 from pathlib import Path
@@ -14,7 +14,8 @@ open Compiler Compiler.CompilationModel Compiler.CompilationModel.SolidityImport
   let callback := Stmt.ecm (ECM.SolidityRawCall.module "ok" false) []
   let typed := Stmt.ecm (ECM.LegacyBoolCall.module "ok" 1234 1)
     [.localVar "target", .localVar "account"]
-  for read in [query, typed, .ite (.localVar "flag") [query] [typed]] do
+  for read in [query, typed, .setStorage "slot" (.literal 1),
+      .ite (.localVar "flag") [query] [typed]] do
     unless stmtAfterTrailingCall read && onlyTrailingLowLevelCallWindows [callback, read] do
       throw (IO.userError "closed static continuation rejected")
   for bad in [{ raw with writesState := true }, { raw with readsState := false },
@@ -23,7 +24,10 @@ open Compiler Compiler.CompilationModel Compiler.CompilationModel.SolidityImport
       throw (IO.userError "forged static descriptor accepted")
   for read in [Stmt.ecm raw [.storage "target"],
       .ecm raw [.add (.literal 0) (.tload (.literal 0))],
-      .setStorage "slot" (.literal 1), .letVar "n" (.storage "slot"),
+      .setStorage "slot" (.storage "other"), .letVar "n" (.storage "slot"),
+      .setStorageAddr "address" (.literal 1),
+      .setStorageArrayElement "items" (.literal 0) (.literal 1),
+      .forEach "i" (.literal 2) [.setStorage "slot" (.literal 1)],
       .tstore (.literal 0) (.literal 1), .letVar "t" (.tload (.literal 0)),
       .forEach "i" (.literal 2) [query], .forEach "i" (.literal 2) [typed]] do
     unless !stmtAfterTrailingCall read &&
@@ -40,11 +44,18 @@ CASES = {
     'typed-bool': (HEADER + CALL + 'return I(target).query(address(this)) ? 1 : 0; }', None),
     'captured-target': (HEADER + 'target=stored; ' + CALL + QUERY + '}', None),
     'read-target': (HEADER + CALL + 'target=stored; ' + QUERY + '}',
-                    'storage-free trailing continuation'),
+                    'closed trailing continuation with storage-free operands'),
     'storage-after-query': (HEADER + CALL + QUERY.replace('return abi.decode(data,(uint256));',
-        'return abi.decode(data,(uint256))+count;') + '}', 'storage-free trailing continuation'),
+        'return abi.decode(data,(uint256))+count;') + '}', 'closed trailing continuation with storage-free operands'),
     'write-after-query': (HEADER + CALL + QUERY.replace('return abi.decode(data,(uint256));',
-        'count=1; return abi.decode(data,(uint256));') + '}', 'storage-free trailing continuation'),
+        'count=1; return abi.decode(data,(uint256));') + '}', None),
+    'mapping-write': (HEADER + CALL + 'cells[0]=1; return 0; }',
+        'closed trailing continuation with storage-free operands'),
+    'array-write': (HEADER + CALL + 'fixedValues[0]=1; return 0; }',
+        'does not support type uint256[2] storage ref'),
+    'write-storage-rhs': (HEADER + CALL + QUERY.replace('return abi.decode(data,(uint256));',
+        'count=count+1; return abi.decode(data,(uint256));') + '}',
+        'closed trailing continuation with storage-free operands'),
 }
 
 
@@ -62,7 +73,8 @@ def main():
     for name,(body,diagnostic) in CASES.items():
         (out/(name+'.sol')).write_text('pragma solidity 0.7.6; '
             'interface I { function query(address a) external view returns(bool); } '
-            'contract P { address stored; uint256 count; '+body+' }')
+            'contract P { address stored; uint256 count; mapping(uint256=>uint256) cells; '
+            'uint256[2] fixedValues; '+body+' }')
         driver = out/(name+'.lean')
         driver.write_text('import Compiler.SolidityImport.Import\n'
             f'solidity_import model from {json.dumps(str(out))} entry "{name}.sol"\n'

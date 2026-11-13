@@ -15692,7 +15692,9 @@ private def importSlice
       | .ecm mod _ => isClosedRawCall mod || isClosedVoidCall mod
       | _ => false) body.toList
     if statefulCalls && !onlyTrailingCallReentrancyWindows body.toList then
-      (failAt fn "raw and void calls require a storage-free trailing continuation").run' env
+      (failAt fn
+        ("raw and void calls require a closed trailing continuation " ++
+          "with storage-free operands")).run' env
     specs := specs.push
       { name := functionName, params := modelParams.toList, returnType := none,
         returns := returns.toList, isView,
@@ -15734,13 +15736,17 @@ private def importSlice
             name := "solidity_trailing_low_level_call_reentrancy"
             obligation := "Every state-changing external interaction is a closed low-level " ++
               "CALL, DELEGATECALL or void interface callback. Its continuation has no " ++
-              "direct persistent/transient storage reads or writes. Closed STATICCALLs " ++
+              "direct persistent/transient storage reads. Scalar field writes with storage-free " ++
+              "values use the current world; packed writes preserve its neighboring bits. " ++
+              "Address-field, mapping/array writes and explicit transient operations remain " ++
+              "excluded, as do writes inside post-call loops. Closed STATICCALLs " ++
               "observe the current committed world, including callback changes, and " ++
               "cannot change it. Their operands and scalar logs are storage-free. " ++
               "Earlier local snapshots may be stale; truthful query results and " ++
               "callee correspondence remain consumer obligations. Denote lets the " ++
               "callback change any account, including this one. A later parent revert " ++
-              "rolls back the whole frame. Admission is checked by the importer, not proved."
+              "rolls back the whole frame. Lock restoration is not a general reentrancy-safety " ++
+              "proof. Admission is checked by the importer, not proved."
             proofStatus := .unchecked }] else []) }
     for proj in env.projections do
       let ignored :=

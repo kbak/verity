@@ -319,6 +319,8 @@ def setup() -> None:
     subprocess.run(["lake", "build", "Compiler.SolidityImport.Differential",
                     "Compiler.SolidityImport.StaticOracleMocks",
                     "Compiler.SolidityImport.Import",
+                    "Compiler.SolidityImport.PostCallStorageFrames",
+                    "Contracts.SolidityImportSmoke.PostCallStorageMocks",
                     "Compiler.SolidityImport.SequenceRunner"], cwd=ROOT, check=True)
     WORK.mkdir(parents=True, exist_ok=True)
     # Provision the differential venv and pinned compilers once, before workers share them.
@@ -994,6 +996,17 @@ def tasks(update_golden: bool) -> list:
               for optimized in (False, True)]
     items += [("deployed-immutable-guard-mutation", 1, lambda: module_campaign_output(
         "check_deployed_immutables", "deployed-immutable-guard-mutation", 1800, "--mutant"))]
+    items += [(f"legacy-storage-members-opt{int(optimized)}", 1,
+               lambda optimized=optimized: module_campaign_output(
+                   "check_legacy_storage_members", "legacy-storage-members", 1800,
+                   *(["--optimized"] if optimized else [])))
+              for optimized in (False, True)]
+    items += [(f"legacy-storage-members-{mutation}", 1,
+               lambda mutation=mutation: module_campaign_output(
+                   "check_legacy_storage_members", "legacy-storage-members-mutation", 1800,
+                   "--mutation", mutation)) for mutation in ("neighbor-clobber", "missing-restore")]
+    items += [("legacy-storage-member-boundaries", 1, lambda: module_campaign_output(
+        "check_legacy_storage_member_boundaries", "legacy-storage-member-boundaries", 900))]
     items += [(f"assignment-siblings-opt{int(optimized)}", 1,
                lambda optimized=optimized: module_campaign_output(
                    "check_legacy_assignment_siblings", "assignment-siblings", 1800, "--prepared",
@@ -1005,6 +1018,15 @@ def tasks(update_golden: bool) -> list:
                    "--mutation", mutation)) for mutation in ("drop-guard", "drop-assignment")]
     items += [("assignment-sibling-boundaries", 1, lambda: module_campaign_output(
         "check_assignment_sibling_boundaries", "assignment-sibling-boundaries", 900))]
+    items += [(f"post-call-storage-opt{int(optimized)}", 1,
+               lambda optimized=optimized: module_campaign_output(
+                   "check_post_call_storage", "post-call-storage", 1800,
+                   *(["--optimized"] if optimized else [])))
+              for optimized in (False, True)]
+    items += [(f"post-call-storage-{mutation}", 1,
+               lambda mutation=mutation: module_campaign_output(
+                   "check_post_call_storage", "post-call-storage-mutation", 1800,
+                   "--mutation", mutation)) for mutation in ("stale-neighbor", "missing-restore")]
     items += [(f"post-call-balances-opt{int(optimized)}", 1,
                lambda optimized=optimized: module_campaign_output(
                    "check_post_call_balances", "post-call-balances", 1800,
