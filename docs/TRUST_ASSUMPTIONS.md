@@ -80,6 +80,14 @@ premise, gas guarantee or source/compiler correspondence is added. Write-then-re
 composition, tail-only cleanup and the pinned downstream wrapper remain separate
 #32 obligations; see `PACKED_STORAGE_UPDATES.md`.
 
+The full-cleanup rollback preparation adds a CI regression gate, not an admission
+change, theorem or axiom. The complete frozen sequence runs on the source EVM;
+revert-removal and error-payload mutants establish finite sensitivity. Separate
+probes isolate the post-effect memory audit and the compiler's return-path
+rejection for an imported literal-zero custom-error guard. Packed Denote/generated
+rollback remains blocked. Existing expectations, frame hypotheses and hash
+premises are unchanged; see `PACKED_STORAGE_ROLLBACK.md`.
+
 The tail-only caller probes compare controlled upper-bit perturbations against
 the unchanged packed hashes. They retain both complete state archives without
 executing their transactions in this stateless campaign. All current tail-only
