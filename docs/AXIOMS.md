@@ -752,7 +752,8 @@ Explicit deployed immutable bindings add no project axiom or assumed ECM summary
 The trusted Solidity frontend checks typed submitted words against a freshly
 compiled runtime template and solc immutable reference ranges, including every
 unpatched byte and repeated occurrence. Signed patch words are normalized by sign
-extension before high-level use; this does not admit legacy signed expressions.
+extension before high-level use. Legacy signed expression admission is separately
+restricted to the scalar arithmetic/cast slice described below.
 Reads/getters become literal model words;
 `address(this)` retains the execution account, including under delegatecall. The
 previous implicit constructor-address substitution is removed. Declaration identity
@@ -870,3 +871,22 @@ words, exact errors and ordered logs cover normal/early modifier exits and late
 whole-frame rollback. Omitting restoration or overwriting the callback's neighbor
 with an old snapshot must produce completed counterexamples. These tests assume
 adequate gas; original-bytecode gas obligations and generated gas limits remain.
+
+
+Legacy signed scalar arithmetic and integer casts add no project axiom or ECM
+assumption. The trusted solc frontend supplies widths and conversion types; the
+importer reuses wrapping word arithmetic, signed comparisons and SIGNEXTEND.
+ABI-v1 narrow signed inputs are cleaned, while ABI-v2 validates canonical sign
+extension before source execution. Range checks remain explicit source guards;
+casts do not synthesize modern panic behavior. Out-of-range literal casts are cleaned
+at the destination width. Signed division/modulo, storage, assembly and external
+call transport remain rejected by this admission path.
+
+`LegacySignedProofs` establishes mathematical signed narrowing/range equivalence,
+unsigned wrapping addition/subtraction guard conditions, and evaluation of the
+actual emitted signed ABI cleanup to the shared SIGNEXTEND primitive. The
+mathematical laws are not a solc-to-model simulation or an application proof.
+Independent integer-oracle differential checks cover ABI coders, width/sign
+boundaries, exact failure bytes and storage frames; completed guard-removal
+counterexamples establish that the observations distinguish those defects.
+The remaining frontend trust boundary and deployment/gas assumptions are unchanged.

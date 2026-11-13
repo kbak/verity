@@ -320,6 +320,7 @@ def setup() -> None:
                     "Compiler.SolidityImport.StaticOracleMocks",
                     "Compiler.SolidityImport.Import",
                     "Compiler.SolidityImport.PostCallStorageFrames",
+                    "Compiler.SolidityImport.LegacySignedProofs",
                     "Contracts.SolidityImportSmoke.PostCallStorageMocks",
                     "Compiler.SolidityImport.SequenceRunner"], cwd=ROOT, check=True)
     WORK.mkdir(parents=True, exist_ok=True)
@@ -1018,6 +1019,19 @@ def tasks(update_golden: bool) -> list:
                    "--mutation", mutation)) for mutation in ("drop-guard", "drop-assignment")]
     items += [("assignment-sibling-boundaries", 1, lambda: module_campaign_output(
         "check_assignment_sibling_boundaries", "assignment-sibling-boundaries", 900))]
+    items += [(f"legacy-signed-opt{int(optimized)}-v{2 if v2 else 1}", 1,
+               lambda optimized=optimized, v2=v2: module_campaign_output(
+                   "check_legacy_signed_scalars", "legacy-signed-scalars", 1800, "--prepared",
+                   "--context", "2" if optimized else "0",
+                   *(["--optimized"] if optimized else []), *(["--abi-v2"] if v2 else [])))
+              for optimized in (False, True) for v2 in (False, True)]
+    items += [(f"legacy-signed-{mutation}", 1,
+               lambda mutation=mutation: module_campaign_output(
+                   "check_legacy_signed_scalars", "legacy-signed-mutation", 1800, "--prepared",
+                   "--mutation", mutation))
+              for mutation in ("drop-cast-guard", "drop-delta-guard")]
+    items += [("legacy-signed-boundaries", 1, lambda: module_campaign_output(
+        "check_legacy_signed_rejections", "legacy-signed-boundaries", 900, "--prepared"))]
     items += [(f"post-call-storage-opt{int(optimized)}", 1,
                lambda optimized=optimized: module_campaign_output(
                    "check_post_call_storage", "post-call-storage", 1800,
