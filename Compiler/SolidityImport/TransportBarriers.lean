@@ -217,10 +217,13 @@ end
 local bindings, checks, scalar events, returns and further closed calls.
 Closed static queries observe the current world without changing it.
 Event arguments must read no storage. Logs open no additional reentrancy window;
-direct post-call persistent/transient storage reads and writes remain rejected. -/
+Scalar field assignments may write a storage-free value; packed writes merge into
+the current callback world. Direct storage reads, address-field writes, explicit
+transient operations and writes inside post-call loops remain rejected. -/
 partial def stmtAfterTrailingCall : Stmt → Bool
   | .forEach name count body => postCallMemoryStmt (.forEach name count body)
-  | .letVar _ value | .assignVar _ value | .require value _ => exprStorageFree value
+  | .letVar _ value | .assignVar _ value | .require value _ | .setStorage _ value =>
+      exprStorageFree value
   | .requireError condition _ args => exprStorageFree condition && args.all exprStorageFree
   | .ite condition yes no =>
       exprStorageFree condition && yes.all stmtAfterTrailingCall && no.all stmtAfterTrailingCall

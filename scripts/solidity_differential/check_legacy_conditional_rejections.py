@@ -63,7 +63,7 @@ CASES = {
         '{ return h(f ? n++ : 0,n); }', 'run(bool,uint256)', 'assignment expression in multi-argument call'),
     'post-call-storage': ('interface I { function hook() external; }',
         'function run(address t,bool f) external { I(t).hook(); stored=f ? 1 : 2; }',
-        'run(address,bool)', 'storage-free trailing continuation'),
+        'run(address,bool)', None),
 }
 
 if __name__ == '__main__':

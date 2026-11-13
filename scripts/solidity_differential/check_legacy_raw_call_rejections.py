@@ -9,13 +9,15 @@ SIGNATURE = 'run(address,bytes,uint256)'
 FUNCTION = ('function run(address target,bytes memory data,uint256 n) public returns(bool ok) { ')
 CALL = 'assembly { ok := call(n,target,0,add(data,32),mload(data),0,0) } '
 CASES = {
-    'post-write': (FUNCTION + CALL + 'stored=n; }', SIGNATURE, 'storage-free trailing continuation'),
-    'post-read': (FUNCTION + CALL + 'return stored>0; }', SIGNATURE, 'storage-free trailing continuation'),
+    'post-write': (FUNCTION + CALL + 'stored=n; }', SIGNATURE, None),
+    'post-write-read': (FUNCTION + CALL + 'stored+=n; }', SIGNATURE,
+                        'closed trailing continuation with storage-free operands'),
+    'post-read': (FUNCTION + CALL + 'return stored>0; }', SIGNATURE, 'closed trailing continuation with storage-free operands'),
     'post-log': (FUNCTION + CALL + 'emit Seen(n); }', SIGNATURE, None),
     'post-log-storage-read': (FUNCTION + CALL + 'emit Seen(stored); }', SIGNATURE,
-                              'storage-free trailing continuation'),
+                              'closed trailing continuation with storage-free operands'),
     'post-branch-read': (FUNCTION + CALL + 'if(ok) return stored>0; }', SIGNATURE,
-                         'storage-free trailing continuation'),
+                         'closed trailing continuation with storage-free operands'),
     'scratch-word-output': (FUNCTION + CALL.replace('mload(data),0,0', 'mload(data),0,32') + '}',
                             SIGNATURE, None),
     'output-area': (FUNCTION + CALL.replace('mload(data),0,0', 'mload(data),0,31') + '}',
