@@ -1,3 +1,4 @@
+import Compiler.SolidityImport.LegacySigned
 import Compiler.SolidityImport.LegacyControlFlow
 import Compiler.SolidityImport.LegacyAbi
 import Compiler.SolidityImport.LegacyArrays
@@ -80,6 +81,13 @@ def legacyCleanHelperArgument (caller : Env) (argument : Json)
 
 /-- Reject dirty narrow reads at both scalar and statement assembly entry points. -/
 def validateLegacyAssemblyReads (node : Json) : M Unit := do
+  for ref in (← mArr (← mField node "externalReferences")) do
+    let id ← mNat (← mField ref "declaration")
+    if let some ty := (← get).scalarTy.find? id then
+      match ty with
+      | .int256 | .intN _ =>
+          failAt node "Solidity 0.7.6 signed assembly references are outside the scalar slice"
+      | _ => pure ()
   let ast ← mField node "AST"
   let stmts ← mArr (← mField ast "statements")
   -- The existing terminal-revert path applies its stricter narrow-reference rule.
@@ -114,6 +122,10 @@ def cleanLegacyStorageAddress (ty : ParamType) (value : Val) : Val :=
 /-- Narrow assignment results need an explicit bound in the legacy assembly
 slice; enforce it for named results as well as ordinary writable locals. -/
 def validateLegacyYulAssignment (node : Json) (ty : ParamType) (rhs : Expr) : M Unit := do
+  match ty with
+  | .int256 | .intN _ =>
+      failAt node "Solidity 0.7.6 signed assembly assignments are outside the scalar slice"
+  | _ => pure ()
   unless isFullWordYulScalar ty || isProvablyBoundedYulExpr ty rhs do
     failAt node "Solidity 0.7.6 Yul assignment to narrow local requires a bounded value"
 
@@ -140,6 +152,7 @@ partial def validateLegacyDeclaration (node : Json) (encodingInput : Bool := fal
         validateLegacyYul false ast
       return
     if let some kind := optStr node "nodeType" then
+      LegacySigned.validate node
       unless #["FunctionDefinition", "ParameterList", "VariableDeclaration", "Block",
           "ExpressionStatement", "VariableDeclarationStatement", "IfStatement", "Return",
           "BinaryOperation", "UnaryOperation", "Assignment", "Identifier", "Literal", "Conditional",
@@ -166,7 +179,8 @@ partial def validateLegacyDeclaration (node : Json) (encodingInput : Bool := fal
           (ty.startsWith "function (" && !(ty.replace "address[] memory" "address").contains '[')
         if (ty.contains '[' && !supportedArray) ||
             ty.startsWith "struct " ||
-            (ty.startsWith "int" && !ty.startsWith "int_const") ||
+            (ty.startsWith "int" && !ty.startsWith "int_const" &&
+              (signedBitsOf ty).isNone) ||
             (ty.startsWith "bytes " && ty != "bytes memory" && ty != "bytes calldata") ||
             ty.startsWith "string " then
           failAt node s!"Solidity 0.7.6 scalar slice does not support type {ty}"
@@ -272,18 +286,20 @@ partial def validateLegacyDeclaration (node : Json) (encodingInput : Bool := fal
           failAt node "Solidity 0.7.6 fixed-bytes indexing may execute INVALID"
       if kind == "FunctionCall" && optStr node "kind" == some "typeConversion" then
         let target := (field? node "typeDescriptions").bind (optStr · "typeString") |>.getD ""
-        unless target.startsWith "uint" || target.startsWith "address" ||
+        unless target.startsWith "uint" || (signedBitsOf target).isSome ||
+            target.startsWith "address" ||
             (fixedBytesWidth? target).isSome || target.startsWith "contract " ||
             target.startsWith "enum " do
-          failAt node "Solidity 0.7.6 scalar slice admits only unsigned/address conversions"
+          failAt node "Solidity 0.7.6 scalar slice requires supported scalar conversions"
         for arg in (← mArr (← mField node "arguments")) do
           let source := (field? arg "typeDescriptions").bind (optStr · "typeString") |>.getD ""
-          unless source.startsWith "uint" || source.startsWith "address" ||
+          unless source.startsWith "uint" || (signedBitsOf source).isSome ||
+              source.startsWith "address" ||
               source.startsWith "int_const" || source.startsWith "enum " ||
               (fixedBytesWidth? source).isSome ||
               source.startsWith "literal_string " ||
               (target.startsWith "address" && source.startsWith "contract ") do
-            failAt node "Solidity 0.7.6 scalar slice admits only unsigned/address conversions"
+            failAt node "Solidity 0.7.6 scalar slice requires supported scalar conversions"
       if kind == "FunctionCall" && optStr node "kind" == some "functionCall" then
         let callee ← mField node "expression"
         let ty := (field? callee "typeDescriptions").bind (optStr · "typeString") |>.getD ""

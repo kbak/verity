@@ -55,7 +55,7 @@ CASES = {
         '{ function() internal pure returns(uint256) h=f ? a : b; return h(); }', 'run(bool)',
         'does not support FunctionTypeName'),
     'signed': ('', 'function run(bool f,int256 a,int256 b) external pure returns(int256) '
-        '{ return f ? a : b; }', 'run(bool,int256,int256)', 'does not support type int256'),
+        '{ return f ? a : b; }', 'run(bool,int256,int256)', SCALAR),
     'unselected-gas': ('', 'function run(bool f) external view returns(uint256) '
         '{ return f ? 1 : gasleft(); }', 'run(bool)', 'builtin call is outside'),
     'effectful-neighbor': ('', 'function h(uint256 a,uint256 b) internal pure returns(uint256) '

@@ -15,6 +15,9 @@ def cleanScalar (ty : ParamType) (word : Expr) : Expr :=
   | .uint8 => .bitAnd word (.literal (2^8-1))
   | .uint16 => .bitAnd word (.literal (2^16-1))
   | .uintN bits => if bits < 256 then .bitAnd word (.literal (2^bits-1)) else word
+  | .intN bits =>
+      if 0 < bits && bits < 256 && bits % 8 == 0 then
+        .signextend (.literal (bits / 8 - 1)) word else word
   | .address => .bitAnd word (.literal (2^160-1))
   | .bool => .logicalNot (.logicalNot word)
   | _ => word
