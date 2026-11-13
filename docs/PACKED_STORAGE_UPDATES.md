@@ -3,6 +3,9 @@
 This extends #32's full-cleanup read composition to successful raw storage-word
 updates and scalar events. It does not complete #32: write-then-revert composition,
 tail-only cleanup and the pinned downstream wrapper remain separate work.
+The next [rollback regression preparation and design](PACKED_STORAGE_ROLLBACK.md)
+preserves the complete frozen sequence and isolates the remaining admission and
+compiler-validation blockers without implementing either fix.
 
 ## Admission boundary
 

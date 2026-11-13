@@ -50,6 +50,14 @@ the existing hash premises. The unchanged successful state/log prefix executes
 on all three routes; that finite evidence does not prove frontend or compiler
 correspondence. See `PACKED_STORAGE_UPDATES.md` for the remaining #32 obligations.
 
+The full-cleanup rollback preparation adds a CI regression gate, not an admission
+change, theorem or axiom. The complete frozen sequence runs on the source EVM;
+revert-removal and error-payload mutants establish finite sensitivity. Separate
+probes isolate the post-effect memory audit and the compiler's return-path
+rejection for an imported literal-zero custom-error guard. Packed Denote/generated
+rollback remains blocked. Existing expectations, frame hypotheses and hash
+premises are unchanged; see `PACKED_STORAGE_ROLLBACK.md`.
+
 The tail-only caller-liveness preparation adds no axiom, theorem or admission.
 Controlled upper-bit perturbations provide finite source-EVM sensitivity evidence
 against unchanged packed hashes. All tail-only roots still reject; no Denote or
