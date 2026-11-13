@@ -9,8 +9,7 @@ interface IBalanceCallback {
 }
 library CheckedBalanceAdd {
     function add(uint256 a, uint256 b) internal pure returns (uint256 c) {
-        c = a + b;
-        require(c >= a, "overflow");
+        require((c = a + b) >= a, "overflow");
     }
 }
 contract LegacyPostCallBalance {

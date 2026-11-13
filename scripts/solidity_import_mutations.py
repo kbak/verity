@@ -317,7 +317,9 @@ def setup() -> None:
         raise SystemExit(f"missing {SOLC}")
     # The checks import the status driver, which `lake build SolidityImportSmoke` does not build.
     subprocess.run(["lake", "build", "Compiler.SolidityImport.Differential",
-                    "Compiler.SolidityImport.StaticOracleMocks"], cwd=ROOT, check=True)
+                    "Compiler.SolidityImport.StaticOracleMocks",
+                    "Compiler.SolidityImport.Import",
+                    "Compiler.SolidityImport.SequenceRunner"], cwd=ROOT, check=True)
     WORK.mkdir(parents=True, exist_ok=True)
     # Provision the differential venv and pinned compilers once, before workers share them.
     subprocess.run(["sh", str(ROOT / "scripts/check_solidity_differential.sh"), "--help"],
@@ -992,6 +994,17 @@ def tasks(update_golden: bool) -> list:
               for optimized in (False, True)]
     items += [("deployed-immutable-guard-mutation", 1, lambda: module_campaign_output(
         "check_deployed_immutables", "deployed-immutable-guard-mutation", 1800, "--mutant"))]
+    items += [(f"assignment-siblings-opt{int(optimized)}", 1,
+               lambda optimized=optimized: module_campaign_output(
+                   "check_legacy_assignment_siblings", "assignment-siblings", 1800, "--prepared",
+                   *(["--optimized"] if optimized else [])))
+              for optimized in (False, True)]
+    items += [(f"assignment-siblings-{mutation}", 1,
+               lambda mutation=mutation: module_campaign_output(
+                   "check_legacy_assignment_siblings", "assignment-siblings-mutation", 1800, "--prepared",
+                   "--mutation", mutation)) for mutation in ("drop-guard", "drop-assignment")]
+    items += [("assignment-sibling-boundaries", 1, lambda: module_campaign_output(
+        "check_assignment_sibling_boundaries", "assignment-sibling-boundaries", 900))]
     items += [(f"post-call-balances-opt{int(optimized)}", 1,
                lambda optimized=optimized: module_campaign_output(
                    "check_post_call_balances", "post-call-balances", 1800,

@@ -1,5 +1,6 @@
 import Mathlib.Data.Nat.Basic
 import Compiler.SolidityImport.Access
+import Compiler.SolidityImport.AssignmentOrder
 
 /-!
 Lemmas for proofs about an imported model's `Denote` execution: 256-bit word
@@ -94,17 +95,6 @@ theorem ofNat_val (u : Uint256) : Uint256.ofNat u.val = u := by
       · subst n; simp [lookupValue, bindValue, h, Ne.symm h]
       · simpa [lookupValue, bindValue, h, hn, hk] using ih
 
-mutual
-/-- A prefix can only continue or revert, and cannot assign a protected name. -/
- def prefixStmt (keys : List String) : Stmt → Bool
-  | .letVar name _ | .assignVar name _ => !keys.contains name
-  | .ite _ yes no => prefixList keys yes && prefixList keys no
-  | .panic _ => true
-  | _ => false
- def prefixList (keys : List String) : List Stmt → Bool
-  | [] => true
-  | s :: ss => prefixStmt keys s && prefixList keys ss
-end
 
 def Frame (keys : List String) (s : DenoteState) : StmtOutcome → Prop
  | .continue t => t.world = s.world ∧ ∀ k ∈ keys, lookupValue t.bindings k = lookupValue s.bindings k
@@ -160,6 +150,20 @@ mutual
      · trivial
      · simp_all [Frame]
 end
+
+/-- An admitted prelude preserves the sibling value on every successful continuation.
+Source lowering and bytecode correspondence remain separate obligations. -/
+theorem local_assignment_sibling_frame (oracle : DenoteOracle) (fields : List Field)
+    (before after : DenoteState) (pre : List Stmt) (sibling : Expr)
+    (admitted : localAssignmentSibling pre sibling = true)
+    (executed : execStmtList oracle fields before pre = .continue after) :
+    after.world = before.world ∧
+      evalExpr oracle fields after sibling = evalExpr oracle fields before sibling := by
+  cases sibling <;> simp only [localAssignmentSibling, Bool.false_eq_true] at admitted
+  rename_i name
+  have frame := list_frame oracle fields before pre [name] admitted
+  rw [executed] at frame
+  exact ⟨frame.1, congrArg some (frame.2 name (by simp only [List.mem_singleton]))⟩
 
 theorem exec_append (o : DenoteOracle) (fs : List Field) (s : DenoteState)
     (a b : List Stmt) : execStmtList o fs s (a ++ b) =
