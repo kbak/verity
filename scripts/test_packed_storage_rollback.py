@@ -103,19 +103,47 @@ class PackedStorageRollbackTests(unittest.TestCase):
             rollback.source_variants(original.replace('revert Rejected(next);', 'revert();'))
 
     def test_compiler_boundary_requires_the_exact_structured_result(self):
-        rollback.require_compilation({'status': 'compiled'}, False)
-        rollback.require_compilation({'status': 'rejected', 'reason': rollback.COMPILER_REJECTION}, True)
-        for declared in (False, True):
+        rollback.require_compilation({'status': 'compiled'})
+        rollback.require_compilation({'status': 'rejected', 'reason': rollback.COMPILER_REJECTION}, False)
+        for terminal in (False, True):
             for bad in ({}, {'status': 'crashed'}, {'status': 'rejected', 'reason': 'timeout'},
                         {'status': 'rejected', 'reason': 'other compiler error'}):
                 with self.assertRaises(HarnessError):
-                    rollback.require_compilation(bad, declared)
+                    rollback.require_compilation(bad, terminal)
+        for result, terminal in (({'status': 'compiled'}, False),
+                                  ({'status': 'rejected', 'reason': rollback.COMPILER_REJECTION}, True)):
+            with self.assertRaises(HarnessError):
+                rollback.require_compilation(result, terminal)
+        self.assertEqual({case for case, (_, terminal) in rollback.TAIL_CASES.items() if not terminal},
+                         {'nonzero', 'unknown', 'stop', 'conditional-fallthrough'})
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp)
             with patch.object(rollback, 'eval_json', side_effect=HarnessError('evaluation failed')):
                 with self.assertRaisesRegex(HarnessError, 'evaluation failed'):
                     rollback.probe_compilation(directory, directory / 'Source.sol',
                                                'ScalarControl', 'fail(uint128)')
+
+    def test_declared_control_needs_exact_errors_and_rollback_on_every_actual_route(self):
+        rows = [{'id': ident, 'fields': ['data']} for ident in self.reverted]
+        good = {'routes': list(rollback.ROUTES), 'divergences': [],
+                'mismatches': {route: copy.deepcopy(rows) for route in rollback.ROUTES}}
+        rollback.require_error_mutation(good, self.spec)
+        for route in rollback.ROUTES:
+            for field in ('status', 'events', 'storage'):
+                bad = copy.deepcopy(good)
+                bad['mismatches'][route][0]['fields'].append(field)
+                with self.assertRaises(HarnessError):
+                    rollback.require_error_mutation(bad, self.spec)
+            for defect in ('missing-route', 'missed-error', 'divergence'):
+                bad = copy.deepcopy(good)
+                if defect == 'missing-route':
+                    del bad['mismatches'][route]
+                elif defect == 'missed-error':
+                    bad['mismatches'][route].pop()
+                else:
+                    bad['divergences'] = ['payload']
+                with self.assertRaises(HarnessError):
+                    rollback.require_error_mutation(bad, self.spec)
 
 
 if __name__ == '__main__':

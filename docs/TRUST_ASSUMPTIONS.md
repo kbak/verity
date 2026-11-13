@@ -80,13 +80,20 @@ premise, gas guarantee or source/compiler correspondence is added. Write-then-re
 composition, tail-only cleanup and the pinned downstream wrapper remain separate
 #32 obligations; see `PACKED_STORAGE_UPDATES.md`.
 
-The full-cleanup rollback preparation adds a CI regression gate, not an admission
-change, theorem or axiom. The complete frozen sequence runs on the source EVM;
-revert-removal and error-payload mutants establish finite sensitivity. Separate
-probes isolate the post-effect memory audit and the compiler's return-path
-rejection for an imported literal-zero custom-error guard. Packed Denote/generated
-rollback remains blocked. Existing expectations, frame hypotheses and hash
-premises are unchanged; see `PACKED_STORAGE_ROLLBACK.md`.
+The full-cleanup rollback gate retains the complete frozen source sequence and
+its revert-removal/error-payload mutations. The supplied-key declared-return
+control now executes on source EVM, actual Denote and generated Cancun EVM;
+a wrong error argument must change only the reverted payloads on every route.
+Packed rollback still rejects at the post-effect memory audit. No packed
+Denote/generated-EVM agreement is claimed; see `PACKED_STORAGE_ROLLBACK.md`.
+
+The literal-zero custom-error guard refinement preserves the imported statements,
+compiler lowering and final return-path check. Only `requireError (literal 0)`
+gains terminal metadata. Local lemmas in `DenoteErrorGuard.lean` establish metadata
+consistency, exact existing Denote outcomes and no continuation, including
+argument/encoding failures. This adds no axiom or cryptographic premise and does
+not prove the complete control-flow analysis or source/compiler correspondence.
+Frozen expectations and existing memory/frame hypotheses remain unchanged.
 
 The tail-only caller probes compare controlled upper-bit perturbations against
 the unchanged packed hashes. They retain both complete state archives without

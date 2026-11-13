@@ -1,9 +1,11 @@
-# Full-cleanup rollback preparation
+# Full-cleanup rollback boundary and terminal error guards
 
-This prepares the next part of fork #32 on #62. It changes no importer admission,
-compiler behavior, proof, fixture or independent expectation. Implementation must
-wait for #62 to merge. Full-cleanup rollback remains unaccepted until actual source
-EVM, imported Denote and generated Cancun EVM execute the complete frozen sequence.
+This tracks the next part of fork #32 after #62 and #63. Literal-zero custom-error
+guards now have terminal control-flow metadata, allowing the supplied-key root
+with declared return values to compile and execute on all three routes. Packed
+rollback admission remains unchanged: the full-cleanup root still rejects until
+the bounded post-effect revert audit is implemented. Fixtures and independent
+expectations remain unchanged.
 
 ## Regression contract
 
@@ -31,41 +33,52 @@ not execution evidence for a broken backend.
 The supplied-key control also runs its complete source sequence, with and without
 declared return values on its always-reverting root. Only control inputs use
 precomputed keys; expected observations and transaction environments stay intact.
-The existing separate storage-control gate retains actual three-route rollback
-coverage. It does not establish packed-hash/rollback composition.
+The declared-return control now also runs the complete unchanged sequence through
+actual Denote and generated Cancun EVM. A changed error argument must affect only
+the exact reverted payloads on every route, preserving state, logs and successful
+calls. The existing separate storage-control gate remains required. Neither
+supplied-key control establishes packed-hash/rollback composition.
 
-## Two independently observed blockers
+## Current admission and compilation boundaries
 
 | Case | Importer | Compiler |
 | --- | --- | --- |
 | Full-cleanup packed root, with or without declared return values | Rejected by the memory-independent successful suffix audit | Not reached |
 | Supplied-key root, no declared return values | Admitted | Compiles |
-| Same supplied-key root, with declared scalar return values | Admitted | Rejected by exhaustive return-path validation |
+| Same supplied-key root, with declared scalar return values | Admitted | Compiles and agrees on all three routes |
 
 The importer already marks a Solidity `RevertStatement` as terminal in
 [`lowerRootStatements`](../Compiler/SolidityImport/Import.lean), but `lowerRevert`
 represents the custom error as `Stmt.requireError (Expr.literal 0)`. The imported
-control model retains that representation. The second blocker is the compiler's
+control model retains that representation. The compiler's
 [`stmtListAlwaysReturnsOrReverts` check](../Compiler/CompilationModel/Validation.lean),
 which delegates to the structural control-flow summary in
-[`Types.lean`](../Verity/Core/Model/Types.lean). That summary conservatively permits
-fallthrough for every `requireError`, including a literal-zero condition;
-`revertError` itself is already classified as terminal. The regression invokes
-the actual compiler and requires its exact structured rejection. Evaluation
-errors cannot satisfy this check. No source return declaration is removed to
-claim acceptance of the original packed root.
+[`Types.lean`](../Verity/Core/Model/Types.lean), previously allowed fallthrough for
+that representation. Direct metadata and the recursive summary now classify
+only the syntactic `requireError (literal 0)` case as terminal. Other conditions
+retain their conservative classification. The final return-path check, imported
+statements, argument lists and generated lowering are unchanged.
 
-## Implementation stages after #62 merges
+The regression invokes the actual compiler on the imported root and controlled
+tail variants. True and unknown guards, a falling-through conditional alternative
+and raw `stop` must retain the exact return-path rejection. A zero guard followed
+by unreachable `stop`, and a conditional whose alternatives both revert, compile.
+Evaluation failures cannot satisfy any compiler result check.
 
-1. **Literal-zero custom-error guard classification.** Refine the canonical
-   structural summary for `requireError (literal 0)` to record no successful
-   fallthrough. Preserve the imported representation and the final return-path
-   check. True and unknown conditions must still permit fallthrough; reject raw
-   `stop` for declared returns and reject a conditional with a falling-through
-   alternative. Check direct metadata and recursive summary consistency, argument
-   evaluation failures and sequential composition. Do not add dummy returns or
-   infer terminality from a function name. The supplied-key declared-return
-   control must then compile and match all three routes on the unchanged sequence.
+[`DenoteErrorGuard.lean`](../Verity/Core/Model/DenoteErrorGuard.lean) proves that
+direct and recursive metadata agree, every guard argument remains visible to
+other audits, and the zero guard returns the existing custom-error bytes or
+reverts when argument evaluation/encoding fails. It cannot continue, return or
+execute a later statement. These are local Denote/control-flow lemmas, not a
+global soundness proof for the complete control-flow analysis or importer.
+
+## Completed slice and next implementation stage
+
+1. **Literal-zero custom-error guard classification: implemented.** The generic
+   structural refinement and local proofs preserve the imported representation,
+   final return-path check and all independent expectations. The supplied-key
+   declared-return control now requires real three-route agreement and error-byte
+   mutation sensitivity; no dummy returns or function-name dispatch are added.
 2. **Bounded terminal custom errors after storage effects.** Extend the structural
    suffix audit only for terminal custom errors, including the current literal-zero
    `requireError` representation, with supported static scalar
@@ -73,7 +86,8 @@ claim acceptance of the original packed root.
    against subsequent memory observations, calls, loops and unsupported branches.
    Preserve the existing lowering order and complete mapping-scratch provenance.
    The original full-cleanup root must execute the entire frozen sequence through
-   all three routes; both blocker regressions must become positive execution gates.
+   all three routes. Promote the packed rejection controls to positive execution
+   gates while preserving the full frozen expectations and negative boundaries.
 
 The second stage must account for the actual
 [`revertWithCustomError`](../Compiler/CompilationModel/AbiEncoding.lean) encoder:
