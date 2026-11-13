@@ -15727,13 +15727,15 @@ private def importSlice
             proofStatus := .unchecked }] else []) ++
           (if onlyTrailingCallReentrancyWindows body.toList then [{
             name := "solidity_trailing_low_level_call_reentrancy"
-            obligation := "Every external interaction that can re-enter is a closed low-level " ++
-              "CALL, DELEGATECALL or void interface callback after which the body reads " ++
-              "and writes no storage. " ++
-              "Scalar logs use storage-free arguments and make no call, so a re-entrant " ++
-              "entrypoint observes only the completed state " ++
-              "updates. Denote lets the callee's committed world change any account, " ++
-              "including this one. The trailing position is checked by the importer, not proved."
+            obligation := "Every state-changing external interaction is a closed low-level " ++
+              "CALL, DELEGATECALL or void interface callback. Its continuation has no " ++
+              "direct persistent/transient storage reads or writes. Closed STATICCALLs " ++
+              "observe the current committed world, including callback changes, and " ++
+              "cannot change it. Their operands and scalar logs are storage-free. " ++
+              "Earlier local snapshots may be stale; truthful query results and " ++
+              "callee correspondence remain consumer obligations. Denote lets the " ++
+              "callback change any account, including this one. A later parent revert " ++
+              "rolls back the whole frame. Admission is checked by the importer, not proved."
             proofStatus := .unchecked }] else []) }
     for proj in env.projections do
       let ignored :=

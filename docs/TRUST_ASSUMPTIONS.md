@@ -2790,3 +2790,18 @@ correspondence. Generated code keeps the original literals; it does not rerun th
 original constructor. Existing expression restrictions, external-call assumptions
 and original-bytecode gas evidence obligations remain. Finite differential checks
 and malformed-evidence rejection checks are validation, not universal proofs.
+
+
+Closed static queries after state-changing callbacks add no project axiom or new
+ECM summary. `PostCallStaticFrames` proves that callback completion installs the
+child world, a subsequent checked static response uses and preserves that world,
+and a failed source check restores the entire entry world with exact error bytes.
+These are conditional model laws, not frontend/bytecode equivalence or a general
+reentrancy theorem. Canonical descriptor checks and storage-free operands delimit
+admission; direct post-callback parent storage access and calls in memory loops
+remain excluded. The unchecked `solidity_trailing_low_level_call_reentrancy`
+obligation now explicitly allows external static observations and warns that
+local snapshots may be stale. Consumers must establish callee correspondence and
+truthful query semantics: staticness alone does not imply an honest balance.
+The finite payer/ledger differential and mutation campaign assumes adequate gas;
+original-bytecode gas evidence and generated gas limitations are unchanged.

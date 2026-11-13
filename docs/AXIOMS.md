@@ -781,3 +781,17 @@ load/hash observations then reuse the bounded literal bridge. Binding agreement
 is a premise, not inferred provenance, and earlier captured scalars are not
 erased. Existing hash premises, expectations and importer admission are unchanged.
 `TRUST_ASSUMPTIONS.md` and `TAIL_CLEANUP_LIVENESS.md` record the same limited scope.
+
+Closed static queries after state-changing callbacks add no project axiom or new
+ECM summary. `PostCallStaticFrames` proves that callback completion installs the
+child world, a subsequent checked static response uses and preserves that world,
+and a failed source check restores the entire entry world with exact error bytes.
+These are conditional model laws, not frontend/bytecode equivalence or a general
+reentrancy theorem. Canonical descriptor checks and storage-free operands delimit
+admission; direct post-callback parent storage access and calls in memory loops
+remain excluded. The unchecked `solidity_trailing_low_level_call_reentrancy`
+obligation now explicitly allows external static observations and warns that
+local snapshots may be stale. Consumers must establish callee correspondence and
+truthful query semantics: staticness alone does not imply an honest balance.
+The finite payer/ledger differential and mutation campaign assumes adequate gas;
+original-bytecode gas evidence and generated gas limitations are unchanged.

@@ -992,6 +992,17 @@ def tasks(update_golden: bool) -> list:
               for optimized in (False, True)]
     items += [("deployed-immutable-guard-mutation", 1, lambda: module_campaign_output(
         "check_deployed_immutables", "deployed-immutable-guard-mutation", 1800, "--mutant"))]
+    items += [(f"post-call-balances-opt{int(optimized)}", 1,
+               lambda optimized=optimized: module_campaign_output(
+                   "check_post_call_balances", "post-call-balances", 1800,
+                   *(["--optimized"] if optimized else [])))
+              for optimized in (False, True)]
+    items += [(f"post-call-balances-{mutation}", 1,
+               lambda mutation=mutation: module_campaign_output(
+                   "check_post_call_balances", "post-call-balances-mutation", 1800,
+                   "--mutation", mutation)) for mutation in ("stale", "unchecked")]
+    items += [("post-call-static-boundaries", 1, lambda: module_campaign_output(
+        "check_post_call_static_boundaries", "post-call-static-boundaries", 900))]
     items += [("raw-static-boundaries", 1, lambda: module_campaign_output(
         "check_raw_static_boundaries", "raw-static-boundaries", 900))]
     items += [("static-call-gas-boundaries", 1, lambda: module_campaign_output(

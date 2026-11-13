@@ -214,9 +214,10 @@ def postCallMemoryList : List Stmt → Bool
 end
 
 /-- Statements allowed after a closed low-level call in a trailing-call body:
-local bindings, checks, scalar events, returns and further closed low-level calls.
+local bindings, checks, scalar events, returns and further closed calls.
+Closed static queries observe the current world without changing it.
 Event arguments must read no storage. Logs open no additional reentrancy window;
-post-call persistent/transient storage reads and writes remain rejected. -/
+direct post-call persistent/transient storage reads and writes remain rejected. -/
 partial def stmtAfterTrailingCall : Stmt → Bool
   | .forEach name count body => postCallMemoryStmt (.forEach name count body)
   | .letVar _ value | .assignVar _ value | .require value _ => exprStorageFree value
@@ -224,7 +225,7 @@ partial def stmtAfterTrailingCall : Stmt → Bool
   | .ite condition yes no =>
       exprStorageFree condition && yes.all stmtAfterTrailingCall && no.all stmtAfterTrailingCall
   | .ecm mod args => (isClosedSourceGasRead mod || isClosedLowLevelCall mod ||
-      isClosedRawCall mod || isClosedVoidCall mod ||
+      isClosedRawCall mod || isClosedVoidCall mod || isClosedStaticCall mod ||
       isClosedExtCodeSize mod ||
       mod == Compiler.ECM.SolidityInvalid.module ||
       mod == Compiler.ECM.SolidityRevertMemory.module) &&
