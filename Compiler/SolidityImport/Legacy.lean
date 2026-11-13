@@ -83,6 +83,8 @@ def legacyCleanHelperArgument (caller : Env) (argument : Json)
 def validateLegacyAssemblyReads (node : Json) : M Unit := do
   for ref in (← mArr (← mField node "externalReferences")) do
     let id ← mNat (← mField ref "declaration")
+    if (← get).flatStructs.contains id || (← get).mems.contains id then
+      failAt node "Solidity 0.7.6 memory struct assembly references are outside this slice"
     if let some ty := (← get).scalarTy.find? id then
       match ty with
       | .int256 | .intN _ =>
@@ -152,6 +154,7 @@ partial def validateLegacyDeclaration (node : Json) (encodingInput : Bool := fal
         validateLegacyYul false ast
       return
     if let some kind := optStr node "nodeType" then
+      LegacyStructs.validate node
       LegacySigned.validate node
       unless #["FunctionDefinition", "ParameterList", "VariableDeclaration", "Block",
           "ExpressionStatement", "VariableDeclarationStatement", "IfStatement", "Return",
@@ -178,7 +181,6 @@ partial def validateLegacyDeclaration (node : Json) (encodingInput : Bool := fal
         let supportedArray := ty == "address[]" || ty == "address[] memory" ||
           (ty.startsWith "function (" && !(ty.replace "address[] memory" "address").contains '[')
         if (ty.contains '[' && !supportedArray) ||
-            ty.startsWith "struct " ||
             (ty.startsWith "int" && !ty.startsWith "int_const" &&
               (signedBitsOf ty).isNone) ||
             (ty.startsWith "bytes " && ty != "bytes memory" && ty != "bytes calldata") ||

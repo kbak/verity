@@ -174,7 +174,7 @@ def scenario(kind, caller, layout, *, initial_count=3, random_cases=8, seed=7611
 def campaign(output, *, kind='links', context=0, optimized=False, initial_count=3,
              fixture=FIXTURE, contract=None, functions=None, extra_sources=None,
              fields=None, errors=None, events=None, dirty_mappings=False, prepared=False,
-             scenario_builder=scenario, import_functions=None):
+             scenario_builder=scenario, import_functions=None, optimizer_runs=200):
     output = Path(output).resolve()
     output.mkdir(parents=True, exist_ok=False)
     # Parallel execution must share fixed artifacts: build once before workers.
@@ -203,11 +203,11 @@ def campaign(output, *, kind='links', context=0, optimized=False, initial_count=
     template = template.replace('  function setLimit(uint256)\n  function insert(address,uint256)',
                                 '\n'.join('  function ' + f.replace('address[]', '«address[]»') for f in (import_functions or functions)))
     if optimized:
-        template = template.replace('optimizerRuns := none', 'optimizerRuns := some 200')
+        template = template.replace('optimizerRuns := none', f'optimizerRuns := some {optimizer_runs}')
     driver = output / 'Driver.lean'
     driver.write_text(template)
     original = solc_compile({'language': 'Solidity', 'sources': sources, 'settings': {
-        'evmVersion': 'istanbul', 'optimizer': {'enabled': optimized, 'runs': 200},
+        'evmVersion': 'istanbul', 'optimizer': {'enabled': optimized, 'runs': optimizer_runs},
         'metadata': {'bytecodeHash': 'none'}, 'outputSelection': {'*': {'*': [
             'evm.bytecode.object', 'evm.methodIdentifiers', 'storageLayout']}}}},
         output, output / 'source-solc', solc=Path.cwd() / '.lake/solidity-import/solc-0.7.6')['contracts']['Sequence.sol'][contract]
@@ -253,7 +253,8 @@ def campaign(output, *, kind='links', context=0, optimized=False, initial_count=
                     mismatches.append({'route': route, 'id': tx['id'], 'label': tx['label'], 'field': key,
                                        'expected': wanted[key], 'actual': actual})
     report = {**result, 'expectationMismatches': mismatches, 'count': len(calls),
-              'kind': kind, 'context': context, 'optimized': optimized, 'initialCount': initial_count,
+              'kind': kind, 'context': context, 'optimized': optimized, 'optimizerRuns': optimizer_runs,
+              'initialCount': initial_count,
               'dirtyMappings': dirty_mappings,
               'sourceSha256': hashlib.sha256(source.encode()).hexdigest(),
               'scope': 'finite zero-value call-frame sequences, explicit initial storage and self-sender impersonation; gas/value transfers excluded'}

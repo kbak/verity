@@ -1030,6 +1030,19 @@ def tasks(update_golden: bool) -> list:
                    "check_legacy_signed_scalars", "legacy-signed-mutation", 1800, "--prepared",
                    "--mutation", mutation))
               for mutation in ("drop-cast-guard", "drop-delta-guard")]
+    items += [(f"legacy-memory-structs-opt{int(optimized)}-v{2 if v2 else 1}", 1,
+               lambda optimized=optimized, v2=v2: module_campaign_output(
+                   "check_legacy_memory_structs", "legacy-memory-structs", 1800, "--prepared",
+                   *(["--optimized"] if optimized else []), *(["--abi-v2"] if v2 else [])))
+              for optimized in (False, True) for v2 in (False, True)]
+    items += [(f"legacy-memory-structs-{mutation}", 1,
+               lambda mutation=mutation: module_campaign_output(
+                   "check_legacy_memory_structs", "legacy-memory-structs-mutation", 1800,
+                   "--prepared", "--mutation", mutation))
+              for mutation in ("field-order", "sign-cleanup")]
+    items += [("legacy-memory-struct-boundaries", 1, lambda: module_campaign_output(
+        "check_legacy_memory_struct_rejections", "legacy-memory-struct-boundaries", 900,
+        "--prepared"))]
     items += [("legacy-signed-boundaries", 1, lambda: module_campaign_output(
         "check_legacy_signed_rejections", "legacy-signed-boundaries", 900, "--prepared"))]
     items += [(f"post-call-storage-opt{int(optimized)}", 1,
