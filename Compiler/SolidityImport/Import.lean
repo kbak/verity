@@ -4282,10 +4282,11 @@ private partial def lowerCast (j : Json) : M Val := do
     unless (signedBitsOf src).isSome || src.startsWith "int_const" ||
         (src.startsWith "uint" && (bitsOf src).isSome) do
       failAt j s!"unsupported cast source {src} for {tname}"
-    let alreadySignExtended := pb == 256 || src.startsWith "int_const" ||
+    let alreadySignExtended := pb == 256 || (!(← get).legacyWrapping &&
+      (src.startsWith "int_const" ||
       match signedBitsOf src with
       | some sb => sb ≤ pb
-      | none => false
+      | none => false))
     if alreadySignExtended then
       return v
     let a ← atom v
@@ -4321,7 +4322,9 @@ private partial def lowerCast (j : Json) : M Val := do
   if (fixedBytesWidth? tname).isSome || (fixedBytesWidth? src).isSome then
     failAt j s!"unsupported fixed-bytes cast from {src} to {tname}"
   let some bits := bitsOf tname | failAt j s!"unsupported cast target {tname}"
-  let narrow : Bool :=
+  let narrow : Bool := if (← get).legacyWrapping && src.startsWith "int_const -" then
+    bits < 256
+  else
     match bitsOf src with
     | some sb => decide (sb > bits)
     | none => decide (bits < 256) && !src.startsWith "int_const" && !src.startsWith "enum "
@@ -13273,7 +13276,8 @@ private partial def lowerLocalCore (s : Json) : M (Array Stmt) := do
       failAt d "uninitialized reference locals are outside this slice"
     let ty ← mType d
     discard (validateEnumTypeIfNeeded d ty)
-    let some scalarType := (localParamType ty).filter fun | .intN _ => false | _ => true
+    let legacy := (← get).legacyWrapping
+    let some scalarType := (localParamType ty).filter fun | .intN _ => legacy | _ => true
       | failAt d s!"unsupported default local type {ty}"
     let binding ← freshFor name
     let expr := Expr.localVar binding
@@ -15634,7 +15638,7 @@ private def importSlice
         let offset := 4 + (modelParams.toList.take i).foldl (fun n p => n + paramHeadSize p.ty) 0
         let rawWord := Expr.calldataload (.literal offset)
         if let .intN bits := ty then
-          if 0 < bits && bits < 256 && bits % 8 == 0 then
+          if strictAbi && 0 < bits && bits < 256 && bits % 8 == 0 then
             abiGuards := abiGuards.push (.ite
               (.eq rawWord (.signextend (.literal (bits / 8 - 1)) rawWord))
               [] [.revertEmpty])
