@@ -75,7 +75,7 @@ def validate (node : Json) : M Unit := do
     unless !ty.contains '[' &&
         (kind == "UserDefinedTypeName" || ty.endsWith " memory" ||
           (kind == "VariableDeclaration" && optStr node "storageLocation" == some "memory")) do
-      failAt node ("Solidity 0.7.6 structs require scalar memory records; " ++
+      failAt node (s!"Solidity 0.7.6 scalar slice does not support type {ty}; " ++
         "storage references are outside this slice")
     let some decl := declaration? node (← get)
       | failAt node "unresolved Solidity 0.7.6 memory struct declaration"
@@ -114,8 +114,10 @@ def validateClosure : M Unit := do
     env.funs.find? reached.declId <|> env.modifiers.find? reached.declId
   let hasStruct := declarations.any fun node =>
     (findNode? (fun n =>
-      ((field? n "typeDescriptions").bind (optStr · "typeString")).any
-        (·.startsWith "struct ")) node).isSome
+      let ty := ((field? n "typeDescriptions").bind (optStr · "typeString")).getD ""
+      ty.startsWith "struct " && (ty.endsWith " memory" ||
+        (optStr n "nodeType" == some "VariableDeclaration" &&
+          optStr n "storageLocation" == some "memory"))) node).isSome
   if hasStruct then
     for declaration in declarations do
       if let some assembly := findNode?

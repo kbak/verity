@@ -8,6 +8,9 @@ CASES = {
     'signed-memory-read': ('', RECORD +
         'function run(int24 a) external pure returns(int24) { R memory r=R(a,2); return r.a; }',
         'run(int24)', None),
+    'storage-member-with-assembly': ('', 'struct R { uint8 b; } R r; '
+        'function run() external view returns(uint256 x) { assembly { x := add(1,2) } return x+r.b; }',
+        'run()', None),
     'memory-default': ('', RECORD +
         'function run() external pure returns(int24) { R memory r; return r.a; }',
         'run()', None),
