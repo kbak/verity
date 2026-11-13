@@ -77,6 +77,21 @@ def sha256Hex (bytes : ByteArray) : String :=
   (Sha256Engine.sha256 bytes).data.foldl (init := "") fun acc byte =>
     acc.push (hexDigit (byte.toNat / 16)) |>.push (hexDigit (byte.toNat % 16))
 
+/-- A source site whose narrow assembly references have no dirty-bit audit. -/
+structure AssemblyReference where
+  node : Json
+  file : String
+  stack : List Nat
+
+/-- A source memory access whose fresh address binding must pass the root bounds audit. -/
+structure MemoryAccess where
+  binding : String
+  size : Nat
+  metadata : Bool
+  node : Json
+  file : String
+  stack : List Nat
+
 structure Env where
   sourceNames : List String
   /-- Source units whose internal external-call sites use legacy ABI coder v2. -/
@@ -167,6 +182,10 @@ structure Env where
   representation-preserving identifier copies through internal helpers. -/
   legacyCleanParams : List Nat := []
   rawBindings : RBMap Nat String compare := RBMap.empty
+  memoryAccesses : Array MemoryAccess := #[]
+  /-- Fresh result bindings of generated, ordered mapping-preimage scratch sequences. -/
+  mappingScratchBindings : Std.HashSet String := {}
+  uncheckedAssemblyReferences : Array AssemblyReference := #[]
   encodingMemory : Bool := false
   explicitAbi : Bool := false
   next : Nat

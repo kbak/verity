@@ -20,6 +20,8 @@ import Compiler.SolidityImport.LegacyBytePointers
 import Compiler.SolidityImport.ExprHelpers
 import Compiler.SolidityImport.StorageLayout
 import Compiler.SolidityImport.InlineAssemblyShims
+import Compiler.SolidityImport.BoundedMemory
+import Compiler.SolidityImport.MemoryBounds
 
 /-!
 Solidity importer. Pinned `solc --standard-json` supplies the AST, declaration
@@ -688,12 +690,7 @@ private def computeStructMappingLeafSlot (path : SPath) (info : FieldInfo) (mapI
     (innerKey : Expr) (at_ : Json) : M (Array Stmt × Expr) := do
   modify fun e => { e with encodingMemory := true, usedRawStorage := true }
   let (baseStmts, mapBaseExpr) ← computeSPathBaseSlot path info mapInfo.wordOffset at_
-  let leafSlot ← fresh
-  let leafStmts : Array Stmt := #[
-    .mstore (.literal 0) innerKey,
-    .mstore (.literal 32) mapBaseExpr,
-    .letVar leafSlot (.keccak256 (.literal 0) (.literal 64))
-  ]
+  let (leafStmts, leafSlot) ← mappingScratch innerKey mapBaseExpr
   return (baseStmts ++ leafStmts, .localVar leafSlot)
 
 private def readStructMappingElement (pre : Array Stmt) (path : SPath) (mapInfo : StructMappingInfo)
@@ -701,12 +698,7 @@ private def readStructMappingElement (pre : Array Stmt) (path : SPath) (mapInfo 
   if let .rawSlot _ baseSlot := path then
     modify fun e => { e with encodingMemory := true, usedRawStorage := true }
     let mapBaseExpr := rawStructMemberSlot baseSlot mapInfo.wordOffset
-    let leafSlot ← fresh
-    let slotStmts : Array Stmt := #[
-      .mstore (.literal 0) innerKey,
-      .mstore (.literal 32) mapBaseExpr,
-      .letVar leafSlot (.keccak256 (.literal 0) (.literal 64))
-    ]
+    let (slotStmts, leafSlot) ← mappingScratch innerKey mapBaseExpr
     let raw := Expr.storageArrayElement rawStorageFieldName (.localVar leafSlot)
     let masked :=
       if mapInfo.valueWidth < 256 then Expr.bitAnd raw (.literal (2 ^ mapInfo.valueWidth - 1))
@@ -1503,6 +1495,7 @@ private def lowerYulValue (node : Json) : M Val := do
 
 private def lowerAssembly (j : Json) (retName : String) : M Val := do
   if (← get).legacyWrapping then validateLegacyAssemblyReads j
+  else BoundedMemory.recordUncheckedReferences j
   let assignedInAsm := bodyAssignedIds j
   if !assignedInAsm.isEmpty then
     modify fun e => { e with zeroInitLocals := e.zeroInitLocals.filter (!assignedInAsm.contains ·) }
@@ -2078,9 +2071,20 @@ private partial def lowerAssemblyStmts (j : Json) (retName : String) : M (Array 
       yulScratch32 := savedScratch32 }
     return out
   if let some prefixStmts ← lowerYulPrefixKeccakBlock? j stmts refs retName then
+    if !(← get).legacyWrapping then BoundedMemory.recordUncheckedReferences j
     modify fun e => { e with yulNames := savedYulNames, yulScratch0 := savedScratch0, yulScratch32 := savedScratch32 }
     return prefixStmts
-  let out ← lowerYulStmtSlice j stmts refs retName
+  let before ← get
+  let out ← try
+    let result ← lowerYulStmtSlice j stmts refs retName
+    if !(← get).legacyWrapping then BoundedMemory.recordUncheckedReferences j
+    pure result
+  catch error =>
+    if before.legacyWrapping || !BoundedMemory.applies ast then throw error
+    set before
+    unless ← BoundedMemory.scalarReferences refs do throw error
+    BoundedMemory.lower j stmts refs lowerYul fun stmt target value =>
+      lowerYulDirectAssignmentTarget j stmt target refs retName value
   modify fun e => { e with yulNames := savedYulNames, yulScratch0 := savedScratch0, yulScratch32 := savedScratch32 }
   pure out
 
@@ -3134,12 +3138,8 @@ private partial def lowerRef (j : Json) : M Ref := do
               if let .rawSlot _ baseSlot := path then do
                 modify fun e => { e with encodingMemory := true, usedRawStorage := true }
                 let mapBaseExpr := rawStructMemberSlot baseSlot mapInfo.wordOffset
-                let leafSlot ← fresh
-                pure (#[
-                  Stmt.mstore (.literal 0) key.expr,
-                  Stmt.mstore (.literal 32) mapBaseExpr,
-                  Stmt.letVar leafSlot (.keccak256 (.literal 0) (.literal 64))
-                ], Expr.localVar leafSlot)
+                let (slotStmts, leafSlot) ← mappingScratch key.expr mapBaseExpr
+                pure (slotStmts, Expr.localVar leafSlot)
               else do
                 let rawName ← match path with
                   | .zero name | .one name _ | .two name _ _ => pure name
@@ -15483,7 +15483,8 @@ private def importSlice
     let rootFile := env.nodeFile.find? rootId |>.getD entry
     env := { env with currentFile := rootFile, next := 0, bound := [], values := RBMap.empty, paths := RBMap.empty,
                       snapshots := RBMap.empty, mems := RBMap.empty, flatStructs := RBMap.empty, abiElements := RBMap.empty, calldataBytes := RBMap.empty, scalarArrays := RBMap.empty, byteBuffers := RBMap.empty, stringBuffers := RBMap.empty, nonLiteralByteLocals := #[], storageBytesVars := RBMap.empty, storageDynamicArrayVars := RBMap.empty, scalarTy := RBMap.empty, enumBounds := RBMap.empty, bytes4Params := #[], writableLocals := RBMap.empty, fnPtrs := RBMap.empty, bodyAssigned := [], zeroInitLocals := #[], yulNames := RBMap.empty, yulMemoryArrays := RBMap.empty, yulMemoryStructs := RBMap.empty,
-                      legacyCleanParams := [],
+                      legacyCleanParams := [], memoryAccesses := #[], mappingScratchBindings := {},
+                      uncheckedAssemblyReferences := #[],
                       projections := #[], rawBindings := RBMap.empty, explicitAbi := false, encodingMemory := false, helperResult := none, helperReturnId := none, multiHelperResults := none, flatStructHelperResult := none, helperPost := #[], rootIsVoid := false, rootReturns := #[], rootReturnTypes := #[], rootNamedReturn := none, rootFixedArrayReturn := none, rootFlatStructReturn := none, rootMsgDataReturn := false, rootDynamicBytesReturn := none, rootPost := #[], publicVarGetterReturns := #[] }
     let ((body, srcParams), env2) ← (lowerRoot fn).run env
     env := env2
@@ -15646,6 +15647,7 @@ private def importSlice
             LegacyMemory.cleanScalar ty rawWord else rawWord
           abiGuards := abiGuards.push (.letVar binding decoded)
     let body := abiGuards ++ body
+    (MemoryBounds.validate body).run' env
     let returns ← (do
       if (← mKind fn) == "VariableDeclaration" then
         return (← get).publicVarGetterReturns
@@ -15833,6 +15835,9 @@ private def importSlice
   let packedSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyPacked.lean"
   let legacyAbiSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyAbi.lean"
   let legacyMemorySrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyMemory.lean"
+  let boundedMemorySrc ← moduleText sourceRoot "Compiler/SolidityImport/BoundedMemory.lean"
+  let memoryBoundsSrc ← moduleText sourceRoot "Compiler/SolidityImport/MemoryBounds.lean"
+  let storageLayoutSrc ← moduleText sourceRoot "Compiler/SolidityImport/StorageLayout.lean"
   let signatureSrc ← moduleText sourceRoot "Verity/Core/Model/LegacySignatureCalls.lean"
   let rawCallsSrc ← moduleText sourceRoot "Verity/Core/Model/RawCalls.lean"
   let gasSrc ← moduleText sourceRoot "Verity/Core/Model/SourceGas.lean"
@@ -15873,6 +15878,9 @@ private def importSlice
       ("LegacyPacked.lean", Json.str packedSrc),
       ("LegacyAbi.lean", Json.str legacyAbiSrc),
       ("LegacyMemory.lean", Json.str legacyMemorySrc),
+      ("BoundedMemory.lean", Json.str boundedMemorySrc),
+      ("MemoryBounds.lean", Json.str memoryBoundsSrc),
+      ("StorageLayout.lean", Json.str storageLayoutSrc),
       ("AbiLowering.lean", Json.str abiLoweringSrc),
       ("ExprHelpers.lean", Json.str exprHelpersSrc),
       ("LegacySignatureCalls.lean", Json.str signatureSrc),

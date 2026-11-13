@@ -32,13 +32,63 @@ These theorems do not establish coherence for arbitrary external states, admit
 new importer constructs, prove the Keccak implementation faithful to the EVM, or
 discharge `keccak256_memory_slice_matches_evm`.
 
-The name-selected packed-hash replacement has been removed. Reached helper bodies
-use ordinary translation, which rejects the unsupported overlapping memory writes
-with a source location. The existing packed-byte/hash expectations remain unchanged;
-no packed-memory support or source-equivalence theorem is added by this correction.
-The inline-assembly registry now has 17 entries. Its flag/count theorems establish
-metadata consistency only, not source-to-model correctness. See
-`PACKED_MEMORY_HASH_REPRODUCER.md` for the remaining admission and execution gates.
+The name-selected packed-hash replacement remains removed; the inline-assembly
+registry has 17 entries. Its metadata theorems do not establish source equivalence.
+Storage-reference regression preparation uses independent mapping-slot and
+per-transaction state expectations, explicit initial storage, and source EVM
+execution with cumulative discovery/replay observations. The CI campaign adds
+no importer admission or proof coverage: actual Denote/generated-EVM sequence
+execution and the pinned downstream lookup wrapper remain pending. Source
+mutations establish finite test sensitivity; they do not prove storage-reference
+correspondence or justify relaxing the partial-cleanup guard. See the Stage 5
+preparation in `PACKED_MEMORY_HASH_REPRODUCER.md`.
+
+The explicit-key storage control connects that oracle to the actual imported
+model via `SequenceRunner.execute` and to Cancun bytecode compiled from that
+same model. Source, Denote and generated-EVM observations are independently
+checked, including cumulative cross-route slots, rollback and exact logs. Model
+snapshots retain their original import report and unavailable compiler-proof
+status; event-deletion mutants are labeled as modified models. Precomputed keys
+are supplied as control inputs, so these runs do not validate packed-key
+computation or admit the still-blocked packed-reference helper. Full initial and
+expected state archives remain unchanged. This is finite execution evidence, not
+constructor, gas, whole-world, importer or compiler correspondence.
+
+The full-cleanup read slice retains both frozen state archives and the packed
+archive. Its unchanged initial-read prefix must agree across source EVM, actual
+Denote and generated Cancun bytecode, including renamed helpers and shifted
+storage layout. Wrong mapping-base and shortened-hash source mutants must remain
+observable on all routes. The root audit now recognizes complete generated mapping
+scratch sequences using fresh-binding provenance and admits scalar storage reads
+without inferring pointer bounds from their values. This recognition is trusted
+frontend code, not a kernel-certified abstract interpretation. Existing physical
+scratch-frame lemmas supply disjointness and allocator/storage/event frames; no
+source/importer correspondence theorem or new cryptographic premise is claimed.
+Tail-only cleanup, writes and observations of synthetic layouts remain excluded.
+See `PACKED_STORAGE_READ_DESIGN.md` for the precise boundary and remaining work.
+
+The tail-only caller probes compare controlled upper-bit perturbations against
+the unchanged packed hashes. They retain both complete state archives without
+executing their transactions in this stateless campaign. All current tail-only
+rejections remain mandatory; source sensitivity establishes no caller-liveness
+theorem, gas equivalence, storage sequence or source/compiler correspondence.
+Actual Denote/generated routes remain absent; see `TAIL_CLEANUP_LIVENESS.md`.
+
+The modern bounded-memory frontend now translates supported straight-line source
+operations directly to physical `mload`, `mstore`, and `keccak256`. A byte-wise
+unknown-bit analysis requires observed bytes to be independent of dirty narrow
+scalar bits and requires all remaining dirty bytes to be overwritten before leaving
+assembly. A separate root audit bounds nonwrapping addresses using scalar bindings,
+successful guards, and preceding free-pointer writes. Unsupported aliases, effects,
+control flow, bounds, or interactions with synthetic ABI allocation layouts remain
+source-located rejections. Narrow references through older assembly paths are
+also rejected in roots using this fragment. Legacy validators are
+unchanged. Both analyses are trusted frontend checks, not kernel-certified abstract
+interpretations or source/importer correspondence theorems. Existing byte/hash
+expectations and cryptographic premises are unchanged. The three-route Cancun
+campaign supplies finite execution evidence; it does not prove arbitrary Solidity
+assembly, storage frames, gas/resource adequacy, or deployed-bytecode equivalence.
+See `PACKED_MEMORY_HASH_REPRODUCER.md` and `SOLIDITY_IMPORT.md` for executable gates.
 
 `Compiler/SolidityImport/Import.lean` selects functions from a solc project,
 closes over the definitions solc's declaration ids actually reach, and elaborates
@@ -382,6 +432,71 @@ against the pinned version; a cache hit alone cannot satisfy tool installation.
 The fork does not provision the upstream
 OCR model service: OCR is explicitly skipped and supplies no semantic-review
 evidence. See [fork CI operations](FORK_CI.md) for rollout and limitations.
+
+CI retains its established Turbo-Lean proof-verifier pin and narrow axiom
+allowlist. A separately pinned builder supports declarative Lake `input_dir` /
+`input_file` inputs and Lean 4.31 artifacts. Solidity inputs remain connected
+through `needs` and participate in build-cache identity; unsupported dynamic
+Lake configuration still fails closed. The builder uses a separate CAS after all existing verification commands
+have completed. Proof checks and regression evaluation retain the established
+verifier/evaluator and its cache.
+This changes operational build tooling, not proof assumptions or coverage.
+Local proof workflows retain their documented tool pin.
+The two C source repositories already declared by EVMYulLean are checked out
+at immutable revisions before offline recipe materialization; their existing
+FFI trust boundary is unchanged. This setup does not authorize network access
+inside the offline build gate.
+
+The proof-only scratch composition modules establish ordered mapping preimages
+and frames for the existing physical word writer. Coherent word observations and
+nonwrapping proof-IR reads have explicit hypotheses. The canonical scratch pair
+preserves allocator/zero words, disjoint byte buffers and non-memory world state;
+its preimage equals the existing key-then-base ABI encoder. These are local
+composition theorems, not importer admission, source/compiler correspondence,
+storage-reference validity, or gas/memory-expansion equivalence. Existing hash
+faithfulness and collision premises remain unchanged. See
+[the read-composition design](PACKED_STORAGE_READ_DESIGN.md).
+
+The proof-only caller-memory composition modules add a two-run overwrite and
+observation argument. Both executions perform the same concrete word writes in
+the same order. They need initial physical-byte agreement outside the writes,
+or outside a residual byte set whose observed portion is covered by those writes.
+Exact slices and coherent word reads then agree; the existing proof-IR hash
+reader additionally requires its explicit rounded nonwrapping bound. No new
+hash axiom or change to existing faithfulness/collision premises is introduced.
+This is not a proof that arbitrary callers evaluate identical write operands,
+that earlier captured values are equal, or that aliases/residual masks can be
+inferred safely. Memory-size/gas equality and non-memory world agreement are
+separate obligations. Importer admission and every independent expectation and
+rejection remain unchanged; see `TAIL_CLEANUP_LIVENESS.md`.
+
+The bounded literal-store bridge proves actual canonical source execution of a
+straight-line block equals the existing ordered physical-write fold. Typed word
+literals and bounded 32-byte footprints establish the common evaluated operands.
+The exact poststate preserves all non-memory runtime fields, including bindings,
+immutable values, call bookkeeping, storage and events. It permits memory
+expansion and does not equate non-memory fields of different initial states.
+Subsequent canonical load/hash results agree under explicit initial coherence,
+byte agreement outside the writes, literal-normalization bounds and the existing
+nonwrapping observation bounds. No new hash premise is introduced. Arbitrary
+operand/alias analysis, ABI return and allocator behavior, source/compiler and
+generated-EVM correspondence, and gas/memory-size equality remain unproved by
+this bridge. Importer admission and all independent expectations remain
+unchanged; see `TAIL_CLEANUP_LIVENESS.md` and `AXIOMS.md`.
+
+The parameter/local-variable store bridge extends that proof to explicit
+store-only witnesses with literals, present parameter/local bindings and bounded
+constant additions. Agreement on referenced bindings derives identical evaluated
+writes; unrelated bindings may differ. Canonical execution, non-memory runtime
+preservation and subsequent load/hash agreement reuse the literal bridge under
+its existing bounds and coherence/byte-agreement hypotheses. No new hash premise
+is introduced. Binding agreement is assumed explicitly: the proof does not infer
+provenance or make previously captured dirty scalars equal. Missing bindings,
+overflowing additions, memory-dependent operands and other statement effects are
+outside the witness. Alias/liveness analysis, ABI return/allocator behavior,
+source/compiler and generated-EVM correspondence, and gas/memory-size equality
+remain outside this slice. Importer admission and independent expectations remain
+unchanged; see `TAIL_CLEANUP_LIVENESS.md` and `AXIOMS.md`.
 
 ## Compilation Pipeline
 
