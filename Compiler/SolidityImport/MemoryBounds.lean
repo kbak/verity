@@ -1,4 +1,5 @@
-import Compiler.SolidityImport.ExprHelpers
+import Compiler.SolidityImport.StorageLayout
+import Compiler.CompilationModel.EventEmission
 
 /-! Conservative root-level interval audit for source memory accesses. The audit
 follows scalar bindings, successful guards and allocator metadata in source order.
@@ -17,6 +18,7 @@ private structure Bounds where
   versions : Std.HashMap String Nat := {}
   guards : Std.HashMap String (List (String × Nat × Nat)) := {}
   accesses : Std.HashMap String MemoryAccess := {}
+  events : Std.HashMap String EventDef := {}
   seen : Std.HashSet String := {}
   deriving Inhabited
 
@@ -145,11 +147,53 @@ private def step (s : Bounds) (stmt : Stmt) : M Bounds := do
   | .panicCode _ | .panic _ | .stop => return s
   | _ => unsupported s
 
+/-- After observable effects, only words independent of memory and synthetic
+storage layouts may be consumed. Earlier captured scalar values remain available. -/
+private def independentScalar (expr : Expr) : Bool :=
+  scalar expr && !(expr.foldBool fun
+    | .mload .. | .keccak256 .. => true
+    | .storageArrayElement field _ => field != rawStorageFieldName
+    | _ => false)
+
+private def unsupportedEffects (s : Bounds) : M α :=
+  failRoot s "bounded memory storage effects require a memory-independent successful suffix"
+
+/-- Scalar event encoding uses the current free pointer for its signature and
+unindexed words. Bound both footprints; later source memory observations reject. -/
+private def checkEvent (s : Bounds) (name : String) (args : List Expr) : M Unit := do
+  let some event := s.events[name]?
+    | unsupportedEffects s
+  unless eventDefScalarCompileSupported event && args.length == event.params.length do
+    unsupportedEffects s
+  let signatureSize := ((bytesFromString (eventSignature event)).length + 31) / 32 * 32
+  let dataSize := (event.params.filter (·.kind == .unindexed)).length * 32
+  unless 128 ≤ s.free.lo && s.free.lo ≤ s.free.hi &&
+      s.free.hi + max signatureSize dataSize ≤ 2^32 do
+    failRoot s "bounded memory event encoding requires a bounded free pointer"
+
+/-- A successful storage/log suffix cannot re-enter source memory or arbitrary
+control flow. Raw word writes preserve memory; scalar logs may clobber the heap. -/
+private def effects (s : Bounds) : List Stmt → M Bounds
+  | [] => pure s
+  | stmt :: rest => do
+      unless stmt.directMetadata.subexpressions.all independentScalar do unsupportedEffects s
+      let next ← match stmt with
+        | .letVar name value | .assignVar name value => bind s name value
+        | .setStorageArrayElement field _ _ => do
+            unless field == rawStorageFieldName do unsupportedEffects s
+            pure s
+        | .emit name args => do checkEvent s name args; pure s
+        | .return _ | .returnValues _ | .stop => pure s
+        | _ => unsupportedEffects s
+      effects next rest
+
 /-- Consume only an intact mapping sequence carrying fresh lowering provenance.
 Its scratch footprint is [0,64); allocator metadata and bounded source buffers
 are unchanged. Storage words and hash results remain unknown to interval analysis. -/
 private def sequence (generated : Std.HashSet String) (s : Bounds) : List Stmt → M Bounds
   | [] => pure s
+  | stmt@(.setStorageArrayElement ..) :: rest
+  | stmt@(.emit ..) :: rest => effects s (stmt :: rest)
   | .mstore (.literal 0) key :: .mstore (.literal 32) baseSlot ::
       .letVar name (.keccak256 (.literal 0) (.literal 64)) :: tail => do
       unless generated.contains name do
@@ -163,8 +207,9 @@ private def sequence (generated : Std.HashSet String) (s : Bounds) : List Stmt �
 
 /-- Validate all recorded addresses, including helper-inlined operations, against
 successful guards and the actual preceding free-pointer writes. Generated mapping
-scratch is admitted only as a complete ordered operation. No control-flow joins,
-loops or storage writes are inferred; other roots retain a located rejection. -/
+scratch is admitted only as a complete ordered operation. Raw storage writes and
+scalar logs start a memory-independent successful suffix. Control-flow joins,
+loops, later memory observations and post-effect reverts retain a located rejection. -/
 def validate (body : Array Stmt) : M Unit := do
   let env ← get
   let accesses := env.memoryAccesses
@@ -173,7 +218,8 @@ def validate (body : Array Stmt) : M Unit := do
     modify fun e => { e with currentFile := site.file, stack := site.stack }
     failAt site.node "bounded memory cannot consume unaudited narrow assembly references"
   let initial : Bounds := {
-    accesses := Std.HashMap.ofList (accesses.toList.map fun access => (access.binding, access)) }
+    accesses := Std.HashMap.ofList (accesses.toList.map fun access => (access.binding, access))
+    events := Std.HashMap.ofList (env.usedEvents.map fun (_, event) => (event.name, event)) }
   let s ← sequence env.mappingScratchBindings initial body.toList
   for access in accesses do
     unless s.seen.contains access.binding do

@@ -1,8 +1,9 @@
 # Full-cleanup packed hash and storage read
 
 This implements the read-only full-cleanup composition slice of #32 after #39
-merged. Tail-only cleanup, writes, events, rollback and the pinned downstream
-wrapper remain separate work; this slice does not complete #32.
+merged. [Successful writes and logs](PACKED_STORAGE_UPDATES.md) extend this base
+in a separate campaign. Tail-only cleanup, rollback and the pinned downstream
+wrapper remain separate work; these slices do not complete #32.
 
 ## Executable boundary
 
@@ -18,7 +19,8 @@ wrapper remain separate work; this slice does not complete #32.
 | Partial cleanup, dirty hash, dirty word read, unknown cleanup alias | Source-valid roots retain their respective located rejections. |
 | ABI allocation before the hash | Retains the synthetic-memory-write rejection. |
 | Raw scratch read after lookup | Retains the existing `unsupported Yul builtin mload` rejection. |
-| Storage write, storage-derived pointer or free pointer, source-written scratch pair | Retain their respective root-audit rejections. |
+| Unexpected storage write | All three routes detect return-data and state corruption against the unchanged read expectations. |
+| Memory after a write, storage-derived pointer or free pointer, source-written scratch pair | Retain their respective root-audit rejections. |
 
 Full cleanup clears all three words starting at the saved free pointer after
 computing the unchanged 58-byte packed hash. This is a separate generic control;
@@ -70,8 +72,9 @@ rewritten or reordered and no source memory layout is assumed observable.
 Scalar storage-array reads are admitted in this straight-line root. Their values
 remain unknown words in the interval analysis, as do hash results. Reading storage
 does not establish a pointer bound. Existing successful guards and binding-version
-invalidation still apply; writes, external calls, loops and unsupported branches
-remain excluded. Dirty-bit cleanup requirements in `BoundedMemory.lean` are
+invalidation still apply. Raw writes and scalar logs require the separate
+memory-independent successful suffix; external calls, loops and unsupported
+branches remain excluded. Dirty-bit cleanup requirements in `BoundedMemory.lean` are
 unchanged, so tail-only cleanup still rejects before this composition audit.
 
 The mapping-slot preimage remains the independent `word32(key) ++ word32(base)`
@@ -122,8 +125,8 @@ alone cannot pass the composition gate. Repository, warning, proof, differential
 and mutation checks remain required on the exact PR head.
 
 Tail-only cleanup needs a separate caller liveness/frame argument, prepared in
-[the caller-liveness design](TAIL_CLEANUP_LIVENESS.md). Writes,
-events, rollback and the always-reverting value-return root remain later work,
+[the caller-liveness design](TAIL_CLEANUP_LIVENESS.md). Successful writes and logs
+have a separate gate; rollback and the always-reverting value-return root remain later work,
 followed by validation of the pinned downstream wrapper tracked in #32. Full
 cleanup does not substitute for any of those acceptance criteria.
 

@@ -64,8 +64,21 @@ without inferring pointer bounds from their values. This recognition is trusted
 frontend code, not a kernel-certified abstract interpretation. Existing physical
 scratch-frame lemmas supply disjointness and allocator/storage/event frames; no
 source/importer correspondence theorem or new cryptographic premise is claimed.
-Tail-only cleanup, writes and observations of synthetic layouts remain excluded.
+Tail-only cleanup and observations of synthetic layouts remain excluded.
 See `PACKED_STORAGE_READ_DESIGN.md` for the precise boundary and remaining work.
+
+The successful-update extension allows raw storage-word writes and scalar events
+only in a structurally memory-independent suffix. It bounds event signature/data
+stores at the current free pointer and rejects later memory reads/hashes, calls,
+guards, branches, loops and explicit reverts. Generated event memory need not equal
+source event memory; that difference remains unobservable in this admitted suffix.
+Existing write/masking and event lowering are unchanged. Frozen successful-prefix
+state, return and log expectations are checked independently on source EVM, actual
+Denote and generated EVM, with addressing and event-deletion mutation controls.
+Recognition remains trusted frontend code; no theorem, axiom, new cryptographic
+premise, gas guarantee or source/compiler correspondence is added. Write-then-revert
+composition, tail-only cleanup and the pinned downstream wrapper remain separate
+#32 obligations; see `PACKED_STORAGE_UPDATES.md`.
 
 The tail-only caller probes compare controlled upper-bit perturbations against
 the unchanged packed hashes. They retain both complete state archives without

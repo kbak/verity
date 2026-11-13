@@ -181,6 +181,11 @@ jobs:
           PYTHONPATH=scripts python3 -m solidity_differential.check_packed_storage_read --prepared --require-composition --output .lake/bounded-memory/packed-storage-read
           PYTHONPATH=scripts python3 -m solidity_differential.check_tail_cleanup_liveness --prepared --output .lake/bounded-memory/tail-cleanup
 
+      - name: Verify full-cleanup successful storage updates and logs
+        timeout-minutes: 15
+        run: |
+          PYTHONPATH=scripts python3 -m solidity_differential.check_packed_storage_updates --prepared --output .lake/bounded-memory/packed-storage-updates
+
       - name: Archive bounded memory execution and rejection evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
