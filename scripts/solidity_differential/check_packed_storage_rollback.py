@@ -11,14 +11,15 @@ from .check_packed_storage_updates import EFFECT_REJECTION
 from .check_storage_reference import CONTRACT, FIXTURE, compile_variant, source_adapter, variants
 from .check_storage_reference_routes import (
     CONTRACT as CONTROL_CONTRACT, FIXTURE as CONTROL_FIXTURE, SIGNATURES as CONTROL_SIGNATURES,
-    STATE_ARCHIVES, build_source, control_inputs,
+    STATE_ARCHIVES, build_source, control_inputs, require_outcome, run_routes,
 )
 from .engine import HarnessError, ROOT, command, write_json
-from .hash_execution import pinned_compiler
+from .hash_execution import compile_generated, pinned_compiler
 from .identity import ImplementationIdentity
 from .pinned_sequence import SENDERS, create_address
 from .storage_reference_oracle import PACKED_ARCHIVE_SHA256, SIGNATURES, replay_expected, specification
-from .storage_sequence_execution import eval_json
+from .stateful import ROUTES
+from .storage_sequence_execution import eval_json, prepare_model
 
 POSITIVE = ('original', 'renamed', 'shifted-layout', 'void-return')
 MUTANTS = ('drop-revert', 'wrong-error-argument', 'wrong-error-selector', 'empty-revert')
@@ -26,6 +27,15 @@ COMPILER_REJECTION = (
     "Compilation error: function 'writeThenRevert' declares return values but not all "
     'control-flow paths end in return/revert (Issue #738 (exhaustive return-path analysis))')
 COMPILATION_MARKER = 'ROLLBACK_COMPILATION:'
+TAIL_CASES = {
+    'zero': ('[guard]', True),
+    'nonzero': ('[.requireError (.literal 1) name args]', False),
+    'unknown': ('[.requireError (.param "next") name args]', False),
+    'stop': ('[.stop]', False),
+    'conditional-fallthrough': ('[.ite (.param "next") [guard] []]', False),
+    'both-branches-revert': ('[.ite (.param "next") [guard] [.revertEmpty]]', True),
+    'unreachable-stop': ('[guard, .stop]', True),
+}
 
 
 def replace_once(source, before, after):
@@ -82,21 +92,28 @@ def require_source_result(result, spec, mutant=None):
         raise HarnessError('unknown rollback mutation')
 
 
-def require_compilation(result, declared_returns):
-    expected = ({'status': 'rejected', 'reason': COMPILER_REJECTION} if declared_returns
-                else {'status': 'compiled'})
+def require_compilation(result, terminal=True):
+    expected = ({'status': 'compiled'} if terminal
+                else {'status': 'rejected', 'reason': COMPILER_REJECTION})
     if result != expected:
         raise HarnessError('terminal custom-error compilation boundary changed')
 
 
-def probe_compilation(directory, source, contract, signature):
+def probe_compilation(directory, source, contract, signature, tail_case='zero'):
     """Distinguish a structured compiler rejection from importer or tool failure."""
-    driver = directory / 'Compilation.lean'
+    if tail_case not in TAIL_CASES:
+        raise HarnessError('unknown control-flow boundary case')
+    tail, _ = TAIL_CASES[tail_case]
+    driver = directory / f'Compilation-{tail_case}.lean'
     header = 'import Compiler.Codegen\n' + driver_text(source.parent, source.name,
                                                      contract, signature)
     driver.write_text(header + f'''\n#eval do
-  let result := Compiler.CompilationModel.compile imported.model [{int(selector(signature), 16)}]
-    .cancun
+  let [fn] := imported.model.functions | throw (IO.userError "expected one control root")
+  let some guard@(.requireError (.literal 0) name args) := fn.body.getLast?
+    | throw (IO.userError "expected imported literal-zero custom-error guard")
+  let tail : List Compiler.CompilationModel.Stmt := {tail}
+  let active := {{ imported.model with functions := [{{ fn with body := fn.body.dropLast ++ tail }}] }}
+  let result := Compiler.CompilationModel.compile active [{int(selector(signature), 16)}] .cancun
   let observation := match result with
     | .ok _ => Lean.Json.mkObj [("status", Lean.toJson ("compiled" : String))]
     | .error reason => Lean.Json.mkObj [("status", Lean.toJson ("rejected" : String)),
@@ -104,6 +121,34 @@ def probe_compilation(directory, source, contract, signature):
   IO.println ({json.dumps(COMPILATION_MARKER)} ++ observation.compress)
 ''')
     return eval_json(driver, COMPILATION_MARKER)
+
+
+def require_error_mutation(result, spec):
+    """All actual routes must preserve rollback while detecting exactly the changed payloads."""
+    expected = [{'id': row['id'], 'fields': ['data']}
+                for row in spec['expected'] if row['status'] == 'revert']
+    if (result.get('routes') != list(ROUTES) or result.get('divergences') != []
+            or result.get('mismatches') != {route: expected for route in ROUTES}):
+        raise HarnessError('custom-error mutation requires exact three-route payload evidence')
+
+
+def execute_declared_control(directory, source, built, spec, solc, compiler):
+    """The original declared-return control now must execute, including exact rollback bytes."""
+    driver, snapshot = prepare_model(directory / 'model', source, CONTROL_CONTRACT,
+                                     list(CONTROL_SIGNATURES.values()), compiler)
+    compiled = compile_generated(directory / 'model', snapshot, solc)
+    result = run_routes(directory / 'routes', spec, source, built, driver, compiled)
+    require_outcome(result)
+    mutated_source = replace_once(source.read_text(), 'revert Rejected(next);',
+                                   'uint128 changedError = next ^ 1; revert Rejected(changedError);')
+    mutated = directory / 'wrong-error-argument'
+    bad_source, bad_built = build_source(mutated, mutated_source, solc)
+    bad_driver, bad_snapshot = prepare_model(mutated / 'model', bad_source, CONTROL_CONTRACT,
+                                             list(CONTROL_SIGNATURES.values()), compiler)
+    bad_compiled = compile_generated(mutated / 'model', bad_snapshot, solc)
+    bad = run_routes(mutated / 'routes', spec, bad_source, bad_built, bad_driver, bad_compiled)
+    require_error_mutation(bad, spec)
+    return {'threeRouteAgreement': True, 'errorPayloadMutationDetected': True}
 
 
 def run(output, *, prepared=False, require_composition=False):
@@ -114,7 +159,8 @@ def run(output, *, prepared=False, require_composition=False):
     solc, compiler = pinned_compiler()
     if not prepared:
         command(['turbo-lean', '--json', 'build', 'Compiler.SolidityImport.Import',
-                 'Compiler.Codegen', '--project-dir', ROOT], cwd=ROOT, timeout=1800,
+                 'Compiler.SolidityImport.SequenceRunner', 'Compiler.SolidityImport.Differential',
+                 '--project-dir', ROOT], cwd=ROOT, timeout=1800,
                 log=output / 'build.log')
     identity = ImplementationIdentity(FIXTURE, extra_inputs=(CONTROL_FIXTURE,))
     specs = {shift: specification(create_address(SENDERS[0]), SENDERS[0], shift)
@@ -146,8 +192,7 @@ def run(output, *, prepared=False, require_composition=False):
             admission = observe(directory, FIXTURE.name, CONTRACT, SIGNATURES['writeThenRevert'])
             require_rejection(admission, EFFECT_REJECTION)
             results[name]['admission'] = admission
-    # The unchanged supplied-key control isolates the compiler's return-path check.
-    # These source executions are controls, not packed-hash composition evidence.
+    # Supplied-key controls do not substitute for packed-hash composition evidence.
     controls = {}
     for declared in (False, True):
         name = 'declared-return-control' if declared else 'void-control'
@@ -169,9 +214,20 @@ def run(output, *, prepared=False, require_composition=False):
         if admission['status'] != 'admitted':
             raise HarnessError('supplied-key rollback control must remain importable')
         compilation = probe_compilation(directory, path, CONTROL_CONTRACT, signature)
-        require_compilation(compilation, declared)
+        require_compilation(compilation)
         controls[name] = {'sourceExpectationsPassed': True, 'admission': admission,
                           'compilation': compilation}
+        if declared:
+            boundaries = {'zero': compilation}
+            for case, (_, terminal) in TAIL_CASES.items():
+                if case == 'zero':
+                    continue
+                observation = probe_compilation(directory, path, CONTROL_CONTRACT, signature, case)
+                require_compilation(observation, terminal)
+                boundaries[case] = observation
+            controls[name]['boundaries'] = boundaries
+            controls[name]['execution'] = execute_declared_control(
+                directory, path, built, spec, solc, compiler)
     identity.verify()
     write_json(output / 'implementation.json', identity.manifest)
     write_json(output / 'results.json', {'rollbackPreparationPassed': True,
@@ -180,8 +236,8 @@ def run(output, *, prepared=False, require_composition=False):
     write_json(output / 'manifest.json', {'verityHead': identity.manifest['revision'],
         'compiler': compiler, 'fork': 'cancun', 'stateArchivesSha256': STATE_ARCHIVES,
         'packedArchiveSha256': PACKED_ARCHIVE_SHA256,
-        'scope': 'unchanged complete sequence; actual source EVM and isolated rejection probes',
-        'limits': ['no importer admission change or new proof',
+        'scope': 'complete frozen sequence; packed source EVM and supplied-key three-route rollback',
+        'limits': ['no packed rollback admission change',
                    'packed Denote/generated-EVM composition remains blocked',
                    'no tail-only cleanup, downstream wrapper or gas/resource equivalence']})
     print('Full-cleanup source rollback and exact errors pass; mutation sensitivity verified; '
