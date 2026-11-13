@@ -81,7 +81,7 @@ def scenario(kind, caller, layout, **_):
                 x, y = decoded
                 result = [x, x % (1 << 16), y]
             elif name == 'literals':
-                result = [(1 << 128) - 1, 128, -1]
+                result = [(1 << 128) - 1, 128, -1, 0, 1, 127]
             elif name == 'defaultLocal':
                 result = [0]
             elif name == 'explicitAbi':

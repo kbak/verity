@@ -43,8 +43,9 @@ contract LegacySignedScalars {
     function widen(int8 x, uint8 y) external pure returns (int256, uint16, int16) {
         return (int256(x), uint16(x), int16(y));
     }
-    function literals() external pure returns (uint256, uint256, int256) {
-        return (uint256(uint128(-1)), uint256(uint8(-128)), int256(int8(255)));
+    function literals() external pure returns (uint256, uint256, int256, uint256, uint256, int256) {
+        return (uint256(uint128(-1)), uint256(uint8(-128)), int256(int8(255)),
+            uint256(uint8(256)), uint256(uint8(257)), int256(int8(-129)));
     }
     function defaultLocal() external pure returns (int128) {
         int128 empty;

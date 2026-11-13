@@ -9,6 +9,9 @@ on:
       - 'Verity.lean'
       - 'Compiler/**'
       - 'Compiler.lean'
+      - 'scripts/solidity_differential/**'
+      - 'scripts/keccak256.py'
+      - 'scripts/setup_solc_import.py'
       - 'Contracts/**'
       - 'Contracts.lean'
       - 'lakefile.lean'
@@ -22,6 +25,9 @@ on:
       - 'Verity.lean'
       - 'Compiler/**'
       - 'Compiler.lean'
+      - 'scripts/solidity_differential/**'
+      - 'scripts/keccak256.py'
+      - 'scripts/setup_solc_import.py'
       - 'Contracts/**'
       - 'Contracts.lean'
       - 'lakefile.lean'
@@ -31,14 +37,14 @@ on:
   workflow_dispatch:
     inputs:
       check_file:
-        description: 'Optional .lean file for fast theorem-shard check (e.g. Verity/Core.lean)'
+        description: 'Optional .lean file for fast theorem-shard check (e.g. Verity/Core/Uint256.lean)'
         required: false
-        default: 'Verity/Core.lean'
+        default: 'Verity/Core/Uint256.lean'
         type: string
       check_decl:
-        description: 'Optional declaration for single-shard check (e.g. Uint256.add_comm)'
+        description: 'Optional declaration for single-shard check (e.g. Verity.Core.Uint256.add_comm)'
         required: false
-        default: 'Uint256.add_comm'
+        default: 'Verity.Core.Uint256.add_comm'
         type: string
 
 permissions:
@@ -51,7 +57,7 @@ concurrency:
 env:
   VERIFY_CACHE_BUCKET: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('ref-{0}', github.ref_name) }}
   VERIFY_MAIN_CACHE_BUCKET: ref-main
-  TURBO_LEAN_COMMIT: 1949eaac9d790d1dd13e357d45aad010fa0be644 # v0.1.0 (Season 14 / audit-spec v2.1)
+  TURBO_LEAN_COMMIT: 1949eaac9d790d1dd13e357d45aad010fa0be644 # established proof verifier
 
 jobs:
   turbo-lean-verify:
@@ -89,12 +95,12 @@ jobs:
           disable-lake-cache-restore: ${{ github.repository != 'kbak/verity' }}
 
       - name: Run turbo-lean CAS Import, Shard Check & GDSF GC
-        uses: Th0rgal/turbo-lean@1949eaac9d790d1dd13e357d45aad010fa0be644 # v0.1.0 (Season 14 / audit-spec v2.1)
+        uses: Th0rgal/turbo-lean@1949eaac9d790d1dd13e357d45aad010fa0be644 # established proof verifier
         with:
           project-dir: "."
           command: "check"
-          check-file: ${{ inputs.check_file || 'Verity/Core.lean' }}
-          check-decl: ${{ inputs.check_decl || 'Uint256.add_comm' }}
+          check-file: ${{ inputs.check_file || 'Verity/Core/Uint256.lean' }}
+          check-decl: ${{ inputs.check_decl || 'Verity.Core.Uint256.add_comm' }}
           cache-key-prefix: verity-turbo-lean-cas-${{ env.VERIFY_CACHE_BUCKET }}
           max-reclaimable-bytes: "10737418240"
 
@@ -111,8 +117,85 @@ jobs:
           else
             BASE_REF="HEAD~1"
           fi
-          turbo-lean --json audit-spec Verity/Core.lean --decl Uint256.add_comm
+          turbo-lean --json audit-spec Verity/Core/Uint256.lean --decl Verity.Core.Uint256.add_comm
           turbo-lean --json seed-shards --project-dir .
           turbo-lean --json check Verity/Proofs/Stdlib --project-dir .
           turbo-lean --json pr-verify --base "$BASE_REF" --project-dir . --receipt /tmp/verity-ci-receipt.json
           turbo-lean --json verify-receipt /tmp/verity-ci-receipt.json
+
+      # Turbo-Lean materializes dependency Lake recipes offline. Provision the
+      # C sources already declared by EVMYulLean at immutable revisions first.
+      - name: Prepare EVMYulLean SHA-256 source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: amosnier/sha-2
+          ref: 565f65009bdd98267361b17d50cddd7c9beb3e6c
+          path: .lake/packages/evmyul/sha2
+          persist-credentials: false
+
+      - name: Prepare EVMYulLean Keccak source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: brainhub/SHA3IUF
+          ref: fc8504750a5c2174a1874094dd05e6a0d8797753
+          path: .lake/packages/evmyul/keccak256
+          persist-credentials: false
+
+      # Keep the established verifier and its narrow axiom policy. The newer
+      # builder supports declarative Lake inputs and audits Lean 4.31 artifacts.
+      - name: Checkout input-aware Turbo-Lean builder
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: Th0rgal/turbo-lean
+          ref: 265e91ab454435fa9c865b7a416d4770d50f7216
+          path: .lake/turbo-input-builder
+          persist-credentials: false
+
+      - name: Build isolated input-aware Turbo-Lean
+        run: |
+          cargo build --release --locked --manifest-path .lake/turbo-input-builder/Cargo.toml
+
+      - name: Install Foundry for bounded memory regressions
+        uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1
+        with:
+          version: v1.5.0
+
+      - name: Verify bounded memory against independent Cancun expectations
+        timeout-minutes: 20
+        run: |
+          python3 scripts/setup_solc_import.py --version 0.8.26 --output .lake/solidity-import/solc-0.8.26
+          TURBO_LEAN_HOME="$RUNNER_TEMP/verity-input-build-cas" \
+            .lake/turbo-input-builder/target/release/turbo-lean --json build \
+            Compiler.SolidityImport.Import Compiler.SolidityImport.Differential --project-dir .
+          PYTHONPATH=scripts python3 -m solidity_differential.check_packed_memory_hash_routes --prepared --require-admission --output .lake/bounded-memory/packed
+          PYTHONPATH=scripts python3 -m solidity_differential.check_bounded_memory --prepared --output .lake/bounded-memory/constructs
+          PYTHONPATH=scripts python3 -m solidity_differential.check_storage_reference --prepared --output .lake/bounded-memory/storage-reference
+
+      - name: Verify storage controls and read-composition preparation
+        timeout-minutes: 15
+        run: |
+          TURBO_LEAN_HOME="$RUNNER_TEMP/verity-input-build-cas" \
+            .lake/turbo-input-builder/target/release/turbo-lean --json build \
+            Compiler.SolidityImport.SequenceRunner --project-dir .
+          PYTHONPATH=scripts python3 -m solidity_differential.check_storage_reference_routes --prepared --output .lake/bounded-memory/storage-routes
+          PYTHONPATH=scripts python3 -m solidity_differential.check_packed_storage_read --prepared --require-composition --output .lake/bounded-memory/packed-storage-read
+          PYTHONPATH=scripts python3 -m solidity_differential.check_tail_cleanup_liveness --prepared --output .lake/bounded-memory/tail-cleanup
+
+      - name: Verify full-cleanup successful storage updates and logs
+        timeout-minutes: 15
+        run: |
+          PYTHONPATH=scripts python3 -m solidity_differential.check_packed_storage_updates --prepared --output .lake/bounded-memory/packed-storage-updates
+
+      - name: Prepare full-cleanup rollback regressions
+        timeout-minutes: 15
+        run: |
+          PYTHONPATH=scripts python3 -m solidity_differential.check_packed_storage_rollback --prepared --output .lake/bounded-memory/packed-storage-rollback
+
+      - name: Archive bounded memory execution and rejection evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: bounded-memory-regressions
+          path: .lake/bounded-memory/**
+          include-hidden-files: true
+          retention-days: 14
