@@ -66,6 +66,12 @@ def source_variants(source):
                                             'uint256[2] private outerBefore;'),
         'short-hash': source.replace('keccak256(add(base, 12), 58)',
                                     'keccak256(add(base, 12), 57)'),
+        # Former rejection control: preserve the exact source defect and now
+        # require every executed route to detect its unexpected state change.
+        'storage-write': source.replace(
+            'Record storage row = locate(account, left, right, salt);',
+            'Record storage row = locate(account, left, right, salt);\n'
+            '        row.accumulator = 1;').replace('external view returns', 'external returns'),
     }
 
 
@@ -98,8 +104,10 @@ def rejected_sources(source):
     yield 'scratch-after-read', observed, READ, 'unsupported Yul builtin mload'
     caller = 'Record storage row = locate(account, left, right, salt);'
     for name, statements, reason in (
-        ('storage-write', 'row.accumulator = 1;',
-         'bounded memory requires a straight-line scalar root with successful guards'),
+        ('memory-after-write', 'row.accumulator = 1; uint256 observed; '
+         'assembly ("memory-safe") { let p := mload(0x40) observed := mload(p) } '
+         'row.accumulator = observed;',
+         'bounded memory storage effects require a memory-independent successful suffix'),
         ('storage-pointer', 'uint256 pointer = row.accumulator; '
          'assembly { mstore(pointer, 0) }',
          'bounded memory requires nonwrapping addresses in [128, 2^32), or word 0x40'),
@@ -112,7 +120,7 @@ def rejected_sources(source):
          COMPOSITION_REJECTION),
     ):
         text = source.replace(caller, caller + '\n        ' + statements)
-        if name == 'storage-write':
+        if name == 'memory-after-write':
             text = text.replace('external view returns', 'external returns')
         if name == 'unregistered-scratch':
             text = text.replace('return (row.count, row.accumulator, row.checkpoint);\n    }\n}',
@@ -141,15 +149,15 @@ def require_rejection(observation, reason):
         raise HarnessError(f'expected located rejection {reason!r}, observed {observation}')
 
 
-def require_source(result, mutant=False):
+def require_source(result, mutant=False, *, mutation_fields=('data',)):
     if result.get('routes') != ['source'] or set(result.get('mismatches', {})) != {'source'}:
         raise HarnessError('missing actual source execution')
     rows = result['mismatches']['source']
-    if (bool(rows) != mutant or any(row['fields'] != ['data'] for row in rows)):
+    if (bool(rows) != mutant or any(row['fields'] != list(mutation_fields) for row in rows)):
         raise HarnessError('source read or mandatory return-data mutation evidence failed')
 
 
-def require_combined(result, mutant=False):
+def require_combined(result, mutant=False, *, mutation_fields=('data',)):
     """All routes must execute; source defects must remain observable in every route."""
     if not mutant:
         require_outcome(result)
@@ -160,7 +168,7 @@ def require_combined(result, mutant=False):
         raise HarnessError('missing or divergent combined mutation execution')
     for route in routes:
         require_source({'routes': ['source'], 'mismatches': {'source': result['mismatches'][route]}},
-                       mutant=True)
+                       mutant=True, mutation_fields=mutation_fields)
 
 
 def run(output, *, prepared=False):
@@ -193,15 +201,16 @@ def run(output, *, prepared=False):
         result = replay_expected(spec, {'source': source_adapter(directory / 'source', built, spec)},
                                  required_routes=('source',))
         write_json(directory / 'execution.json', result)
-        mutant = name in ('wrong-mapping-base', 'short-hash')
-        require_source(result, mutant)
+        mutant = name in ('wrong-mapping-base', 'short-hash', 'storage-write')
+        mutation_fields = ('data', 'storage') if name == 'storage-write' else ('data',)
+        require_source(result, mutant, mutation_fields=mutation_fields)
         results[name] = {'sourceSha256': file_sha256(path), 'sourceReads': 6,
                          'mismatches': result['mismatches'], 'combinedThreeRouteAgreement': False}
         driver, snapshot = prepare_model(directory / 'combined-model', path, CONTRACT,
                                          [READ], compiler)
         compiled = compile_generated(directory / 'combined-model', snapshot, solc)
         combined = run_routes(directory / 'combined-routes', spec, path, built, driver, compiled)
-        require_combined(combined, mutant)
+        require_combined(combined, mutant, mutation_fields=mutation_fields)
         results[name].update({'combinedThreeRouteAgreement': not mutant,
                               'mutationDetectedOnAllRoutes': mutant,
                               'mismatches': combined['mismatches']})

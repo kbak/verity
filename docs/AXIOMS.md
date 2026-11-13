@@ -39,8 +39,16 @@ sequences and scalar storage reads within the bounded-memory root audit. It adds
 no axiom or theorem: recognition remains trusted frontend code. Existing physical
 scratch-frame lemmas retain their assumptions; combined source/Denote/generated
 execution against the frozen expectations is finite regression evidence, not
-source/importer or compiler correspondence. Tail-only cleanup and writes remain
-excluded; see `PACKED_STORAGE_READ_DESIGN.md` and `TRUST_ASSUMPTIONS.md`.
+source/importer or compiler correspondence. Tail-only cleanup remains excluded;
+see `PACKED_STORAGE_READ_DESIGN.md` and `TRUST_ASSUMPTIONS.md`.
+
+The successful-update extension admits a structurally restricted suffix of raw
+storage-word writes, scalar logs and memory-independent scalar returns. Event
+encoding footprints are bounded; later memory observations, calls, control flow
+and explicit reverts remain rejected. This adds no theorem or axiom and keeps
+the existing hash premises. The unchanged successful state/log prefix executes
+on all three routes; that finite evidence does not prove frontend or compiler
+correspondence. See `PACKED_STORAGE_UPDATES.md` for the remaining #32 obligations.
 
 The tail-only caller-liveness preparation adds no axiom, theorem or admission.
 Controlled upper-bit perturbations provide finite source-EVM sensitivity evidence

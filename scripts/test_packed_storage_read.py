@@ -117,6 +117,20 @@ class PackedStorageReadTests(unittest.TestCase):
             with self.assertRaises(HarnessError):
                 require_rejection(observation, COMPOSITION_REJECTION)
 
+    def test_promoted_storage_write_requires_data_and_state_detection_on_every_route(self):
+        valid = {'routes': ['source', 'model', 'compiled'], 'divergences': [],
+                 'mismatches': {r: [{'fields': ['data', 'storage']}] for r in
+                                ('source', 'model', 'compiled')}}
+        require_combined(valid, True, mutation_fields=('data', 'storage'))
+        for route in valid['routes']:
+            for fields in ([], ['data'], ['storage'], ['data', 'storage', 'status']):
+                bad = copy.deepcopy(valid)
+                bad['mismatches'][route] = [{'fields': fields}] if fields else []
+                with self.assertRaises(HarnessError):
+                    require_combined(bad, True, mutation_fields=('data', 'storage'))
+        variants = source_variants(FIXTURE.read_text())
+        self.assertIn('row.accumulator = 1;', variants['storage-write'])
+
     def test_rejection_matrix_is_distinct_and_source_mutations_leave_fixture_unchanged(self):
         source = FIXTURE.read_text()
         cases = list(rejected_sources(source))

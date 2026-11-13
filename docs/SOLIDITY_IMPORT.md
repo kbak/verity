@@ -2096,10 +2096,18 @@ generated mapping-address scratch sequences. The root audit requires each entire
 key/store, base/store, 64-byte hash sequence in order, identified by its fresh
 lowering binding; arbitrary source scratch writes remain excluded. Its `[0,64)`
 footprint preserves the allocator, zero word and source buffers above 128.
-Storage/hash results remain unknown words for pointer bounds. Tail-only cleanup,
-writes and observations of synthetic memory layouts remain unsupported. The
+Storage/hash results remain unknown words for pointer bounds. Tail-only cleanup
+and observations of synthetic memory layouts remain unsupported. The
 combined three-route regression uses unchanged independent expectations; see
 [the full-cleanup read design](PACKED_STORAGE_READ_DESIGN.md).
+
+Raw storage-word updates and scalar events may follow in a restricted successful
+suffix: subsequent word expressions must be independent of memory and synthetic
+storage layouts. Event signature/data stores must fit the bounded free pointer.
+Later memory accesses, guards, control flow, calls and explicit reverts reject.
+The [update/log campaign](PACKED_STORAGE_UPDATES.md) executes the unchanged
+successful prefix on source EVM, actual Denote and generated EVM, retaining exact
+state, returns and logs. It does not establish the complete rollback sequence.
 
 The lowerer and the bounds audit are included in the source digest. Allocator
 initialization follows the structural analysis of the emitted memory reads. These

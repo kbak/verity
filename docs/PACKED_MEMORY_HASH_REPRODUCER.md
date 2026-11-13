@@ -375,5 +375,8 @@ control, or a later successful import alone, cannot open that milestone gate.
 The [full-cleanup storage-read slice](PACKED_STORAGE_READ_DESIGN.md) now admits
 bounded source memory composed with generated mapping scratch and scalar reads.
 It requires actual combined source/Denote/generated execution against the unchanged
-expectation archives. Tail-only cleanup, writes and the pinned downstream wrapper
-remain outside this slice, so the #32 milestone gate remains incomplete.
+expectation archives. The [successful-update slice](PACKED_STORAGE_UPDATES.md)
+adds raw storage-word writes and scalar logs under a memory-independent suffix
+restriction, using the unchanged prefix before the first revert. Tail-only
+cleanup, write-then-revert composition and the pinned downstream wrapper remain
+separate obligations, so the #32 milestone gate remains incomplete.
