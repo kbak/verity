@@ -494,6 +494,15 @@ partial def decodeStructLayoutMembers (name prefixStr : String) (baseWord : Nat)
 def rawStructMemberSlot (baseSlot : Expr) (wordOffset : Nat) : Expr :=
   if wordOffset == 0 then baseSlot else .add baseSlot (.literal wordOffset)
 
+/-- Emit the existing key-then-base mapping preimage and record its fresh result.
+The root memory audit must still check the complete adjacent statement sequence;
+this provenance never authorizes individual scratch writes or source observations. -/
+def mappingScratch (key baseSlot : Expr) : M (Array Stmt × String) := do
+  let result ← fresh
+  modify fun e => { e with mappingScratchBindings := e.mappingScratchBindings.insert result }
+  return (#[.mstore (.literal 0) key, .mstore (.literal 32) baseSlot,
+    .letVar result (.keccak256 (.literal 0) (.literal 64))], result)
+
 def computeSPathBaseSlot (path : SPath) (info : FieldInfo) (wordOffset : Nat) (at_ : Json) :
     M (Array Stmt × Expr) := do
   modify fun e => { e with encodingMemory := true }
@@ -502,25 +511,12 @@ def computeSPathBaseSlot (path : SPath) (info : FieldInfo) (wordOffset : Nat) (a
         let bSlot ← fresh
         pure (0, #[Stmt.letVar bSlot (.literal info.slot)], bSlot)
     | .one _ k1 => do
-        let bSlot ← fresh
-        let stmts : Array Stmt := #[
-          .mstore (.literal 0) k1,
-          .mstore (.literal 32) (.literal info.slot),
-          .letVar bSlot (.keccak256 (.literal 0) (.literal 64))
-        ]
+        let (stmts, bSlot) ← mappingScratch k1 (.literal info.slot)
         pure (1, stmts, bSlot)
     | .two _ k1 k2 => do
-        let outerSlot ← fresh
-        let bSlot ← fresh
-        let stmts : Array Stmt := #[
-          .mstore (.literal 0) k1,
-          .mstore (.literal 32) (.literal info.slot),
-          .letVar outerSlot (.keccak256 (.literal 0) (.literal 64)),
-          .mstore (.literal 0) k2,
-          .mstore (.literal 32) (.localVar outerSlot),
-          .letVar bSlot (.keccak256 (.literal 0) (.literal 64))
-        ]
-        pure (2, stmts, bSlot)
+        let (outer, outerSlot) ← mappingScratch k1 (.literal info.slot)
+        let (inner, bSlot) ← mappingScratch k2 (.localVar outerSlot)
+        pure (2, outer ++ inner, bSlot)
     | .outer _ _ | .rawSlot _ _ | .bytesSlot _ _ =>
         failAt at_ "storage struct member access requires all outer mapping keys"
   unless info.keyCount == count do
