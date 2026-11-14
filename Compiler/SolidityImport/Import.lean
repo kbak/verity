@@ -10991,6 +10991,12 @@ private partial def lowerFlatStructValue (j : Json) (expectedSid? : Option Nat) 
     let args ← mArr (← mField j "arguments")
     unless args.size == sMembers.size && !sMembers.isEmpty do
       failAt j "struct constructor argument count mismatch"
+    if (← get).legacyWrapping then
+      for arg in args do
+        if statefulCallIn arg (← get) || assignmentIn arg then
+          failAt arg "legacy struct constructor arguments require effect-free evaluation"
+      if (args.filter (!LegacyStructs.totalArgument ·)).size > 1 then
+        failAt j "legacy struct constructor has multiple potentially failing arguments"
     if names.isEmpty then
       let mut pre : Array Stmt := #[]
       let mut memberVals : Array (String × String × Expr) := #[]
@@ -13255,7 +13261,8 @@ private partial def lowerLocalCore (s : Json) : M (Array Stmt) := do
                  yulNames := e.yulNames.erase name,
                  yulMemoryStructs := e.yulMemoryStructs.insert name id }
       return effects
-    if loc == "memory" && (← mType d).startsWith "struct " && !(← mType d).contains "[" && (← get).stateVars.size > 1 then
+    if loc == "memory" && (← mType d).startsWith "struct " && !(← mType d).contains "[" &&
+        ((← get).legacyWrapping || (← get).stateVars.size > 1) then
       let sid ← refInt (← mField d "typeName")
       if sid < 0 then failAt d "builtin struct"
       let some sDecl := (← get).structs.find? sid.toNat | failAt d "unknown struct declaration"
@@ -15810,6 +15817,7 @@ private def importSlice
     else
       sortedFields
   if legacy then
+    (LegacyStructs.validateClosure).run' env
     for reached in env.included do
       if let some declaration := env.funs.find? reached.declId then
         (validateLegacyDeclaration declaration).run' env

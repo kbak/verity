@@ -1,4 +1,4 @@
-import Compiler.SolidityImport.ExprHelpers
+import Compiler.SolidityImport.LegacyStructs
 
 /-! Bounded admission of legacy signed scalar arithmetic. Division, storage and
 assembly need separate legacy semantics; admitting a scalar type does not admit
@@ -23,7 +23,10 @@ def validate (node : Json) : M Unit := do
     if (field? node "stateVariable").any (fun x => x.getBool?.toOption == some true) then
       some node else ref.bind env.stateVars.find?
   if (signedBitsOf ty).isSome then
-    if declaration.isSome || #["MemberAccess", "IndexAccess"].contains kind then
+    let constant := ref.any env.numericConstants.contains || declaration.any (fun d =>
+      (field? d "constant").bind (·.getBool?.toOption) == some true)
+    if !constant && (declaration.isSome || kind == "IndexAccess" ||
+        (kind == "MemberAccess" && !LegacyStructs.memoryMember node env)) then
       failAt node s!"Solidity 0.7.6 scalar slice does not support type {ty} in storage or members"
   if let some decl := declaration then
     let typeName := field? decl "typeName" |>.getD Json.null

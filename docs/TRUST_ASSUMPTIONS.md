@@ -2905,3 +2905,19 @@ Independent integer-oracle differential checks cover ABI coders, width/sign
 boundaries, exact failure bytes and storage frames; completed guard-removal
 counterexamples establish that the observations distinguish those defects.
 The remaining frontend trust boundary and deployment/gas assumptions are unchanged.
+
+The legacy read-only memory-struct slice adds no project axiom or ECM assumption.
+The frontend trusts solc's struct/member declaration identities and scalar types.
+It admits positional/named construction, zero defaults, field reads, signed
+constants and read-only internal forwarding. Common lowering retains declaration
+order, captures scalar values and applies declared-width/sign cleanup. Because
+Solidity memory references may alias, every reached member mutation, struct
+rebinding, alias local, struct return and storage copy remains rejected. Assembly
+in any reached helper or modifier is excluded, including indirect allocator
+observations. Nested/dynamic/enum fields and struct ABI roots are excluded.
+Constructor arguments cannot have side effects or multiple potentially failing
+siblings.
+Independent integer-oracle and source-mutation comparisons validate finite
+observations only; they do not prove frontend correspondence, memory-allocation
+or gas equivalence, or any application property. Existing model proofs and their
+assumptions retain their original scope.
