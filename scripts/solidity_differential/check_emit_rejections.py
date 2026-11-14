@@ -10,6 +10,9 @@ def main():
     output = Path(tempfile.mkdtemp(prefix='emit-rejections-', dir=root / '.lake'))
     cases = [
         ('wide-direct-widening', 'uint8', 'event E(uint256 value);', 'emit E(x); return x;', None),
+        ('fixed-bytes-direct-widening', 'bytes1', 'event E(bytes4 sel);',
+         'emit E(bytes4(x)); return x;',
+         'event direct parameter type differs from its declaration'),
         ('inlined-widening', 'uint8', 'event E(uint128 value); function widen(uint8 v) internal pure returns (uint128) { return v; }', 'emit E(widen(x)); return x;', 'event direct parameter type differs from its declaration'),
 ('qualified-collision', 'uint256', '', 'emit A.E(x); emit B.E(x); return x;', 'event name resolves to multiple declarations'),
     ('scalar',

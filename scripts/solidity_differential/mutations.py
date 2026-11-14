@@ -145,8 +145,10 @@ MUTANTS = {
         'isPayable := optStr fn "stateMutability" == some "payable", body := body.toList,',
         'isPayable := false, body := body.toList,'),
     'raw-call-input-offset': ('Verity/Core/Model/Denote.lean',
-        'UInt8.ofNat (state.world.physicalByte (pointer + i)).val }',
-        'UInt8.ofNat (state.world.physicalByte (pointer + i + 1)).val }'),
+        'gas := values[0]!\n    calldata := (List.range size).map fun i =>\n'
+        '      UInt8.ofNat (state.world.physicalByte (pointer + i)).val }',
+        'gas := values[0]!\n    calldata := (List.range size).map fun i =>\n'
+        '      UInt8.ofNat (state.world.physicalByte (pointer + i + 1)).val }'),
     'raw-call-value': ('Verity/Core/Model/Denote.lean',
         'value := if delegated then state.world.msgValue.val else values[2]!',
         'value := if delegated then state.world.msgValue.val else 0'),
@@ -174,7 +176,7 @@ MUTANTS = {
     'import-legacy-static-header': ('Compiler/SolidityImport/LegacyAbi.lean',
         '.mstore header (.literal size)', '.mstore header (.literal (size + 1))'),
     'import-legacy-static-stride': ('Compiler/SolidityImport/LegacyAbi.lean',
-        '.literal (32 * index)', '.literal (31 * index)'),
+        '.literal (offset + 32 * index)', '.literal (offset + 31 * index)'),
     'import-legacy-static-rounding': ('Compiler/SolidityImport/LegacyAbi.lean',
         '.letVar headerName (.mload (.literal 64))',
         '.letVar headerName (.bitAnd (.add (.mload (.literal 64)) (.literal 31)) (.bitNot (.literal 31)))'),
@@ -214,8 +216,8 @@ MUTANTS = {
     'denote-memory-revert-empty': ('Verity/Core/Model/Denote.lean', '  return .revertWithData ((List.range size).map fun i =>\n    UInt8.ofNat (state.world.byteMemory.readByte (offset + i)).val)', '  let _ := (offset, size)\n  return .revertWithData []'),
     'ecm-memory-revert-size': ('Verity/Core/Model/ECM.lean', '  | [offset, size] => pure [.exprStmt (.call "revert" [offset, size])]', '  | [offset, size] => pure [.exprStmt (.call "revert" [offset, .call "add" [size, .lit 1]])]'),
 
-    "import-legacy-root-checked": ("Compiler/SolidityImport/Import.lean", 'legacyWrapping := legacy, unchecked := legacy', 'legacyWrapping := legacy, unchecked := false'),
-    "import-legacy-helper-checked": ("Compiler/SolidityImport/Import.lean", 'legacyWrapping := legacy, unchecked := legacy', 'legacyWrapping := false, unchecked := legacy'),
+    "import-legacy-root-checked": ("Compiler/SolidityImport/Import.lean", 'legacyWrapping := legacy\n    unchecked := legacy', 'legacyWrapping := legacy\n    unchecked := false'),
+    "import-legacy-helper-checked": ("Compiler/SolidityImport/Import.lean", 'legacyWrapping := legacy\n    unchecked := legacy', 'legacyWrapping := false\n    unchecked := legacy'),
     "import-require-condition": ("Compiler/SolidityImport/Import.lean", 'return condition.pre.push (.require condition.expr value)', 'return condition.pre.push (.require (.literal 1) value)'),
     "denote-require-selector": ("Verity/Core/Model/Denote.lean", '[0x08, 0xc3, 0x79, 0xa0]', '[0x08, 0xc3, 0x79, 0xa1]'),
     "import-custom-require-condition": ("Compiler/SolidityImport/Import.lean", '(.requireError condition.expr name values)', '(.requireError (.literal 1) name values)'),

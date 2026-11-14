@@ -12,6 +12,7 @@ import subprocess
 import tempfile
 
 MESSAGES = {
+    'legacy-static': 'raw static tuples require Solidity 0.7.6',
     'external': 'external contract calls are outside this slice',
     'placement': ('low-level call must be a (bool success, bytes memory returndata) declaration '
                   'followed by returndata forwarding and optional-bool validation'),
@@ -110,7 +111,7 @@ CASES = [
      ('token.call', 0, 'MemberAccess', 'placement')),
     ('staticcall', '', '',
      sequence(call='token.staticcall(abi.encodeCall(IToken.transfer, (to, amount)))'),
-     ('token.staticcall', 0, 'MemberAccess', 'external')),
+     ('(bool success, bytes memory returndata)', 0, 'VariableDeclarationStatement', 'legacy-static')),
     ('delegatecall', '', '',
      sequence(call='token.delegatecall(abi.encodeCall(IToken.transfer, (to, amount)))'),
      ('token.delegatecall', 0, 'MemberAccess', 'external')),

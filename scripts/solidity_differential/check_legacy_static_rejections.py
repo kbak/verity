@@ -16,7 +16,7 @@ CASES = {
     'dynamic-slot': ('', 'function run(uint256 x) public { assembly { sstore(x,7) } }', 'run(uint256)', 'storage writes require a constant slot'),
     'store-expression': ('', 'function run(uint256 x) public { assembly { sstore(7,add(x,1)) } }', 'run(uint256)', 'read-only decoding'),
     'store-loop': ('', 'function run(uint256 x) public { assembly { for {} lt(x,5) {x := add(x,1)} {sstore(7,x)} } }', 'run(uint256)', 'read-only decoding'),
-    'untracked-helper-address': ('', 'function h(address x) internal { assembly { sstore(7,x) } } function run(address x) public {h(x);}', 'run(address)', 'assembly reads require full-word'),
+    'clean-helper-address': ('', 'function h(address x) internal { assembly { sstore(7,x) } } function run(address x) public {h(x);}', 'run(address)', None),
     'dirty-address-store': ('', 'function run() public {address a; assembly {a := sload(7)} assembly {sstore(8,a)}}', 'run()', 'assembly reads require full-word'),
     'write-after-void': ('interface I { function hook() external; }', RUN + 'I(target).hook(); assembly { sstore(7,x) } }', SIG, 'closed trailing continuation with storage-free operands'),
     'effectful-argument': (I, RUN + 'require(I(target).query(x++)); }', SIG, 'effect-free'),

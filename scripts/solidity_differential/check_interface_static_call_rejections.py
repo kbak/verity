@@ -13,6 +13,7 @@ import tempfile
 
 ORACLE = 'interface IPriceOracle {\n    function price() external view returns (uint256);\n}\n'
 MESSAGES = {
+    'legacy-static': 'raw static tuples require Solidity 0.7.6',
     'placement': 'typed interface staticcall must be a whole variable initializer, '
                  'assignment right-hand side, expression statement, require condition or '
                  'short-circuit operand of one',
@@ -95,7 +96,7 @@ CASES = [
     ('low-level-staticcall', ORACLE, '',
      '(bool ok, bytes memory data) = oracle.staticcall(abi.encodeCall(IPriceOracle.price, ())); '
      'return ok ? data.length : 0;',
-     ('oracle.staticcall', 0, 'MemberAccess', 'external')),
+     ('(bool ok, bytes memory data)', 0, 'VariableDeclarationStatement', 'legacy-static')),
 ]
 
 
