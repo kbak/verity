@@ -116,7 +116,7 @@ def NonEscapingList (stmts : List YulStmt) : Prop :=
 
 theorem nonEscapingList_nil : NonEscapingList [] := by
   intro _ state
-  exact Or.inl ⟨state, by simp [execIRStmts]⟩
+  exact Or.inl ⟨state, by simp⟩
 
 theorem nonEscapingList_cons {stmt : YulStmt} {rest : List YulStmt}
     (hstmt : NonEscaping stmt) (hrest : NonEscapingList rest) :

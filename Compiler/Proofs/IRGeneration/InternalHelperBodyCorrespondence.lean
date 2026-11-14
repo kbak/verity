@@ -522,7 +522,7 @@ private theorem internalHelperResultOfStmtListProjectionCore_eq_return
       intro name hmem
       exact hfresh name (by
         simp [internalHelperStmtListProjectionReadNames,
-          internalHelperStmtProjectionReadNames, hmem]))
+          hmem]))
   cases hleft :
       SourceSemantics.evalExprWithHelpers spec fields fuel
         { runtime with bindings := lhs } value with
@@ -735,7 +735,7 @@ private theorem internalHelperResultOfStmtListProjectionCore_eq
           { runtime with bindings := rhs } stmts) := by
   induction hcore generalizing runtime lhs rhs with
   | nil =>
-      simp [SourceSemantics.execStmtListWithHelpers, internalHelperResultOfStmtResult]
+      simp [internalHelperResultOfStmtResult]
   | letVar hvalue _ ih =>
       refine internalHelperResultOfStmtListProjectionCore_eq_letVar
         hvalue hagree hfresh ?_

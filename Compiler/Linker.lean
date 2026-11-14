@@ -202,14 +202,14 @@ def renderWithLibraries (obj : YulObject) (libraries : List LibraryFunction) : E
       | [] => (acc, inserted)
       | line :: rest =>
           -- Track depth: we want the second "code {" (inside object "runtime")
-          let isCodeLine := line.trim.startsWith "code {"
+          let isCodeLine := line.trimAscii.copy.startsWith "code {"
           let newDepth := if isCodeLine then depth + 1 else depth
           if !inserted && newDepth == 2 && isCodeLine then
             -- Found the runtime code section, insert libraries after this line
             let libraryLines := libraries.flatMap fun fn =>
               -- Add proper indentation for runtime code functions
               fn.body.map fun bodyLine =>
-                if bodyLine.trim.isEmpty then bodyLine
+                if bodyLine.trimAscii.copy.isEmpty then bodyLine
                 else libraryIndent ++ bodyLine
             insertLibraries rest (acc ++ [line] ++ libraryLines) true newDepth
           else
