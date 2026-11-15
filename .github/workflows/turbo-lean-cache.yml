@@ -63,7 +63,7 @@ jobs:
   turbo-lean-verify:
     name: Turbo-Lean Two-Level CAS & Theorem Shard Check
     runs-on: ${{ fromJSON(github.repository == 'kbak/verity' && '["ubuntu-24.04"]' || '["blacksmith-16vcpu-ubuntu-2404"]') }}
-    timeout-minutes: 60
+    timeout-minutes: 90
     env:
       LEAN_NUM_THREADS: ${{ github.repository == 'kbak/verity' && '2' || '16' }}
       # CI only needs verdicts; keep turbo-lean from spooling telemetry under ~/.cache.
@@ -175,14 +175,28 @@ jobs:
           PYTHONPATH=scripts python3 -m solidity_differential.check_bounded_memory --prepared --output .lake/bounded-memory/constructs
           PYTHONPATH=scripts python3 -m solidity_differential.check_storage_reference --prepared --output .lake/bounded-memory/storage-reference
 
-      - name: Verify storage controls and read-composition preparation
+      # These campaigns run for several minutes each on the hosted runner.
+      # Keep preparation and each campaign under independent timeout budgets.
+      - name: Prepare storage sequence verification
         timeout-minutes: 15
         run: |
           TURBO_LEAN_HOME="$RUNNER_TEMP/verity-input-build-cas" \
             .lake/turbo-input-builder/target/release/turbo-lean --json build \
             Compiler.SolidityImport.SequenceRunner --project-dir .
+
+      - name: Verify storage controls
+        timeout-minutes: 15
+        run: |
           PYTHONPATH=scripts python3 -m solidity_differential.check_storage_reference_routes --prepared --output .lake/bounded-memory/storage-routes
+
+      - name: Verify packed storage read composition
+        timeout-minutes: 15
+        run: |
           PYTHONPATH=scripts python3 -m solidity_differential.check_packed_storage_read --prepared --require-composition --output .lake/bounded-memory/packed-storage-read
+
+      - name: Verify tail-cleanup caller liveness
+        timeout-minutes: 15
+        run: |
           PYTHONPATH=scripts python3 -m solidity_differential.check_tail_cleanup_liveness --prepared --output .lake/bounded-memory/tail-cleanup
 
       - name: Verify full-cleanup successful storage updates and logs

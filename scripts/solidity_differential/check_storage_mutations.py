@@ -141,7 +141,7 @@ MUTANTS.update({
 MUTANTS.update({
     'import-helper-effect-binary-guard': ('if statefulCallIn leftNode env ||\n        statefulCallIn rightNode env then', 'if false then'),
     'import-helper-effect-argument-guard': ('if statefulCallIn arg (← get) then', 'if false then'),
-    'import-helper-effect-classifier': ('| some fn => ![some "pure", some "view"].contains (optStr fn "stateMutability")', '| some _ => false'),
+    'import-helper-effect-classifier': ('![some "pure", some "view"].contains (optStr fn "stateMutability") ||', 'false ||'),
     'import-helper-effect-drop': ('-- Use the same exact assignment/delete and require rules as root bodies.\n        -- The helper continuation still resumes only after these effects.\n        let pre ← lowerEffect s', '-- Use the same exact assignment/delete and require rules as root bodies.\n        -- The helper continuation still resumes only after these effects.\n        let pre : Array Stmt := #[]'),
     'import-packed-member-delete': ('        markField name\n        let value ← if deleting then pure ({ pre := #[], expr := .literal 0 } : Val) else do\n          let right ← mField expression "rightHandSide"\n          atom (← convert ty (← mType right) (← lowerExpr right) right)\n        return (pre ++ value.pre).push (write value.expr)', '        markField name\n        let value ← if deleting then pure ({ pre := #[], expr := .literal 1 } : Val) else do\n          let right ← mField expression "rightHandSide"\n          atom (← convert ty (← mType right) (← lowerExpr right) right)\n        return (pre ++ value.pre).push (write value.expr)'),
     'import-packed-member-value': ('return (pre ++ value.pre).push (write value.expr)', 'return (pre ++ value.pre).push (write (.literal 0))'),
@@ -378,7 +378,7 @@ MUTANTS.update({
     'import-access-manager-target-role-calldata-helper-slice-size-zero': ('      else if let some buf := (← get).byteBuffers.find? id.toNat then\n        if (← mType base) == "bytes calldata" then\n          pure (some (buf.pre, buf.pointer, buf.size, false, false))\n        else\n          pure none', '      else if let some buf := (← get).byteBuffers.find? id.toNat then\n        if (← mType base) == "bytes calldata" then\n          pure (some (buf.pre, buf.pointer, .literal 0, false, false))\n        else\n          pure none'),
     'import-access-manager-target-role-packed-bytes1-pad-shift': ('    let padded := if ty == "bytes4" || ty == "bytes1" then value.expr else Expr.mul value.expr (.literal (2^(8*(32-size))))', '    let padded := if ty == "bytes4" then value.expr else Expr.mul value.expr (.literal (2^(8*(32-size))))'),
     'import-access-manager-target-role-mapping-bytes4-key-zero': ('      let convKey ← if baseTy.startsWith "mapping(bytes4 =>" then\n        convert "bytes4" (← mType indexExpression) rawKey indexExpression\n      else\n        pure rawKey', '      let convKey ← if baseTy.startsWith "mapping(bytes4 =>" then\n        pure { pre := rawKey.pre, expr := .literal 0 }\n      else\n        pure rawKey'),
-    'import-access-manager-target-role-narrow-bytes-event-guard': ('          match modelType with\n          | .uintN _ | .bytesN _ => failAt argument "event direct parameter type differs from its declaration"', '          match modelType with\n          | .uintN _ => failAt argument "event direct parameter type differs from its declaration"'),
+    'import-event-narrow-parameter-type-guard': ('          match modelType with\n          | .uintN _ | .bytesN _ => failAt argument "event direct parameter type differs from its declaration"', '          match modelType with\n          | .bytesN _ => failAt argument "event direct parameter type differs from its declaration"'),
 })
 
 # `unchecked` wrapping and lexical scope, observed through UncheckedSequence.
@@ -630,6 +630,7 @@ def helper_order_control(directory, name, mutated):
     target = directory / '.lake/helper-order-control'
     target.mkdir(exist_ok=True)
     using_clause = '{ evmVersion := "osaka", viaIR := true, optimizerRuns := some 466, bytecodeHash := "none" }'
+    signature = 'checked(uint256)'
     require_located = True
     if name == 'import-yul-result-id-guard':
         diagnostic = 'Yul assigns result, not the return declaration result'
@@ -1162,14 +1163,17 @@ contract C {
  }
 }
 ''')
-    elif name == 'import-access-manager-target-role-narrow-bytes-event-guard':
+    elif name == 'import-event-narrow-parameter-type-guard':
+        # UIntN has a Word instance, so the removed guard must produce an
+        # admitted import rather than an unrelated elaboration failure.
+        signature = 'checked(uint8)'
         diagnostic = 'event direct parameter type differs from its declaration'
         (target / 'Fixture.sol').write_text('''pragma solidity 0.8.34;
 contract C {
- event E(bytes4 sel);
- function checked(bytes1 x) external returns (uint256) {
-  emit E(bytes4(x));
-  return uint256(uint8(x));
+ event E(uint16 n);
+ function checked(uint8 x) external returns (uint256) {
+  emit E(uint16(x));
+  return uint256(x);
  }
 }
 ''')
@@ -1191,7 +1195,7 @@ contract C {
 solidity_import tested from "{target}" entry "Fixture.sol"
   using {using_clause}
   contract C
-  function checked(uint256)
+  function {signature}
 ''')
     artifact = target / ('mutated.olean' if mutated else 'baseline.olean')
     result = subprocess.run(['lake', 'env', 'lean', str(driver), '-o', str(artifact)],
@@ -1282,7 +1286,7 @@ def mutation_campaign(output, selected=None):
                                   'import-ecdsa-merkle-checkpoints-storage-slot-unaligned-byte-mload-guard',
                                   'import-create2-clones-msgdata-deque-nonempty-pop-loop-body-guard',
                                   'import-governor-slice-proposer-delay-unaligned-tail-offset-guard',
-                                  'import-access-manager-target-role-narrow-bytes-event-guard'}
+                                  'import-event-narrow-parameter-type-guard'}
             if order_guard:
                 helper_order_control(directory, name, False)
             source = mutation_source(directory, name)

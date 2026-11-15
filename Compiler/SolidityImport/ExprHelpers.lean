@@ -796,7 +796,7 @@ def resolveEnumMembers (j : Json) (ty : String) : M (Array String) := do
 def validateEnumTypeIfNeeded (j : Json) (ty : String) : M (Option Nat) := do
   if ty.startsWith "enum " then
     let bound := (← resolveEnumMembers j ty).size
-    if (← get).legacyWrapping && optStr j "nodeType" == some "VariableDeclaration" then
+    if optStr j "nodeType" == some "VariableDeclaration" then
       let id ← mNat (← mField j "id")
       modify fun e => { e with enumBounds := e.enumBounds.insert id bound }
     pure (some bound)

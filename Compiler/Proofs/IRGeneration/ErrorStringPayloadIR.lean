@@ -320,7 +320,7 @@ theorem execIRStmts_mstore_ptr_block (ptrName : String) (p : Nat) :
         .continue (PhysicalPayloadStores.applyStores state
           (writes.map fun ow =>
             ((p + ow.1) % Compiler.Constants.evmModulus, ow.2)))
-  | [], _, state, _ => by simp [execIRStmts, PhysicalPayloadStores.applyStores]
+  | [], _, state, _ => by simp [PhysicalPayloadStores.applyStores]
   | (o, w) :: rest, fuel, state, hptr => by
       have hptr' : (state.writePhysicalMemoryValue
           ((p + o) % Compiler.Constants.evmModulus) w).getVar ptrName = some p := hptr

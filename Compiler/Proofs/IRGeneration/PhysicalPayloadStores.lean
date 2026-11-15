@@ -95,7 +95,7 @@ theorem exec_stores_revert (writes : List (Nat × Nat)) (state : IRState)
       .revert (applyStores state writes) := by
   induction writes generalizing state with
   | nil => simp only [stores, List.map_nil, List.nil_append, List.length_nil,
-                     Nat.zero_add, applyStores, execIRStmts, execIRStmt, evalIRExpr]
+                     Nat.zero_add, applyStores, execIRStmts, execIRStmt]
   | cons head rest ih =>
       rcases head with ⟨destination, value⟩
       simp only [stores, List.map_cons, List.cons_append, List.length_cons, applyStores]
@@ -120,7 +120,7 @@ theorem exec_trace_revert {statements writes} (trace : StoreTrace statements wri
       .revert (applyStores state writes) := by
   induction trace generalizing state with
   | nil => simp only [List.nil_append, List.length_nil, Nat.zero_add, applyStores,
-                     execIRStmts, execIRStmt, evalIRExpr]
+                     execIRStmts, execIRStmt]
   | @consLit destination value tail writes trace ih =>
       simp only [List.cons_append, List.length_cons, applyStores]
       rw [show writes.length + 1 + fuel + 2 = (writes.length + fuel + 2) + 1 by omega]

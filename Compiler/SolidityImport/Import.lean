@@ -1589,7 +1589,7 @@ private def lowerYulDirectAssignmentTarget (j stmt varNode : Json) (refs : Array
         else failAt stmt s!"unresolved Yul assignment target {vname}"
     let env ← get
     if env.enumBounds.contains targetId then
-      failAt j "Yul assignment to an enum variable is unsupported"
+      failAt stmt "Yul assignment to an enum variable is unsupported"
     let some binding := env.writableLocals.find? targetId
       | if retName != "" then failAt stmt s!"Yul assigns {vname}, not the return name {retName}"
         else failAt stmt s!"Yul assignment target {vname} is not a writable scalar local"
@@ -14466,6 +14466,8 @@ private partial def lowerRootStatements (stmts : Array Json) (isTail : Bool := f
                 pres := pres.push (.letVar captured valExpr)
                 exprs := exprs.push (.localVar captured)
             out := (out ++ pres ++ env.rootPost).push (.returnValues exprs.toList)
+        else if env.rootDynamicBytesReturn.isSome then
+          failAt expr "unsupported dynamic bytes or string return expression"
         else if (← mKind expr) == "TupleExpression" then
           if ← mBool (← mField expr "isInlineArray") then
             failAt expr "inline arrays are outside this slice"

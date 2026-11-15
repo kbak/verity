@@ -5,7 +5,7 @@ from pathlib import Path
 import tempfile
 
 from .anvil import Anvil, SequenceAdapter
-from .engine import HarnessError, solc_compile, write_json
+from .engine import solc_compile, write_json
 
 
 def main():
@@ -61,12 +61,10 @@ def main():
         assert int.from_bytes(returned[32:64], 'big') == len(payload)
         assert returned[64:64 + len(payload)] == payload
         assert all(b == 0 for b in returned[64 + len(payload):])
-        try:
-            call('exceptional()')
-        except HarnessError as error:
-            assert 'exceptional halt' in str(error)
-        else:
-            raise AssertionError('invalid opcode was misclassified as a contract revert')
+        exceptional = call('exceptional()', slots=[(address, zero)])
+        assert exceptional['status'] == 'invalid' and exceptional['data'] == '0x'
+        assert exceptional['events'] == []
+        assert exceptional['storage'] == [[address, zero, '0x' + format(9, '064x')]]
     transactions = [
         {'id': str(index), 'sender': sender, 'target': address, 'value': '0x0',
          'data': '0x' + evm['methodIdentifiers']['change(uint256)'] + format(value, '064x'),

@@ -26,8 +26,11 @@ contract LegacyStaticInstallation {
         if (candidate != address(0) && !ICapability(candidate).acceptsTag(type(ICapability).interfaceId)) {
             revert("unsupported");
         }
-        assembly { sstore(CANDIDATE_SLOT, candidate) }
+        storeCandidate(candidate);
         emit Changed(candidate);
+    }
+    function storeCandidate(address candidate) internal {
+        assembly { sstore(CANDIDATE_SLOT, candidate) }
     }
     function installAndFail(address candidate) public authorized {
         marker = 99;

@@ -27,6 +27,12 @@ def expected(x, mode):
         return "revert", error_string(b"ABCDE" if mode == 38 else bytes.fromhex("ff00010203"))
     if mode == 40:
         return "ok", x.to_bytes(32, "big")[:5].ljust(32, b"\0")
+    if mode == 42:
+        return "ok", b"0".rjust(32, b"\0")
+    if mode == 43:
+        return "ok", b"0123456789ab".rjust(32, b"\0")
+    if mode == 44:
+        return "ok", x.to_bytes(32, "big")[12:28].rjust(32, b"\0")
     if mode < 64:
         return "ok", bytes(32)
     if mode >= 224:
@@ -74,7 +80,7 @@ REJECTIONS = {
     "dirtyInteger": "memory-revert assembly requires literal-bound narrow scalars",
     "rootBytes": "narrow fixed-bytes root ABI is outside this slice",
     "indexByte": "fixed-bytes indexing may execute INVALID",
-    "nonterminal": "assembly requires a terminal memory revert",
+    "nonterminal": "legacy scratch memory requires a free-pointer root and constant displacement",
     "unsupportedBuiltin": "memory-revert assembly builtin is unsupported",
     "conditionalAssembly": "memory-revert assembly must be straight-line",
     "dynamicBuffer": "bytes locals require an existing memory buffer",

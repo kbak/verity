@@ -67,6 +67,9 @@ contract FixedBytesMemoryRevert {
         if (mode == 39) failCode(hex"ff00010203");
         if (mode == 40) return uint256(bytes32(bytes5(bytes32(x))));
         if (mode == 41) return uint256(bytes32("thirty-two"));
+        if (mode == 42) return uint256(uint8(bytes1(bytes16("0123456789abcdef"))));
+        if (mode == 43) return uint256(uint96(bytes12(bytes16("0123456789abcdef"))));
+        if (mode == 44) return uint256(uint128(bytes16(bytes20(address(uint160(x))))));
         if (mode == 224) return uint256(uint8(bytes1(bytes32(x))));
         if (mode == 225) return uint256(uint16(bytes2(bytes32(x))));
         if (mode == 226) return uint256(uint24(bytes3(bytes32(x))));

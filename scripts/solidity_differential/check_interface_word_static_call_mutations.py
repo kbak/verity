@@ -44,9 +44,8 @@ MUTANTS = {
     # Remove the synthesized prologue itself: dropping encodingMemory alone
     # leaves structural free-pointer detection active and changes no model code.
     'import-interface-word-free-pointer-init': (IMPORT,
-        '    let mut abiGuards : Array Stmt := if env.explicitAbi || env.encodingMemory || '
-        'stmtListRequiresFreePointerInit body.toList then '
-        '#[.mstore (.literal 64) (.literal 128)] else #[]',
+        '    let mut abiGuards : Array Stmt :=\n'
+        '      if needsPrologue then #[.mstore (.literal 64) (.literal 128)] else #[]',
         '    let mut abiGuards : Array Stmt := #[]', 'runtime', None),
     'import-interface-word-operator-admission': (IMPORT,
         '      if optStr node "operator" == some "&&" || optStr node "operator" == some "||" then',

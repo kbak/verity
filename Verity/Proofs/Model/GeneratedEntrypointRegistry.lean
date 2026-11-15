@@ -80,8 +80,8 @@ verity_contract RegistryWindowHelperRouting where
   linked_externals
     external ping(Uint256) -> (Uint256)
 
-  function view readBal (token : IToken, who : Address) : Uint256 := do
-    let observed ← token.balanceOf who
+  function view readBal (_token : IToken, who : Address) : Uint256 := do
+    let observed ← _token.balanceOf who
     return observed
 
   function reentrancy_trusted hop (token : IToken, who : Address) : Uint256 := do
@@ -195,8 +195,8 @@ verity_contract BoundViewCallee where
       function balanceOf(Address) view returns (Uint256)
     end
 
-  function view get (token : IToken, who : Address) : Uint256 := do
-    let observed ← token.balanceOf who
+  function view get (_token : IToken, who : Address) : Uint256 := do
+    let observed ← _token.balanceOf who
     return observed
 
 verity_contract BoundViewCaller where
@@ -207,11 +207,11 @@ verity_contract BoundViewCaller where
       function get(Address, Address) view returns (Uint256)
     end
   linked_contracts
-    helper : IViewCallee := BoundViewCallee
+    _helper : IViewCallee := BoundViewCallee
 
   function allow_post_interaction_writes reentrancy_trusted entry
-      (helper : IViewCallee, token : Address, who : Address) : Uint256 := do
-    let observed ← helper.get token who
+      (_helper : IViewCallee, token : Address, who : Address) : Uint256 := do
+    let observed ← _helper.get token who
     setStorage last observed
     return observed
 
