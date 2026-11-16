@@ -1,4 +1,5 @@
 import Compiler.SolidityImport.LegacySigned
+import Compiler.SolidityImport.TupleReturns
 import Compiler.SolidityImport.LegacyControlFlow
 import Compiler.SolidityImport.LegacyAbi
 import Compiler.SolidityImport.LegacyArrays
@@ -134,10 +135,13 @@ def validateLegacyYulAssignment (node : Json) (ty : ParamType) (rhs : Expr) : M 
 /-- Check every reached declaration, including helper bodies. Rejected constructs
 need separate legacy semantics and differential evidence before admission.
 `encodingInput` admits construction only as the direct input to the hash builtin. -/
-partial def validateLegacyDeclaration (node : Json) (encodingInput : Bool := false) : M Unit := do
+partial def validateLegacyDeclaration (node : Json) (encodingInput : Bool := false)
+    (storageReturns : Array Nat := #[]) (loops : LoopAdmission := .bounded) : M Unit := do
   match node with
-  | .arr children => children.forM (validateLegacyDeclaration · encodingInput)
+  | .arr children => children.forM (validateLegacyDeclaration · encodingInput storageReturns loops)
   | .obj fields =>
+    let storageReturns := if optStr node "nodeType" == some "FunctionDefinition" then
+        TupleReturns.namedStorageIds node else storageReturns
     if LegacyBoolCalls.interfaceId node (← get) then return
     if optStr node "nodeType" == some "InlineAssembly" then
       if LegacyCalls.forwardingRevert node then return
@@ -154,8 +158,8 @@ partial def validateLegacyDeclaration (node : Json) (encodingInput : Bool := fal
         validateLegacyYul false ast
       return
     if let some kind := optStr node "nodeType" then
-      LegacyStructs.validate node
-      LegacySigned.validate node
+      LegacyStructs.validate node storageReturns
+      LegacySigned.validate node (loops == .observed)
       unless #["FunctionDefinition", "ParameterList", "VariableDeclaration", "Block",
           "ExpressionStatement", "VariableDeclarationStatement", "IfStatement", "Return",
           "BinaryOperation", "UnaryOperation", "Assignment", "Identifier", "Literal", "Conditional",
@@ -163,10 +167,11 @@ partial def validateLegacyDeclaration (node : Json) (encodingInput : Bool := fal
           "MemberAccess", "IndexAccess", "Mapping", "TupleExpression", "FunctionCallOptions",
           "UserDefinedTypeName", "OverrideSpecifier", "StructuredDocumentation",
           "ForStatement", "WhileStatement", "ModifierDefinition", "ModifierInvocation",
-          "PlaceholderStatement", "EmitStatement", "ArrayTypeName", "NewExpression"].contains kind do
+          "PlaceholderStatement", "EmitStatement", "ArrayTypeName", "NewExpression"].contains kind ||
+          (loops == .observed && #["Break", "Continue"].contains kind) do
         failAt node s!"Solidity 0.7.6 scalar slice does not support {kind}"
       if kind == "FunctionDefinition" || kind == "ModifierDefinition" then
-        validateLegacyControlFlow node
+        validateLegacyControlFlow node loops
         LegacyArrays.validateDeclaration node
       if kind == "FunctionDefinition" then
         unless #[some "pure", some "view", some "nonpayable", some "payable"].contains
@@ -179,7 +184,10 @@ partial def validateLegacyDeclaration (node : Json) (encodingInput : Bool := fal
             (field? node "stateVariable").any (fun x => x.getBool?.toOption == some true)
           if stored then failAt node "Solidity 0.7.6 enum storage is outside the scalar enum slice"
         let supportedArray := ty == "address[]" || ty == "address[] memory" ||
-          (ty.startsWith "function (" && !(ty.replace "address[] memory" "address").contains '[')
+          (LegacyStructs.fixedArray? node).isSome ||
+          (ty.startsWith "function (" &&
+            (!(ty.replace "address[] memory" "address").contains '[' ||
+              LegacyStructs.fixedArrayFunction node (← get)))
         if (ty.contains '[' && !supportedArray) ||
             (ty.startsWith "int" && !ty.startsWith "int_const" &&
               (signedBitsOf ty).isNone) ||
@@ -227,9 +235,12 @@ partial def validateLegacyDeclaration (node : Json) (encodingInput : Bool := fal
               failAt node "Solidity 0.7.6 enum operands require a comparison"
       if kind == "Conditional" then
         let ty ← mType node
+        let mixedStorageTuple := ty.startsWith "tuple(" &&
+          #["trueExpression", "falseExpression"].all fun key =>
+            (field? node key).any LegacyStructs.storageTuple
         if ty.startsWith "enum " then
           failAt node "Solidity 0.7.6 enum conditionals are outside the scalar enum slice"
-        unless ty == "bool" || ty == "address" || ty == "address payable" ||
+        unless mixedStorageTuple || ty == "bool" || ty == "address" || ty == "address payable" ||
             ty.startsWith "contract " || (fixedBytesWidth? ty).isSome ||
             (ty.startsWith "uint" && (bitsOf ty).isSome) do
           failAt node ("Solidity 0.7.6 conditionals require an unsigned, bool, address " ++
@@ -328,7 +339,7 @@ partial def validateLegacyDeclaration (node : Json) (encodingInput : Bool := fal
     let scalarMember := legacyScalarStorageMember node (← get)
     for (key, child) in fields do
       unless scalarMember && key == "expression" do
-        validateLegacyDeclaration child (isHash && key == "arguments")
+        validateLegacyDeclaration child (isHash && key == "arguments") storageReturns loops
   | _ => pure ()
 
 /-- Solidity 0.7.6 defaults to ABI coder v1. External decoding uses the

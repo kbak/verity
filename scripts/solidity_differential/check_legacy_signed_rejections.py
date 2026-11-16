@@ -27,7 +27,7 @@ CASES = {
         '{ return s; }', 'run()', 'does not support type int128 in storage'),
     'signed-member': ('', 'struct S { int128 x; } S s; '
         'function run() external view returns(int128) { return s.x; }', 'run()',
-        'does not support type int128 in storage'),
+        None),
     'signed-local-default': ('', 'function run() external pure returns(int128) '
         '{ int128 x; return x; }', 'run()', None),
     'signed-increment': ('', 'function run(int128 x) external pure returns(int128) '

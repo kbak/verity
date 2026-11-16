@@ -126,6 +126,10 @@ structure Env where
   constantStack : List Nat := []
   values : RBMap Nat Expr compare
   paths : RBMap Nat SPath compare
+  /-- Mapping parameters retain their captured base slot and complete value layout. -/
+  storageMappingVars : RBMap Nat (Expr × StructMappingInfo) compare := RBMap.empty
+  /-- Fixed struct array parameters retain their extent and captured base slot. -/
+  fixedStructArrayVars : RBMap Nat FixedStorageStructArray compare := RBMap.empty
   snapshots : RBMap Nat (Array Expr) compare := RBMap.empty
   mems : RBMap Nat MemParam compare
   flatStructs : RBMap Nat FlatStructLocal compare := RBMap.empty
@@ -141,7 +145,7 @@ structure Env where
   bodyAssigned : List Nat := []
   helperResult : Option (String × String) := none
   helperReturnId : Option Nat := none
-  multiHelperResults : Option (Array (String × String × Bool)) := none
+  multiHelperResults : Option (Array MultiHelperResult) := none
   flatStructHelperResult : Option (Nat × String × Array (String × String × String) × Bool) := none
   helperPost : Array Stmt := #[]
   rootIsVoid : Bool := false

@@ -14,7 +14,7 @@ private partial def hasSignedType (node : Json) : Bool :=
     #["keyType", "valueType"].any (fun key => (field? node key).any hasSignedType))
 
 /-- Signed legacy scalars are admitted only in evaluated integer expressions. -/
-def validate (node : Json) : M Unit := do
+def validate (node : Json) (observedLocals : Bool := false) : M Unit := do
   let kind := optStr node "nodeType" |>.getD ""
   let ty := (field? node "typeDescriptions").bind (optStr · "typeString") |>.getD ""
   let ref := (field? node "referencedDeclaration").bind (·.getNat?.toOption)
@@ -26,7 +26,8 @@ def validate (node : Json) : M Unit := do
     let constant := ref.any env.numericConstants.contains || declaration.any (fun d =>
       (field? d "constant").bind (·.getBool?.toOption) == some true)
     if !constant && (declaration.isSome || kind == "IndexAccess" ||
-        (kind == "MemberAccess" && !LegacyStructs.memoryMember node env)) then
+        (kind == "MemberAccess" && !LegacyStructs.memoryMember node env &&
+          !LegacyStructs.storageMember node env)) then
       failAt node s!"Solidity 0.7.6 scalar slice does not support type {ty} in storage or members"
   if let some decl := declaration then
     let typeName := field? decl "typeName" |>.getD Json.null
@@ -44,8 +45,12 @@ def validate (node : Json) : M Unit := do
       unless optStr node "operator" == some "-" do
         failAt node "Solidity 0.7.6 signed unary operators require negation"
   if kind == "Assignment" then
-    if (signedBitsOf (← mType (← mField node "leftHandSide"))).isSome then
-      unless optStr node "operator" == some "=" do
+    let target ← mField node "leftHandSide"
+    if (signedBitsOf (← mType target)).isSome then
+      let localArithmetic := observedLocals && optStr target "nodeType" == some "Identifier" &&
+        !((field? target "referencedDeclaration").bind (·.getNat?.toOption)).any env.stateVars.contains &&
+        (optStr node "operator").any (#["+=", "-=", "*="].contains ·)
+      unless optStr node "operator" == some "=" || localArithmetic do
         failAt node "Solidity 0.7.6 signed compound assignments are outside the scalar slice"
   if kind == "FunctionCall" && optStr node "kind" == some "typeConversion" then
     for arg in (← mArr (← mField node "arguments")) do

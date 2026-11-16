@@ -72,6 +72,9 @@ def lower (node : Json) (lowerScalar : Json → M Val) : M EncodedBytes := do
       let (width, leftAligned) ← if let some width := fixedBytesWidth? ty then
         pure (width, true)
       else if ty == "bool" then pure (1, false)
+      else if let some bits := signedBitsOf ty then
+        -- The common mask retains the width-sized two's-complement representation.
+        pure (bits / 8, false)
       else if ty.startsWith "uint" || ty == "address" || ty == "address payable" ||
           ty.startsWith "contract " then do
         let some bits := bitsOf ty | failAt arg "unsupported legacy packed scalar type"

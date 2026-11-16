@@ -46,10 +46,10 @@ CASES = {
         'run()', 'memory struct writes and rebinding'),
     'storage-copy': ('', RECORD + 'R s; '
         'function run() external view returns(int24) { R memory r=s; return r.a; }',
-        'run()', 'storage references are outside'),
+        'run()', 'storage copies to memory are outside'),
     'storage-reference': ('', RECORD + 'R s; '
         'function run() external view returns(int24) { R storage r=s; return r.a; }',
-        'run()', 'storage references are outside'),
+        'run()', None),
     'nested': ('', 'struct Inner { uint256 n; } struct R { Inner inner; } '
         'function run() external pure returns(uint256) { R memory r; return r.inner.n; }',
         'run()', 'memory structs require scalar fields'),

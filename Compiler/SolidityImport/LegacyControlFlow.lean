@@ -143,19 +143,25 @@ def validateLegacyLoop (node : Json) : M Unit := do
     if writes.contains id || identifier? lhs == some id then
       failAt bound "Solidity 0.7.6 for loop bound must remain invariant"
 
-private partial def validateFlow (node : Json) (eligible facts : Std.HashSet Nat) :
+/-- The observed backend retains unbounded control flow; the ordinary model still requires bounds. -/
+inductive LoopAdmission where
+  | bounded
+  | observed
+  deriving BEq
+
+private partial def validateFlow (admission : LoopAdmission) (node : Json) (eligible facts : Std.HashSet Nat) :
     M (Option (Std.HashSet Nat)) := do
   match optStr node "nodeType" with
   | some "Block" =>
     let mut out := some facts
     for stmt in (← mArr (← mField node "statements")) do
-      if let some current := out then out ← validateFlow stmt eligible current
+      if let some current := out then out ← validateFlow admission stmt eligible current
     return out
   | some "IfStatement" =>
     let cond := child node "condition"
     validateExpression cond eligible facts
-    let yes ← validateFlow (child node "trueBody") eligible (branchFacts cond true eligible facts)
-    let no ← validateFlow (child node "falseBody") eligible (branchFacts cond false eligible facts)
+    let yes ← validateFlow admission (child node "trueBody") eligible (branchFacts cond true eligible facts)
+    let no ← validateFlow admission (child node "falseBody") eligible (branchFacts cond false eligible facts)
     return match yes, no with
       | some a, some b => some (meet a b)
       | some a, none | none, some a => some a
@@ -164,13 +170,13 @@ private partial def validateFlow (node : Json) (eligible facts : Std.HashSet Nat
     validateExpression (child node "expression") eligible facts
     return none
   | some "ForStatement" | some "WhileStatement" =>
-    validateLegacyLoop node
-    let init ← validateFlow (child node "initializationExpression") eligible facts
+    if admission == .bounded then validateLegacyLoop node
+    let init ← validateFlow admission (child node "initializationExpression") eligible facts
     let current := init.getD facts
     let cond := child node "condition"
     validateExpression cond eligible current
-    let body ← validateFlow (child node "body") eligible (branchFacts cond true eligible current)
-    discard (validateFlow (child node "loopExpression") eligible (body.getD current))
+    let body ← validateFlow admission (child node "body") eligible (branchFacts cond true eligible current)
+    discard (validateFlow admission (child node "loopExpression") eligible (body.getD current))
     return some current
   | some "ExpressionStatement" =>
     let expr := child node "expression"
@@ -188,12 +194,12 @@ private partial def validateFlow (node : Json) (eligible facts : Std.HashSet Nat
 /-- Each reached declaration proves its own division guards; caller assumptions
 are never imported. Restricting facts to never-assigned local IDs makes them
 stable across joins, loop iterations, inline assembly, and internal calls. -/
-def validateLegacyControlFlow (fn : Json) : M Unit := do
+def validateLegacyControlFlow (fn : Json) (admission : LoopAdmission := .bounded) : M Unit := do
   let body := child fn "body"
   let writes := (bodyAssignedIds body).foldl (fun (s : Std.HashSet Nat) id => s.insert id) {}
   let eligible := (unsignedDeclarations fn).toList.foldl
     (fun (s : Std.HashSet Nat) id => if writes.contains id then s else s.insert id) {}
-  discard (validateFlow body eligible {})
+  discard (validateFlow admission body eligible {})
 
 /-- Normalize the legacy existing-counter spelling for the exact counted-loop
 lowerer. The caller must emit initialization and restore the observable final

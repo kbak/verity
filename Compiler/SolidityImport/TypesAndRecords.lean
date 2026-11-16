@@ -26,6 +26,19 @@ structure Val where
   pre : Array Stmt
   expr : Expr
 
+/-- Tuple components distinguish scalar values from declaration-identified storage addresses. -/
+inductive TupleComponentType where
+  | scalar (solidityType : String)
+  | storageRef (structId : Nat)
+  deriving BEq, Inhabited
+
+/-- A helper result binding; only named results can be assigned in its body. -/
+structure MultiHelperResult where
+  binding : String
+  ty : TupleComponentType
+  namedId : Option Nat
+  deriving Inhabited
+
 structure EncodedBytes where
   pre : Array Stmt
   pointer : Expr
@@ -93,7 +106,27 @@ structure FlatStructLocal where
   structName : String
   members : Array (String × String × String)
 
+/-- A fixed storage array keeps its element stride without expanding its elements. -/
+structure FixedStorageStructArray where
+  slot : Expr
+  structId : Nat
+  length : Nat
+  wordCount : Nat
+
+/-- Decode the declaration identity and fixed extent from solc's storage type identifier. -/
+def fixedStorageStructArrayType? (typeId : String) : Option (Nat × Nat) := do
+  guard (typeId.startsWith "t_array$_t_struct$_")
+  let [_, structPart, lengthPart] := typeId.splitOn "_$" | none
+  guard (structPart.endsWith "_storage")
+  let sid ← (structPart.dropEnd 8).toNat?
+  let [digits, location] := lengthPart.splitOn "_storage" | none
+  guard (location == "" || location == "_ptr" || location == "_ref")
+  let length ← digits.toNat?
+  guard (length > 0)
+  pure (sid, length)
+
 inductive Ref where
+  | fixedStructArray (pre : Array Stmt) (descriptor : FixedStorageStructArray)
   | expr (v : Val)
   | path (pre : Array Stmt) (p : SPath)
   | fixedElement (pre : Array Stmt) (path : SPath) (index : Expr)
@@ -162,6 +195,7 @@ inductive FnPtr where
   | branch (cond : Expr) (trueFnId : Nat) (falseFnId : Nat)
 
 inductive CallArg where
+  | fixedStructArray (descriptor : FixedStorageStructArray) (pre : Array Stmt)
   | scalar (value : Val)
   | memory (descriptor : MemParam) (pre : Array Stmt)
   | abiElement (bound : AbiElementLocal) (pre : Array Stmt)
@@ -170,6 +204,7 @@ inductive CallArg where
   | stringBuffer (buffer : EncodedBytes)
   | calldataBytes (descriptor : CalldataBytesParam) (pre : Array Stmt)
   | storagePath (structId : Nat) (path : SPath) (pre : Array Stmt)
+  | storageMapping (solcType : String) (slot : Expr) (info : StructMappingInfo) (pre : Array Stmt)
   | flatStruct (structId : Nat) (structName : String) (members : Array (String × String × Expr)) (pre : Array Stmt)
   | storageBytes (target : String × Expr × Array Stmt) (isString : Bool)
   | storageDynamicArray (fieldName : String) (slotExpr : Expr) (elemTy : String) (elemStructId : Option Nat) (pre : Array Stmt)
@@ -197,6 +232,7 @@ structure FieldInfo where
   dynamicArrayElemType : Option (String × ParamType × SolidityAbi.ScalarKind) := none
   dynamicArrayStructId : Option Nat := none
   thirdKeyMapping : Option StructMappingInfo := none
+  fixedStructArray : Option FixedStorageStructArray := none
   fixedArrayLength : Option Nat := none
   fixedArrayType : String := ""
 

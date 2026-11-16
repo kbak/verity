@@ -319,6 +319,9 @@ def setup() -> None:
     subprocess.run(["lake", "build", "Compiler.SolidityImport.Differential",
                     "Compiler.SolidityImport.StaticOracleMocks",
                     "Compiler.SolidityImport.Import",
+                    "Compiler.SolidityImport.ControlDenote",
+                    "Compiler.SolidityImport.ControlCodegen",
+                    "Compiler.SolidityImport.ObservedImport",
                     "Compiler.SolidityImport.PostCallStorageFrames",
                     "Compiler.SolidityImport.LegacySignedProofs",
                     "Contracts.SolidityImportSmoke.PostCallStorageMocks",
@@ -1045,6 +1048,121 @@ def tasks(update_golden: bool) -> list:
         "--prepared"))]
     items += [("legacy-signed-boundaries", 1, lambda: module_campaign_output(
         "check_legacy_signed_rejections", "legacy-signed-boundaries", 900, "--prepared"))]
+    items += [(f"legacy-storage-references-opt{int(optimized)}", 1,
+               lambda optimized=optimized: module_campaign_output(
+                   "check_legacy_storage_references", "legacy-storage-references", 1800,
+                   *(["--optimized"] if optimized else [])))
+              for optimized in (False, True)]
+    items += [(f"legacy-storage-references-{mutation}", 1,
+               lambda mutation=mutation: module_campaign_output(
+                   "check_legacy_storage_references", "legacy-storage-references-mutation", 1800,
+                   "--mutation", mutation))
+              for mutation in ("wrong-alias", "neighbor-clobber", "drop-revert")]
+    items += [("legacy-storage-references-single-storage", 1, lambda: module_campaign_output(
+        "check_legacy_storage_references", "legacy-storage-reference-single", 1800,
+        "--single-storage"))]
+    items += [("legacy-storage-reference-boundaries", 1, lambda: module_campaign_output(
+        "check_legacy_storage_reference_boundaries", "legacy-storage-reference-boundaries", 900,
+        "--prepared"))]
+    items += [(f"legacy-mixed-storage-returns-opt{int(optimized)}", 1,
+               lambda optimized=optimized: module_campaign_output(
+                   "check_legacy_mixed_storage_returns", "legacy-mixed-storage-returns", 1800,
+                   *(["--optimized"] if optimized else [])))
+              for optimized in (False, True)]
+    items += [(f"legacy-mixed-storage-returns-{mutation}", 1,
+               lambda mutation=mutation: module_campaign_output(
+                   "check_legacy_mixed_storage_returns", "legacy-mixed-storage-returns-mutation", 1800,
+                   "--mutation", mutation))
+              for mutation in ("wrong-reference", "lost-scalar", "neighbor-clobber", "drop-revert")]
+    items += [(f"legacy-mixed-return-importer-{mutation}", 1,
+               lambda mutation=mutation: module_campaign_output(
+                   "check_legacy_mixed_return_mutations", "legacy-mixed-return-importer-mutation", 1800,
+                   "--mutation", mutation))
+              for mutation in ("reference-zero", "scalar-zero")]
+    items += [(f"legacy-mapping-helpers-opt{int(optimized)}", 1,
+               lambda optimized=optimized: module_campaign_output(
+                   "check_legacy_mapping_helpers", "legacy-mapping-helpers", 1800,
+                   *(["--optimized"] if optimized else [])))
+              for optimized in (False, True)]
+    items += [("legacy-mapping-helpers-single", 1, lambda: module_campaign_output(
+        "check_legacy_mapping_helpers", "legacy-mapping-helpers-single", 1800, "--single"))]
+    items += [("mapping-member-helper", 1, lambda: module_campaign_output(
+        "check_mapping_member_helper", "mapping-member-helper", 1800))]
+    items += [(f"legacy-mapping-importer-{mutation}", 1,
+               lambda mutation=mutation: module_campaign_output(
+                   "check_legacy_mapping_mutations", "legacy-mapping-importer", 1800,
+                   "--mutation", mutation))
+              for mutation in ("base-slot-zero", "erase-value-layout")]
+    items += [(f"legacy-fixed-struct-arrays-opt{int(optimized)}", 1,
+               lambda optimized=optimized: module_campaign_output(
+                   "check_legacy_fixed_struct_arrays", "legacy-fixed-struct-arrays", 1800,
+                   *(["--optimized"] if optimized else [])))
+              for optimized in (False, True)]
+    items += [("legacy-fixed-struct-array-boundaries", 1, lambda: module_campaign_output(
+        "check_legacy_fixed_struct_array_boundaries", "legacy-fixed-struct-array-boundaries", 1800))]
+    items += [(f"legacy-fixed-struct-array-importer-{mutation}", 1,
+               lambda mutation=mutation: module_campaign_output(
+                   "check_legacy_fixed_struct_array_mutations", "legacy-fixed-struct-array-importer", 1800,
+                   "--mutation", mutation))
+              for mutation in ("stride", "bounds")]
+    # Semantic observer controls are distinct from importer/source correspondence.
+    items += [("loop-observer-control", 1, lambda: module_campaign_output(
+        "check_loop_observer", "loop-observer-control", 400))]
+    items += [(f"loop-observer-{mutation}", 1,
+               lambda mutation=mutation: module_campaign_output(
+                   "check_loop_observer", "loop-observer-mutation", 400,
+                   "--mutation", mutation))
+              for mutation in ("continue-exits", "break-continues", "condition-failure-erased")]
+    items += [(f"legacy-loop-source-opt{int(optimized)}", 1,
+               lambda optimized=optimized: module_campaign_output(
+                   "check_legacy_loop_source", "legacy-loop-source", 600,
+                   *(["--optimized"] if optimized else [])))
+              for optimized in (False, True)]
+    items += [(f"observed-control-opt{int(optimized)}", 1,
+               lambda optimized=optimized: module_campaign_output(
+                   "check_observed_control", "observed-control", 600,
+                   *(["--optimized"] if optimized else [])))
+              for optimized in (False, True)]
+    # Typed-control mutations require an executed clean baseline and completed
+    # source/observer/generated-bytecode witnesses, never a tool error or timeout.
+    items += [(f"observed-control-ir-{mutation}", 1,
+               lambda mutation=mutation: module_campaign_output(
+                   "check_observed_control", "observed-control-ir-mutation", 900,
+                   "--mutation", mutation))
+              for mutation in ("continue-exits", "break-repeats", "post-skipped", "inclusive-bound")]
+    items += [(f"observed-storage-opt{int(optimized)}", 1,
+               lambda optimized=optimized: module_campaign_output(
+                   "check_observed_storage", "observed-storage", 600,
+                   *(["--optimized"] if optimized else [])))
+              for optimized in (False, True)]
+    items += [(f"observed-storage-ir-{mutation}", 1,
+               lambda mutation=mutation: module_campaign_output(
+                   "check_observed_storage", "observed-storage-ir-mutation", 900,
+                   "--mutation", mutation))
+              for mutation in ("helper-return-dropped", "helper-return-exits-frame", "storage-write-zero")]
+    items += [(f"legacy-named-storage-opt{int(optimized)}", 1,
+               lambda optimized=optimized: module_campaign_output(
+                   "check_legacy_named_storage_results", "legacy-named-storage", 1800,
+                   *(["--optimized"] if optimized else [])))
+              for optimized in (False, True)]
+    items += [(f"legacy-named-storage-importer-{mutation}", 1,
+               lambda mutation=mutation: module_campaign_output(
+                   "check_legacy_named_storage_mutations", "legacy-named-storage-importer", 1800,
+                   "--mutation", mutation))
+              for mutation in ("drop-continuation", "moving-alias")]
+    items += [(f"legacy-signed-packed-opt{int(optimized)}", 1,
+               lambda optimized=optimized: module_campaign_output(
+                   "check_legacy_signed_packed", "legacy-signed-packed", 1800,
+                   *(["--optimized"] if optimized else [])))
+              for optimized in (False, True)]
+    items += [("legacy-signed-packed-mapping", 1, lambda: module_campaign_output(
+        "check_legacy_signed_packed", "legacy-signed-packed-mapping", 1800,
+        "--mapping", "--optimized"))]
+    items += [(f"legacy-signed-packed-importer-{mutation}", 1,
+               lambda mutation=mutation: module_campaign_output(
+                   "check_legacy_signed_packed_mutations", "legacy-signed-packed-importer", 1800,
+                   "--mutation", mutation))
+              for mutation in ("word-width", "clear-sign-bit")]
     items += [(f"post-call-storage-opt{int(optimized)}", 1,
                lambda optimized=optimized: module_campaign_output(
                    "check_post_call_storage", "post-call-storage", 1800,

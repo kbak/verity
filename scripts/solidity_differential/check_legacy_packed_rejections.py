@@ -6,6 +6,17 @@ from .engine import HarnessError, command, run_bounded, write_json
 
 HEADER = 'pragma solidity 0.7.6;\n'
 CASES = {
+    'signed-packed': (HEADER + 'contract P { function run(int24 x) public pure returns(bytes32) '
+        '{ return keccak256(abi.encodePacked(x)); }}', 'run(int24)', None),
+    'signed-helper-argument': (HEADER + 'contract P { '
+        'function h(int24 x) internal pure returns(int24) { return x; } '
+        'function run(int24 x) public pure returns(bytes32) '
+        '{ return keccak256(abi.encodePacked(h(x))); }}', 'run(int24)',
+        'require scalar values or conversions'),
+    'signed-standard-encoding': (HEADER + 'contract P { '
+        'function run(int24 x) public pure returns(bytes32) '
+        '{ return keccak256(abi.encode(x)); }}', 'run(int24)',
+        'requires unsigned/address/bool/fixed-bytes scalars'),
     'dynamic': (HEADER + 'contract P { function run(bytes memory b) public pure returns(bytes32) '
         '{ return keccak256(abi.encodePacked(b)); }}', 'run(bytes)',
         'requires literal or fixed-width arguments'),

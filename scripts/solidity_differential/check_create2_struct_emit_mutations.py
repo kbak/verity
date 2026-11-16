@@ -29,8 +29,8 @@ MUTANTS = {
         'expr := .bitAnd (.localVar result) (.literal (2 ^ 160 - 1)) }',
         'expr := .bitAnd (.localVar result) (.literal (2 ^ 152 - 1)) }', 'runtime', None),
     'import-struct-emit-selector': (IMPORT,
-        'let mut topics : Array Expr := #[.literal (digits.foldl (fun word d => word * 16 + d) 0)]',
-        'let mut topics : Array Expr := #[.literal (digits.foldl (fun word d => word * 16 + d) 0 + 1)]',
+        'topics := #[Expr.literal selector] ++ topics',
+        'topics := #[Expr.literal (selector + 1)] ++ topics',
         'runtime', None),
     'import-struct-emit-payload': (IMPORT,
         'let size ← atom { pre := #[], expr := payload.size }',
@@ -62,7 +62,7 @@ MUTANTS = {
         'unless ← yulBytesLength? args[2]! declId do',
         'unless true do', 'admission', 'short-size'),
     'import-struct-emit-indexed-guard': (IMPORT,
-        'unless (Denote.errorScalarType modelType).isSome && !ty.startsWith "enum " do',
+        'unless ((Denote.errorScalarType modelType).isSome || (signedBitsOf ty).isSome) &&\n          !ty.startsWith "enum " do',
         'unless true do', 'admission', 'indexed-bytes4'),
 }
 
