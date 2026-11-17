@@ -82,7 +82,7 @@ def identity():
         str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in (FIXTURE, DRIVER)}
 
 
-def check(output, optimized=False, mutation=None):
+def check(output, optimized=False, mutation=None, ordinary_import=False):
     output = Path(output).resolve(); output.mkdir(parents=True, exist_ok=False)
     captured = identity(); source = FIXTURE.read_text()
     write_json(output/'manifest.json', dict(implementation=captured,
@@ -106,11 +106,18 @@ def check(output, optimized=False, mutation=None):
     write_json(output/'input.json', dict(source=source, ast=ast, layout=layout, functions=functions,
         cases=rows, bases=declaration['linearizedBaseContracts'], mutation=mutation or ''))
     driver = output/'Driver.lean'
-    driver.write_text(DRIVER.read_text()+'\nobserved_storage_cases '+
-        json.dumps(str(output/'input.json'))+' output '+json.dumps(str(output/'model.json'))+'\n')
+    if ordinary_import:
+        from .observed_import import write_driver
+        write_driver(driver, DRIVER.read_text(), output, source, rows, optimized, True)
+    else:
+        driver.write_text(DRIVER.read_text()+'\nobserved_storage_cases '+
+            json.dumps(str(output/'input.json'))+' output '+json.dumps(str(output/'model.json'))+'\n')
     command(['turbo-lean', '--json', 'eval', driver, '--project-dir', '.', '--timeout-ms', '180000'],
             timeout=240, log=output/'model.log')
     model = json.loads((output/'model.json').read_text())
+    if ordinary_import:
+        from .observed_import import validate_metadata
+        validate_metadata(model, optimized, True, {row['function'] for row in rows})
     if (model['rejected'] != ['ambiguousRecord', 'recursive']
             or len(model['observations']) != len(rows)
             or {r['id'] for r in rows} != {r['id'] for r in model['observations']}):
@@ -164,10 +171,11 @@ def check(output, optimized=False, mutation=None):
     print('observed storage/helper checks passed')
 
 
-def run(output, optimized=False, mutation=None):
-    if not mutation: return check(output, optimized)
+def run(output, optimized=False, mutation=None, ordinary_import=False):
+    if not mutation: return check(output, optimized, ordinary_import=ordinary_import)
     output = Path(output).resolve(); output.mkdir(parents=True, exist_ok=False)
-    check(output/'baseline', optimized); check(output/'mutant', optimized, mutation)
+    check(output/'baseline', optimized, ordinary_import=ordinary_import)
+    check(output/'mutant', optimized, mutation, ordinary_import)
     if ((output/'baseline/manifest.json').read_bytes() != (output/'mutant/manifest.json').read_bytes()):
         raise HarnessError('mutation baseline identity changed')
     result = json.loads((output/'mutant/results.json').read_text())
@@ -178,5 +186,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--optimized', action='store_true')
+    parser.add_argument('--ordinary-import', action='store_true')
     parser.add_argument('--mutation', choices=MUTATIONS)
     run(**vars(parser.parse_args()))

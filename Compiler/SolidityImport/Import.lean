@@ -15727,10 +15727,23 @@ def cast := convert
 def indexSource (file : String) (ast : Json) : M Unit := index file none ast
 end ObservedSupport
 
-private def importSlice
-    (pkgRoot projectRoot : System.FilePath) (entry contract : String)
-    (roots : Array (String × Array String)) (profile : Profile) :
-    MetaM (CompilationModel × ImportReport) := do
+/-- Compiler-verified inputs shared by bounded and observed import backends. -/
+structure PreparedImportSlice where
+  env : Env
+  solcLongVersion : String
+  solcSha256 : String
+  settings : Json
+  input : Json
+  deployment : Json
+  deploymentSummary : Option String
+  legacy : Bool
+  strictAbi : Bool
+
+/-- Verify the compiler, collect sources, resolve the contract and install its layout.
+Both import backends consume this same checked source/deployment environment. -/
+def prepareImportSlice
+    (pkgRoot projectRoot : System.FilePath) (entry contract : String) (profile : Profile) :
+    MetaM PreparedImportSlice := do
   let release ← resolveSolcRelease profile
   let compiler := pkgRoot / ".lake/solidity-import" / release.binaryName
   let solcSha ← verifyCompiler release compiler
@@ -15850,6 +15863,208 @@ private def importSlice
     if env.layoutItems.contains label && !env.duplicateLayoutLabels.contains label then
       env := { env with duplicateLayoutLabels := env.duplicateLayoutLabels.push label }
     env := { env with layoutItems := env.layoutItems.insert label item }
+  return {
+    env := env
+    solcLongVersion := release.longVersion
+    solcSha256 := solcSha
+    settings := settings
+    input := input
+    deployment := deployment
+    deploymentSummary := deploymentSummary
+    legacy := legacy
+    strictAbi := strictAbi }
+
+/-- Reset root-local bindings while retaining the shared layout and reached closure. -/
+def resetImportRoot (env : Env) (rootFile : String) : Env :=
+  { env with
+    currentFile := rootFile
+    next := 0
+    bound := []
+    values := RBMap.empty
+    paths := RBMap.empty,
+                      storageMappingVars := RBMap.empty
+    fixedStructArrayVars := RBMap.empty,
+                      snapshots := RBMap.empty
+    mems := RBMap.empty
+    flatStructs := RBMap.empty
+    abiElements := RBMap.empty
+    calldataBytes := RBMap.empty
+    scalarArrays := RBMap.empty
+    byteBuffers := RBMap.empty
+    stringBuffers := RBMap.empty
+    nonLiteralByteLocals := #[]
+    storageBytesVars := RBMap.empty
+    storageDynamicArrayVars := RBMap.empty
+    scalarTy := RBMap.empty
+    enumBounds := RBMap.empty
+    bytes4Params := #[]
+    writableLocals := RBMap.empty
+    fnPtrs := RBMap.empty
+    bodyAssigned := []
+    zeroInitLocals := #[]
+    yulNames := RBMap.empty
+    yulMemoryArrays := RBMap.empty
+    yulMemoryStructs := RBMap.empty,
+                      legacyCleanParams := []
+    memoryAccesses := #[]
+    mappingScratchBindings := {},
+                      uncheckedAssemblyReferences := #[],
+                      projections := #[]
+    rawBindings := RBMap.empty
+    explicitAbi := false
+    encodingMemory := false
+    helperResult := none
+    helperReturnId := none
+    multiHelperResults := none
+    flatStructHelperResult := none
+    helperPost := #[]
+    rootIsVoid := false
+    rootReturns := #[]
+    rootReturnTypes := #[]
+    rootNamedReturn := none
+    rootFixedArrayReturn := none
+    rootFlatStructReturn := none
+    rootMsgDataReturn := false
+    rootDynamicBytesReturn := none
+    rootPost := #[]
+    publicVarGetterReturns := #[] }
+
+/-- Resolve a root using the same overload and inheritance checks as bounded imports. -/
+def selectImportRoot := selectFunction
+
+/-- Build shared provenance and closure reporting without inventing backend coverage. -/
+def finishImportReport (pkgRoot : System.FilePath) (contract : String)
+    (roots : Array (String × Array String)) (profile : Profile) (prepared : PreparedImportSlice)
+    (env : Env) (signatures : Array Json) (functions : List FunctionStatus)
+    (projections : Array ParamProjection := #[]) (backend : String := "bounded")
+    (extraSources : Array String := #[]) : MetaM ImportReport := do
+  let mut excluded : Array FnRec := #[]
+  for (id, decl) in env.funs do
+    unless env.included.any (·.declId == id) do
+      let name ← str (← field decl "name")
+      let params ← arr (← field (← field decl "parameters") "parameters")
+      let mut tys : Array String := #[]
+      for p in params do
+        tys := tys.push (← typeString p)
+      excluded := excluded.push {
+        contract := env.funContract.find? id |>.getD "<free>",
+        name, declId := id, paramTypes := tys }
+  let sortedExcluded := excluded.qsort (fun a b => a.declId < b.declId)
+  let mut opaqueMembers : Array OpaqueMember := #[]
+  for o in env.opaqueMembers do
+    if env.referenced.contains o.field && !env.usedStructFixedArrays.contains (o.field, o.name) &&
+        !env.usedStructMappings.contains (o.field, o.name) &&
+        !env.usedStructDynamicArrays.contains (o.field, o.name) then
+      opaqueMembers := opaqueMembers.push
+        { field := o.field, name := o.name, solcType := o.solcType,
+          wordOffset := o.wordOffset, byteOffset := o.byteOffset }
+  let sourceRoot ← importerSourceRoot pkgRoot
+  let importer ← moduleText sourceRoot "Compiler/SolidityImport/Import.lean"
+  let coverage ← moduleText sourceRoot "Compiler/SolidityImport/Coverage.lean"
+  let reportSrc ← moduleText sourceRoot "Compiler/SolidityImport/Report.lean"
+  let quoteSrc ← moduleText sourceRoot "Compiler/SolidityImport/Quote.lean"
+  let profileSrc ← moduleText sourceRoot "Compiler/SolidityImport/Profile.lean"
+  let legacySrc ← moduleText sourceRoot "Compiler/SolidityImport/Legacy.lean"
+  let legacyFlowSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyControlFlow.lean"
+  let legacyArraysSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyArrays.lean"
+  let legacyArrayLoopsSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyArrayLoops.lean"
+  let abiLoweringSrc ← moduleText sourceRoot "Compiler/SolidityImport/AbiLowering.lean"
+  let exprHelpersSrc ← moduleText sourceRoot "Compiler/SolidityImport/ExprHelpers.lean"
+  let bytePointersSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyBytePointers.lean"
+  let packedSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyPacked.lean"
+  let legacyAbiSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyAbi.lean"
+  let legacyMemorySrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyMemory.lean"
+  let legacySignedSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacySigned.lean"
+  let boundedMemorySrc ← moduleText sourceRoot "Compiler/SolidityImport/BoundedMemory.lean"
+  let memoryBoundsSrc ← moduleText sourceRoot "Compiler/SolidityImport/MemoryBounds.lean"
+  let storageLayoutSrc ← moduleText sourceRoot "Compiler/SolidityImport/StorageLayout.lean"
+  let signatureSrc ← moduleText sourceRoot "Verity/Core/Model/LegacySignatureCalls.lean"
+  let rawCallsSrc ← moduleText sourceRoot "Verity/Core/Model/RawCalls.lean"
+  let gasSrc ← moduleText sourceRoot "Verity/Core/Model/SourceGas.lean"
+  let callGasSrc ← moduleText sourceRoot "Verity/Core/Model/CallGas.lean"
+  let boolLoweringSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyBoolCalls.lean"
+  let boolCompilerSrc ← moduleText sourceRoot "Verity/Core/Model/LegacyBoolCalls.lean"
+  let legacyStorageSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyStorage.lean"
+  let voidLoweringSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyVoidCalls.lean"
+  let voidCompilerSrc ← moduleText sourceRoot "Verity/Core/Model/LegacyVoidCalls.lean"
+  let voidModelSrc ← moduleText sourceRoot "Verity/Core/Model/VoidCalls.lean"
+  let barriersSrc ← moduleText sourceRoot "Compiler/SolidityImport/TransportBarriers.lean"
+  let callWorldSrc ← moduleText sourceRoot "Verity/Core/Model/CallWorld.lean"
+  let legacyCallsSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyCalls.lean"
+  let nativeCallsSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyNativeCalls.lean"
+  let staticCallsSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyStaticCalls.lean"
+  let ecmSrc ← moduleText sourceRoot "Verity/Core/Model/ECM.lean"
+  let denoteSrc ← moduleText sourceRoot "Verity/Core/Model/Denote.lean"
+  -- JSON framing prevents distinct file/signature lists from sharing a
+  -- concatenation merely because their text contains separator newlines.
+  let mut backendSources : Array (String × Json) := #[]
+  for path in extraSources do
+    backendSources := backendSources.push (path, Json.str (← moduleText sourceRoot path))
+  let digestInput := Json.mkObj [
+    ("backend", Json.str backend), ("backendSources", Json.mkObj backendSources.toList),
+    ("importerVersion", Json.str importerVersion),
+    ("solcVersion", Json.str prepared.solcLongVersion),
+    ("contract", Json.str contract),
+    ("functions", Json.arr signatures),
+    ("solcInput", prepared.input),
+    ("sourceGas", Json.bool profile.sourceGas),
+    ("deployment", prepared.deployment),
+    ("importerSources", Json.mkObj [
+      ("DeployedImmutables.lean", Json.str
+        (← moduleText sourceRoot "Compiler/SolidityImport/DeployedImmutables.lean")),
+      ("Import.lean", Json.str importer), ("Coverage.lean", Json.str coverage),
+      ("Report.lean", Json.str reportSrc), ("Quote.lean", Json.str quoteSrc),
+      ("Profile.lean", Json.str profileSrc), ("Legacy.lean", Json.str legacySrc),
+      ("LegacyControlFlow.lean", Json.str legacyFlowSrc),
+      ("LegacyArrays.lean", Json.str legacyArraysSrc),
+      ("LegacyArrayLoops.lean", Json.str legacyArrayLoopsSrc),
+      ("LegacyBytePointers.lean", Json.str bytePointersSrc),
+      ("LegacyPacked.lean", Json.str packedSrc),
+      ("LegacyAbi.lean", Json.str legacyAbiSrc),
+      ("LegacyMemory.lean", Json.str legacyMemorySrc),
+      ("LegacySigned.lean", Json.str legacySignedSrc),
+      ("BoundedMemory.lean", Json.str boundedMemorySrc),
+      ("MemoryBounds.lean", Json.str memoryBoundsSrc),
+      ("StorageLayout.lean", Json.str storageLayoutSrc),
+      ("AbiLowering.lean", Json.str abiLoweringSrc),
+      ("ExprHelpers.lean", Json.str exprHelpersSrc),
+      ("LegacySignatureCalls.lean", Json.str signatureSrc),
+      ("RawCalls.lean", Json.str rawCallsSrc),
+      ("SourceGas.lean", Json.str gasSrc), ("CallGas.lean", Json.str callGasSrc),
+      ("SolidityImport/LegacyBoolCalls.lean", Json.str boolLoweringSrc),
+      ("Model/LegacyBoolCalls.lean", Json.str boolCompilerSrc),
+      ("LegacyStorage.lean", Json.str legacyStorageSrc),
+      ("SolidityImport/LegacyVoidCalls.lean", Json.str voidLoweringSrc),
+      ("Model/LegacyVoidCalls.lean", Json.str voidCompilerSrc),
+      ("VoidCalls.lean", Json.str voidModelSrc),
+      ("TransportBarriers.lean", Json.str barriersSrc),
+      ("CallWorld.lean", Json.str callWorldSrc),
+      ("LegacyCalls.lean", Json.str legacyCallsSrc),
+      ("LegacyNativeCalls.lean", Json.str nativeCallsSrc),
+      ("LegacyStaticCalls.lean", Json.str staticCallsSrc),
+      ("ECM.lean", Json.str ecmSrc), ("Denote.lean", Json.str denoteSrc)])]
+  let digest := sha256Hex digestInput.compress.toUTF8
+  let report : ImportReport :=
+    { importerVersion, solcLongVersion := prepared.solcLongVersion,
+      solcSha256 := prepared.solcSha256, settingsJson := prepared.settings.compress,
+      sourceDigest := digest, deploymentSummary := prepared.deploymentSummary,
+      contract, roots := (roots.map (·.1)).toList,
+      functions,
+      includedFunctions := (env.included.map FnRec.toImported).toList,
+      excludedFunctions := (sortedExcluded.map FnRec.toImported).toList,
+      projections := projections.toList, storageFields := env.referenced.toList,
+      storageKeys := env.referenced.toList.map fun name => (name, mappingKeyNames env name),
+      opaqueMembers := opaqueMembers.toList, observesPanicPayload := true }
+  pure report
+
+private def importSlice
+    (pkgRoot projectRoot : System.FilePath) (entry contract : String)
+    (roots : Array (String × Array String)) (profile : Profile) :
+    MetaM (CompilationModel × ImportReport) := do
+  let prepared ← prepareImportSlice pkgRoot projectRoot entry contract profile
+  let mut env := prepared.env
+  let legacy := prepared.legacy
+  let strictAbi := prepared.strictAbi
   let mut specs : Array FunctionSpec := #[]
   let mut projections : Array ParamProjection := #[]
   let mut signatures : Array Json := #[]
@@ -15869,12 +16084,7 @@ private def importSlice
     -- Each root is lowered on its own: bindings, generated names and projections
     -- do not leak between functions. Field layouts and the closure are shared.
     let rootFile := env.nodeFile.find? rootId |>.getD entry
-    env := { env with currentFile := rootFile, next := 0, bound := [], values := RBMap.empty, paths := RBMap.empty,
-                      storageMappingVars := RBMap.empty, fixedStructArrayVars := RBMap.empty,
-                      snapshots := RBMap.empty, mems := RBMap.empty, flatStructs := RBMap.empty, abiElements := RBMap.empty, calldataBytes := RBMap.empty, scalarArrays := RBMap.empty, byteBuffers := RBMap.empty, stringBuffers := RBMap.empty, nonLiteralByteLocals := #[], storageBytesVars := RBMap.empty, storageDynamicArrayVars := RBMap.empty, scalarTy := RBMap.empty, enumBounds := RBMap.empty, bytes4Params := #[], writableLocals := RBMap.empty, fnPtrs := RBMap.empty, bodyAssigned := [], zeroInitLocals := #[], yulNames := RBMap.empty, yulMemoryArrays := RBMap.empty, yulMemoryStructs := RBMap.empty,
-                      legacyCleanParams := [], memoryAccesses := #[], mappingScratchBindings := {},
-                      uncheckedAssemblyReferences := #[],
-                      projections := #[], rawBindings := RBMap.empty, explicitAbi := false, encodingMemory := false, helperResult := none, helperReturnId := none, multiHelperResults := none, flatStructHelperResult := none, helperPost := #[], rootIsVoid := false, rootReturns := #[], rootReturnTypes := #[], rootNamedReturn := none, rootFixedArrayReturn := none, rootFlatStructReturn := none, rootMsgDataReturn := false, rootDynamicBytesReturn := none, rootPost := #[], publicVarGetterReturns := #[] }
+    env := resetImportRoot env rootFile
     let ((body, srcParams), env2) ← (lowerRoot fn).run env
     env := env2
     let mut modelParams : Array Param := #[]
@@ -16152,119 +16362,10 @@ private def importSlice
   let model : CompilationModel :=
     { name := contract, constructor := none, fields := sortedFields,
       errors := env.usedErrors, events := env.usedEvents.map Prod.snd, functions := specs.toList }
-  let mut excluded : Array FnRec := #[]
-  for (id, decl) in env.funs do
-    unless env.included.any (·.declId == id) do
-      let name ← str (← field decl "name")
-      let params ← arr (← field (← field decl "parameters") "parameters")
-      let mut tys : Array String := #[]
-      for p in params do
-        tys := tys.push (← typeString p)
-      excluded := excluded.push {
-        contract := env.funContract.find? id |>.getD "<free>",
-        name, declId := id, paramTypes := tys }
-  let sortedExcluded := excluded.qsort (fun a b => a.declId < b.declId)
-  let mut opaqueMembers : Array OpaqueMember := #[]
-  for o in env.opaqueMembers do
-    if env.referenced.contains o.field && !env.usedStructFixedArrays.contains (o.field, o.name) &&
-        !env.usedStructMappings.contains (o.field, o.name) &&
-        !env.usedStructDynamicArrays.contains (o.field, o.name) then
-      opaqueMembers := opaqueMembers.push
-        { field := o.field, name := o.name, solcType := o.solcType,
-          wordOffset := o.wordOffset, byteOffset := o.byteOffset }
-  let sourceRoot ← importerSourceRoot pkgRoot
-  let importer ← moduleText sourceRoot "Compiler/SolidityImport/Import.lean"
-  let coverage ← moduleText sourceRoot "Compiler/SolidityImport/Coverage.lean"
-  let reportSrc ← moduleText sourceRoot "Compiler/SolidityImport/Report.lean"
-  let quoteSrc ← moduleText sourceRoot "Compiler/SolidityImport/Quote.lean"
-  let profileSrc ← moduleText sourceRoot "Compiler/SolidityImport/Profile.lean"
-  let legacySrc ← moduleText sourceRoot "Compiler/SolidityImport/Legacy.lean"
-  let legacyFlowSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyControlFlow.lean"
-  let legacyArraysSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyArrays.lean"
-  let legacyArrayLoopsSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyArrayLoops.lean"
-  let abiLoweringSrc ← moduleText sourceRoot "Compiler/SolidityImport/AbiLowering.lean"
-  let exprHelpersSrc ← moduleText sourceRoot "Compiler/SolidityImport/ExprHelpers.lean"
-  let bytePointersSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyBytePointers.lean"
-  let packedSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyPacked.lean"
-  let legacyAbiSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyAbi.lean"
-  let legacyMemorySrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyMemory.lean"
-  let legacySignedSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacySigned.lean"
-  let boundedMemorySrc ← moduleText sourceRoot "Compiler/SolidityImport/BoundedMemory.lean"
-  let memoryBoundsSrc ← moduleText sourceRoot "Compiler/SolidityImport/MemoryBounds.lean"
-  let storageLayoutSrc ← moduleText sourceRoot "Compiler/SolidityImport/StorageLayout.lean"
-  let signatureSrc ← moduleText sourceRoot "Verity/Core/Model/LegacySignatureCalls.lean"
-  let rawCallsSrc ← moduleText sourceRoot "Verity/Core/Model/RawCalls.lean"
-  let gasSrc ← moduleText sourceRoot "Verity/Core/Model/SourceGas.lean"
-  let callGasSrc ← moduleText sourceRoot "Verity/Core/Model/CallGas.lean"
-  let boolLoweringSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyBoolCalls.lean"
-  let boolCompilerSrc ← moduleText sourceRoot "Verity/Core/Model/LegacyBoolCalls.lean"
-  let legacyStorageSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyStorage.lean"
-  let voidLoweringSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyVoidCalls.lean"
-  let voidCompilerSrc ← moduleText sourceRoot "Verity/Core/Model/LegacyVoidCalls.lean"
-  let voidModelSrc ← moduleText sourceRoot "Verity/Core/Model/VoidCalls.lean"
-  let barriersSrc ← moduleText sourceRoot "Compiler/SolidityImport/TransportBarriers.lean"
-  let callWorldSrc ← moduleText sourceRoot "Verity/Core/Model/CallWorld.lean"
-  let legacyCallsSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyCalls.lean"
-  let nativeCallsSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyNativeCalls.lean"
-  let staticCallsSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyStaticCalls.lean"
-  let ecmSrc ← moduleText sourceRoot "Verity/Core/Model/ECM.lean"
-  let denoteSrc ← moduleText sourceRoot "Verity/Core/Model/Denote.lean"
-  -- JSON framing prevents distinct file/signature lists from sharing a
-  -- concatenation merely because their text contains separator newlines.
-  let digestInput := Json.mkObj [
-    ("importerVersion", Json.str importerVersion),
-    ("solcVersion", Json.str release.longVersion),
-    ("contract", Json.str contract),
-    ("functions", Json.arr signatures),
-    ("solcInput", input),
-    ("sourceGas", Json.bool profile.sourceGas),
-    ("deployment", deployment),
-    ("importerSources", Json.mkObj [
-      ("DeployedImmutables.lean", Json.str
-        (← moduleText sourceRoot "Compiler/SolidityImport/DeployedImmutables.lean")),
-      ("Import.lean", Json.str importer), ("Coverage.lean", Json.str coverage),
-      ("Report.lean", Json.str reportSrc), ("Quote.lean", Json.str quoteSrc),
-      ("Profile.lean", Json.str profileSrc), ("Legacy.lean", Json.str legacySrc),
-      ("LegacyControlFlow.lean", Json.str legacyFlowSrc),
-      ("LegacyArrays.lean", Json.str legacyArraysSrc),
-      ("LegacyArrayLoops.lean", Json.str legacyArrayLoopsSrc),
-      ("LegacyBytePointers.lean", Json.str bytePointersSrc),
-      ("LegacyPacked.lean", Json.str packedSrc),
-      ("LegacyAbi.lean", Json.str legacyAbiSrc),
-      ("LegacyMemory.lean", Json.str legacyMemorySrc),
-      ("LegacySigned.lean", Json.str legacySignedSrc),
-      ("BoundedMemory.lean", Json.str boundedMemorySrc),
-      ("MemoryBounds.lean", Json.str memoryBoundsSrc),
-      ("StorageLayout.lean", Json.str storageLayoutSrc),
-      ("AbiLowering.lean", Json.str abiLoweringSrc),
-      ("ExprHelpers.lean", Json.str exprHelpersSrc),
-      ("LegacySignatureCalls.lean", Json.str signatureSrc),
-      ("RawCalls.lean", Json.str rawCallsSrc),
-      ("SourceGas.lean", Json.str gasSrc), ("CallGas.lean", Json.str callGasSrc),
-      ("SolidityImport/LegacyBoolCalls.lean", Json.str boolLoweringSrc),
-      ("Model/LegacyBoolCalls.lean", Json.str boolCompilerSrc),
-      ("LegacyStorage.lean", Json.str legacyStorageSrc),
-      ("SolidityImport/LegacyVoidCalls.lean", Json.str voidLoweringSrc),
-      ("Model/LegacyVoidCalls.lean", Json.str voidCompilerSrc),
-      ("VoidCalls.lean", Json.str voidModelSrc),
-      ("TransportBarriers.lean", Json.str barriersSrc),
-      ("CallWorld.lean", Json.str callWorldSrc),
-      ("LegacyCalls.lean", Json.str legacyCallsSrc),
-      ("LegacyNativeCalls.lean", Json.str nativeCallsSrc),
-      ("LegacyStaticCalls.lean", Json.str staticCallsSrc),
-      ("ECM.lean", Json.str ecmSrc), ("Denote.lean", Json.str denoteSrc)])]
-  let digest := sha256Hex digestInput.compress.toUTF8
-  let report : ImportReport :=
-    { importerVersion, solcLongVersion := release.longVersion, solcSha256 := solcSha, settingsJson := settings.compress,
-      sourceDigest := digest, deploymentSummary, contract, roots := (roots.map (·.1)).toList,
-      functions := specs.toList.map fun f =>
-        { function := f.name, denoteCovered := executableStmtListCovered f.body,
-          compilerProof := .unavailable noCompilerProofReason },
-      includedFunctions := (env.included.map FnRec.toImported).toList,
-      excludedFunctions := (sortedExcluded.map FnRec.toImported).toList,
-      projections := projections.toList, storageFields := env.referenced.toList,
-      storageKeys := env.referenced.toList.map fun name => (name, mappingKeyNames env name),
-      opaqueMembers := opaqueMembers.toList, observesPanicPayload := true }
+  let report ← finishImportReport pkgRoot contract roots profile prepared env signatures
+    (specs.toList.map fun f =>
+      { function := f.name, denoteCovered := executableStmtListCovered f.body,
+        compilerProof := .unavailable noCompilerProofReason }) projections
   pure (model, report)
 
 /-- `solidity_profile osaka466 where evmVersion := "osaka" …` defines a named
@@ -16315,6 +16416,12 @@ private def packageRoot : CommandElabM System.FilePath := do
     if parent == pkg then throwError "package root not found"
     pkg := parent
   return pkg
+
+/-- Evaluate a named import profile through the ordinary command's evaluator. -/
+def readImportProfile (stx : Term) : TermElabM Profile := evalProfile stx
+
+/-- Locate the importing package using the ordinary command's resolution rules. -/
+def importPackageRoot : CommandElabM System.FilePath := packageRoot
 
 /-! ## Typed accessors
 

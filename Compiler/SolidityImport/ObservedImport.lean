@@ -1,7 +1,7 @@
 import Compiler.SolidityImport.Import
 
 /-! Same-frame scalar-result helpers and storage for the observed loop backend.
-The ordinary bounded-model importer is unchanged. Aggregate results, modifiers,
+The bounded-model backend remains separate. Aggregate results, modifiers,
 external calls and helper calls nested in larger expressions remain separate work. -/
 
 namespace Compiler.CompilationModel.SolidityImport.ObservedImport
@@ -167,5 +167,54 @@ def lowerRoot (fn : Json) : M Root := do
       params := frame.params
       body := frame.initial.toList.map Program.atom ++ body ++ [.atom frame.finish] }
     fields }
+
+/-- One selected root in an observed import. No bounded-model coverage is asserted. -/
+structure Function where
+  name : String
+  root : Root
+
+/-- Named observed roots with the compiler-derived storage layout. -/
+structure Slice where
+  functions : List Function
+
+/-- Import observed roots through the ordinary compiler/source/deployment pipeline. -/
+def importSlice (pkgRoot projectRoot : System.FilePath) (entry contract : String)
+    (roots : Array (String × Array String)) (profile : Profile) :
+    Lean.MetaM (Slice × ImportReport) := do
+  let prepared ← prepareImportSlice pkgRoot projectRoot entry contract profile
+  unless prepared.legacy && !profile.sourceGas do
+    throwError "observed imports require Solidity 0.7.6 without source-gas instrumentation"
+  let mut env := prepared.env
+  let mut functions : Array Function := #[]
+  let mut ids : Array Nat := #[]
+  let mut signatures : Array Json := #[]
+  for (name, written) in roots do
+    let (fn, types) ← (selectImportRoot contract name written).run' env
+    let id ← (do mNat (← mField fn "id")).run' env
+    if ids.contains id then throwError "function {contract}.{name} is imported twice"
+    if functions.any (·.name == name) then
+      throwError "root function name collision: {contract}.{name}; import overloads separately"
+    ids := ids.push id
+    signatures := signatures.push (Json.mkObj
+      [("function", toJson name), ("parameterTypes", toJson types)])
+    env := resetImportRoot env (env.nodeFile.find? id |>.getD entry)
+    let (root, next) ← (lowerRoot fn).run env
+    env := next
+    functions := functions.push { name, root }
+  let fields ← observedStorageFields.run' env
+  let imported := functions.toList.map fun f => { f with root := { f.root with fields } }
+  let statuses := imported.map fun f =>
+    { function := f.name, denoteCovered := false,
+      compilerProof := .unavailable
+        "observed control only; no bounded-model coverage or frontend/codegen refinement" :
+      FunctionStatus }
+  let report ← finishImportReport pkgRoot contract roots profile prepared env signatures statuses
+    (backend := "observed-canonical-scalar") (extraSources := #[
+      "Compiler/SolidityImport/LoopExecution.lean", "Compiler/SolidityImport/ControlFlow.lean",
+      "Compiler/SolidityImport/ControlLowering.lean", "Compiler/SolidityImport/ControlDenote.lean",
+      "Compiler/SolidityImport/ControlCodegen.lean", "Compiler/SolidityImport/ObservedImport.lean",
+      "Compiler/SolidityImport/ObservedCommand.lean", "Compiler/SolidityImport/LegacyStructs.lean",
+      "Compiler/SolidityImport/TupleReturns.lean", "Compiler/SolidityImport/TypesAndRecords.lean"])
+  return ({ functions := imported }, report)
 
 end Compiler.CompilationModel.SolidityImport.ObservedImport

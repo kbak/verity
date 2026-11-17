@@ -321,7 +321,7 @@ def setup() -> None:
                     "Compiler.SolidityImport.Import",
                     "Compiler.SolidityImport.ControlDenote",
                     "Compiler.SolidityImport.ControlCodegen",
-                    "Compiler.SolidityImport.ObservedImport",
+                    "Compiler.SolidityImport.ObservedImport", "Compiler.SolidityImport.ObservedCommand",
                     "Compiler.SolidityImport.PostCallStorageFrames",
                     "Compiler.SolidityImport.LegacySignedProofs",
                     "Contracts.SolidityImportSmoke.PostCallStorageMocks",
@@ -1135,6 +1135,15 @@ def tasks(update_golden: bool) -> list:
                    "check_observed_storage", "observed-storage", 600,
                    *(["--optimized"] if optimized else [])))
               for optimized in (False, True)]
+    items += [(f"observed-import-storage-opt{int(optimized)}", 1,
+               lambda optimized=optimized: module_campaign_output(
+                   "check_observed_storage", "observed-import-storage", 900,
+                   "--ordinary-import", *(["--optimized"] if optimized else [])))
+              for optimized in (False, True)]
+    items += [("observed-import-control", 1, lambda: module_campaign_output(
+        "check_observed_control", "observed-import-control", 900, "--ordinary-import"))]
+    items += [("observed-import-quotation-return", 1, lambda: module_campaign_output(
+        "check_observed_import_mutations", "observed-import-quotation", 1800))]
     items += [(f"observed-storage-ir-{mutation}", 1,
                lambda mutation=mutation: module_campaign_output(
                    "check_observed_storage", "observed-storage-ir-mutation", 900,
