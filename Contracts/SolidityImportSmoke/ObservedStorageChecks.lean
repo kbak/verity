@@ -14,11 +14,12 @@ private partial def perturb (mutation : String) (body : ControlLowering.Body)
   match statement with
   | .leaveCall =>
       if mutation == "helper-return-dropped" then []
-      else if mutation == "helper-return-exits-frame" then [.atom (.return (.literal 0))]
+      else if mutation == "helper-return-exits-frame" then
+        [ControlFlow.Program.atom (.return (.literal 0))]
       else [statement]
-  | .atom (.setStorage field _) =>
+  | ControlFlow.Program.atom (.setStorage field _) =>
       if mutation == "storage-write-zero" && !inHelper then
-        [.atom (.setStorage field (.literal 0))]
+        [ControlFlow.Program.atom (.setStorage field (.literal 0))]
       else [statement]
   | .branch pre cond yes no =>
       [.branch pre cond (perturb mutation yes inHelper) (perturb mutation no inHelper)]

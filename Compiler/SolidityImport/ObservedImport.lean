@@ -136,8 +136,8 @@ private partial def special (results : Option Results) (node : Json) (_depth : N
         let converted ← ObservedSupport.cast ty (← mType replacement) lowered replacement
         let captured ← fresh
         pre := pre ++ before ++ converted.pre.toList.map Program.atom ++
-          [.atom (.letVar captured converted.expr)]
-        assignments := assignments ++ [.atom (.assignVar binding (.localVar captured))]
+          [Program.atom (.letVar captured converted.expr)]
+        assignments := assignments ++ [Program.atom (.assignVar binding (.localVar captured))]
       return some (pre ++ assignments ++ [.leaveCall])
     if !expression.isNull && (← helperCall expression) then
       let (pre, replacement) ← value expression
@@ -193,7 +193,7 @@ def lowerRoot (fn : Json) : M Root := do
   return {
     control := {
       params := frame.params
-      body := frame.initial.toList.map Program.atom ++ body ++ [.atom frame.finish] }
+      body := frame.initial.toList.map Program.atom ++ body ++ [Program.atom frame.finish] }
     fields, events := (← get).usedEvents.map Prod.snd }
 
 /-- One selected root in an observed import. No bounded-model coverage is asserted. -/

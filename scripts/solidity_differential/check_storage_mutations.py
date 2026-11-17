@@ -1213,7 +1213,7 @@ solidity_import tested from "{target}" entry "Fixture.sol"
 
 
 def mutation_source(directory, name):
-    return directory / ('Compiler/SolidityImport/SequenceRunner.lean' if name.startswith('observe-event-')
+    return directory / ('Compiler/SolidityImport/EventObservation.lean' if name.startswith('observe-event-')
                                   else 'Compiler/SolidityImport/Quote.lean' if name == 'import-modulo-quote'
                                   else 'Compiler/SolidityImport/AbiLowering.lean' if name == 'import-empty-array-bytes-calldata-tail-bound'
                                   else 'Verity/Core/Model/Denote.lean' if name.startswith('denote-')

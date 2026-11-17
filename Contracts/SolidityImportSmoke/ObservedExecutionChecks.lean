@@ -20,7 +20,7 @@ private def boundaries : Except String Unit := do
       [0, 0, 0, 1], [2^256, 0, 0, 0], [], valid ++ [0]] do
     requireCheck (ObservedExecution.bindCanonical params invalid).toOption.isNone
       "invalid words admitted"
-  let fn : ObservedImport.Function := { name := "run", root := root [.atom .stop] }
+  let fn : ObservedImport.Function := { name := "run", root := root [ControlFlow.Program.atom .stop] }
   requireCheck (ObservedExecution.findRoot { functions := [fn] } "other").toOption.isNone
     "wrong root"
   requireCheck (ObservedExecution.findRoot { functions := [fn, fn] } "run").toOption.isNone
@@ -29,19 +29,20 @@ private def boundaries : Except String Unit := do
     { Verity.defaultState with msgValue := 1 } []).toOption.isNone "call value silently discarded"
   requireCheck (ObservedExecution.executeRoot (root []) Differential.oracle 20
     Verity.defaultState []).toOption.isNone "fallthrough became success"
-  requireCheck (ObservedExecution.executeRoot (root [.atom (.internalCall "missing" [])])
+  requireCheck (ObservedExecution.executeRoot
+    (root [ControlFlow.Program.atom (.internalCall "missing" [])])
     Differential.oracle 20 Verity.defaultState []).toOption.isNone
     "unsupported evaluation became revert"
 
 private def composition : Except String Unit := do
   let body : ControlLowering.Body := [
-    .atom (.setStorage "stored" (.add (.storage "stored") (.literal 1))),
-    .atom (.return (.storage "stored"))]
+    ControlFlow.Program.atom (.setStorage "stored" (.add (.storage "stored") (.literal 1))),
+    ControlFlow.Program.atom (.return (.storage "stored"))]
   let slice : ObservedImport.Slice := { functions := [
     { name := "increment", root := root body },
-    { name := "fail", root := root (body.take 1 ++ [.atom .revertEmpty]) },
+    { name := "fail", root := root (body.take 1 ++ [ControlFlow.Program.atom .revertEmpty]) },
     { name := "invalid", root := root (body.take 1 ++
-        [.atom (.ecm Compiler.ECM.SolidityInvalid.module [])]) },
+        [ControlFlow.Program.atom (.ecm Compiler.ECM.SolidityInvalid.module [])]) },
     { name := "spin", root := root (body.take 1 ++
         [.loop [] (.literal 1) [.continueLoop] []]) }] }
   let some first ← ObservedExecution.execute slice "increment" Differential.oracle 100
@@ -68,8 +69,8 @@ private def eventBoundaries : Except String Unit := do
   let definition : EventDef := {
     name := "Notice"
     params := [{ name := "index", ty := .uint16, kind := .indexed }] }
-  let emitted := [.atom (.emit "Notice" [.literal 7])]
-  let fn := { root (emitted ++ [.atom .stop]) with events := [definition] }
+  let emitted := [ControlFlow.Program.atom (.emit "Notice" [.literal 7])]
+  let fn := { root (emitted ++ [ControlFlow.Program.atom .stop]) with events := [definition] }
   let world := { Verity.defaultState with thisAddress := Verity.Core.Address.ofNat 4660 }
   let some final ← ObservedExecution.executeRoot fn Differential.oracle 100 world []
     | throw "event frame exhausted"
@@ -81,11 +82,12 @@ private def eventBoundaries : Except String Unit := do
   for definitions in [[], [definition, definition]] do
     requireCheck (ObservedExecution.executeRoot { fn with events := definitions }
       Differential.oracle 100 world []).toOption.isNone "invalid event metadata admitted"
-  let some next ← ObservedExecution.executeRoot (root [.atom .stop])
+  let some next ← ObservedExecution.executeRoot (root [ControlFlow.Program.atom .stop])
       Differential.oracle 100 final.world [] | throw "following frame exhausted"
   requireCheck next.world.events.isEmpty "previous frame logs leaked"
   let some failed ← ObservedExecution.executeRoot
-      { fn with control := { fn.control with body := emitted ++ [.atom .revertEmpty] } }
+      { fn with control := {
+        fn.control with body := emitted ++ [ControlFlow.Program.atom .revertEmpty] } }
       Differential.oracle 100 world [] | throw "event rollback exhausted"
   requireCheck (!failed.success && failed.world.events.isEmpty) "reverted logs committed"
   let spin := emitted ++ [.loop [] (.literal 1) [.continueLoop] []]

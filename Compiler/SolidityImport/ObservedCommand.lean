@@ -11,7 +11,7 @@ namespace Compiler.CompilationModel.SolidityImport
 private partial def quoteControl (body : ControlLowering.Body) : CommandElabM Term := do
   let items ← body.toArray.mapM fun statement => do
     match statement with
-    | .atom stmt => `(ControlFlow.Program.atom $(← quoteStmt stmt))
+    | ControlFlow.Program.atom stmt => `(ControlFlow.Program.atom $(← quoteStmt stmt))
     | .branch pre condition yes no =>
         let pre ← pre.toArray.mapM quoteStmt
         `(ControlFlow.Program.branch [$pre,*] $(← quoteExpr condition)

@@ -26,7 +26,7 @@ private partial def perturb (mutation : String) (body : ControlLowering.Body) :
         else cond
       .loop pre condition (perturb mutation loopBody)
         (if mutation == "post-skipped" then [] else perturb mutation post)
-  | .atom _ => statement
+  | ControlFlow.Program.atom _ => statement
   | .call name results body => .call name results (perturb mutation body)
   | .leaveCall => statement
 

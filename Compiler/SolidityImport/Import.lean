@@ -15297,7 +15297,8 @@ def lowerObservedControlRoot (fn : Json) : M ObservedControlRoot := do
     (fun node => do pure (← lowerRootStatements #[node]).1) (← mField fn "body")
   return {
     params := frame.params
-    body := frame.initial.toList.map ControlFlow.Program.atom ++ program ++ [.atom frame.finish] }
+    body := frame.initial.toList.map ControlFlow.Program.atom ++ program ++
+      [ControlFlow.Program.atom frame.finish] }
 
 private partial def index (file : String) (contract? : Option (Nat × String)) (j : Json) : M Unit := do
   match j with

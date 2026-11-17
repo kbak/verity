@@ -19,7 +19,7 @@ private partial def usedNames (body : List (Program Stmt Expr))
   let mut acc := acc
   for statement in body do
     match statement with
-    | .atom stmt => acc := (collectStmtNames stmt).foldl (·.insert ·) acc
+    | Program.atom stmt => acc := (collectStmtNames stmt).foldl (·.insert ·) acc
     | .branch pre cond yes no | .loop pre cond yes no =>
         acc := (collectStmtListNames pre ++ collectExprNames cond).foldl (·.insert ·) acc
         acc := usedNames no (usedNames yes acc)
@@ -37,7 +37,7 @@ private partial def renderBody (body : List (Program Stmt Expr)) (scope : List S
   let mut names := scope
   for statement in body do
     match statement with
-    | .atom stmt =>
+    | Program.atom stmt =>
         chunks := chunks.push (ppStmts indent
           (← compileStmt fields events (inScopeNames := names) (stmt := stmt)))
         names := collectStmtBindNames stmt ++ names

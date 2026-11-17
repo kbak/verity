@@ -66,7 +66,7 @@ def step {Atom Condition State Outcome : Type}
   match machine.frames with
   | [] => return done (.normal state)
   | .code [] :: rest => return next rest state
-  | .code (.atom statement :: tail) :: rest =>
+  | .code (Program.atom statement :: tail) :: rest =>
       match leaf statement state with
       | .error error => return .halt (.error error)
       | .ok (.normal afterBody) => return next (.code tail :: rest) afterBody
