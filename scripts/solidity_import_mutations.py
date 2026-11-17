@@ -18,6 +18,8 @@ import sys
 import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 
 from solidity_differential.check_interface_static_call_mutations import MUTANTS as INTERFACE_MUTANTS
@@ -36,6 +38,28 @@ SMOKE = ROOT / "Contracts/SolidityImportSmoke"
 GOLDEN = SMOKE / "model.golden"
 # Provisioned by `setup()`; campaign modules import eth_hash/eth_abi from it.
 VENV_PYTHON = ROOT / ".lake/slice-testing-venv/bin/python"
+
+# Each worker owns one attempt directory; parallel tasks must never clean up
+# each other's snapshots or snapshots explicitly retained by an earlier run.
+_TASK_WORK = ContextVar("import_mutation_work", default=None)
+
+
+def work_dir() -> Path:
+    return _TASK_WORK.get() or WORK
+
+
+@contextmanager
+def task_workspace(name: str, keep: bool = False):
+    path = Path(tempfile.mkdtemp(prefix=f"{name}-", dir=WORK))
+    token = _TASK_WORK.set(path)
+    try:
+        yield path
+    finally:
+        _TASK_WORK.reset(token)
+        if keep:
+            print(f"kept mutation workspace: {path}", file=sys.stderr, flush=True)
+        else:
+            shutil.rmtree(path)
 
 HEADER = """
 import Compiler.SolidityImport.Import
@@ -107,7 +131,7 @@ def lean(path: Path) -> subprocess.CompletedProcess[str]:
 
 
 def write_project(name: str, mutate) -> Path:
-    dest = WORK / name
+    dest = work_dir() / name
     if dest.exists():
         shutil.rmtree(dest)
     dest.mkdir(parents=True)
@@ -332,7 +356,7 @@ def setup() -> None:
 def prefix_checks(update_golden: bool) -> None:
     subprocess.run([str(VENV_PYTHON), str(ROOT / "scripts/solidity_differential/check_require_rejections.py")],
                    cwd=ROOT, check=True)
-    snapshot = WORK / "model.txt"
+    snapshot = work_dir() / "model.txt"
     snapshot.unlink(missing_ok=True)
     base = expect_success("unreached-for", write_project("base", unchanged), witness=True,
                           extra=f'\n#eval IO.FS.writeFile "{snapshot}" (toString (repr imported.model) ++ "\\n")\n')
@@ -371,8 +395,8 @@ def prefix_checks(update_golden: bool) -> None:
   unless names == ["m", "m_maturity", "user"] && imported.report.projections.isEmpty do
     throw (IO.userError "complete tuple signature was replaced by scalar projections")
 ''')
-    namespaced = WORK / "base/Namespaced.lean"
-    namespaced.write_text(HEADER.format(root=WORK / "base").replace(
+    namespaced = work_dir() / "base/Namespaced.lean"
+    namespaced.write_text(HEADER.format(root=work_dir() / "base").replace(
         "solidity_import imported", "namespace Nested\nsolidity_import imported") +
         "\nend Nested\nexample : modelImportCovered Nested.imported.model = true := Nested.imported.covered\n")
     result = lean(namespaced)
@@ -408,9 +432,9 @@ def prefix_checks(update_golden: bool) -> None:
   unless !(run (2^128)).success do
     throw (IO.userError "uint248 product overflow was accepted")
 ''')
-    two_roots = WORK / "base/TwoRoots.lean"
-    two_roots.write_text("import Compiler.SolidityImport.Differential\n" + HEADER.format(root=WORK / "base") + WITNESS + f'''
-solidity_import both from "{WORK / "base"}" entry "Slice.sol"
+    two_roots = work_dir() / "base/TwoRoots.lean"
+    two_roots.write_text("import Compiler.SolidityImport.Differential\n" + HEADER.format(root=work_dir() / "base") + WITNESS + f'''
+solidity_import both from "{work_dir() / "base"}" entry "Slice.sol"
   using {{ evmVersion := "osaka", viaIR := true, optimizerRuns := some 466, bytecodeHash := "none" }}
   contract C
   function f(Mkt, bytes32, address)
@@ -448,8 +472,8 @@ solidity_import both from "{WORK / "base"}" entry "Slice.sol"
     for name, extra, needle in [
             ("duplicate-root", "  function f(Mkt, bytes32, address)\n  function f(Mkt, bytes32, address)\n", "imported twice"),
             ("unknown-root", "  function nope(bytes32)\n", "no function C.nope(bytes32)")]:
-        bad = WORK / f"base/{name}.lean"
-        bad.write_text(HEADER.format(root=WORK / "base").replace("  function f(Mkt, bytes32, address)\n", extra))
+        bad = work_dir() / f"base/{name}.lean"
+        bad.write_text(HEADER.format(root=work_dir() / "base").replace("  function f(Mkt, bytes32, address)\n", extra))
         blob = lean(bad)
         if blob.returncode == 0 or needle not in blob.stdout + blob.stderr:
             raise SystemExit(f"{name}: expected rejection containing {needle!r}\n{blob.stdout}{blob.stderr}")
@@ -475,7 +499,7 @@ solidity_import both from "{WORK / "base"}" entry "Slice.sol"
     if blob.returncode == 0 or "closure: C.lossOf -> L.unused" not in text:
         raise SystemExit(f"second-root-unsupported: expected the lossOf call path\n{text}")
     print("pass second-root-unsupported")
-    repeated = expect_success("deterministic", WORK / "base", witness=True)
+    repeated = expect_success("deterministic", work_dir() / "base", witness=True)
     if digest_of(base) != digest_of(repeated):
         raise SystemExit("identical input did not reproduce the digest")
     rounding = expect_failure("rounding-detected", write_project("rounding", change_rounding), "witness changed")
@@ -614,7 +638,7 @@ MUTANT_TIMEOUT = 3600
 
 
 def run_differential_mutant(mutant: str) -> list:
-    output = Path(tempfile.mkdtemp(prefix=f"{mutant}-", dir=WORK))
+    output = Path(tempfile.mkdtemp(prefix=f"{mutant}-", dir=work_dir()))
     subprocess.run(["sh", str(ROOT / "scripts/check_solidity_differential.sh"),
                     "--mutations", "--mutant", mutant, "--output", str(output)],
                    cwd=ROOT, check=True, timeout=MUTANT_TIMEOUT)
@@ -698,7 +722,7 @@ def abi_rejections() -> None:
 
 
 def module_campaign_output(module: str, label: str, timeout: int, *extra: str) -> Path:
-    output = Path(tempfile.mkdtemp(prefix=label + "-", dir=WORK)) / "cases"
+    output = Path(tempfile.mkdtemp(prefix=label + "-", dir=work_dir())) / "cases"
     launcher = ('import runpy,sys; sys.path.insert(0,"scripts"); '
                 f'runpy.run_module("solidity_differential.{module}",run_name="__main__")')
     subprocess.run([str(VENV_PYTHON), "-c", launcher, "--output", str(output), *extra],
@@ -1201,6 +1225,8 @@ def main() -> None:
     parser.add_argument("--shard", default="0/1", help="run shard I of N, written I/N")
     parser.add_argument("--jobs", default="1", help="parallel isolated campaigns, or 'auto' to size by cores and memory")
     parser.add_argument("--list", action="store_true", help="print the selected tasks and exit")
+    parser.add_argument("--keep-workspaces", action="store_true",
+                        help="keep task snapshots for debugging instead of cleaning them after each attempt")
     parser.add_argument("--task", action="append", help="run only the named task (repeatable)")
     args = parser.parse_args()
     try:
@@ -1237,11 +1263,15 @@ def main() -> None:
         # a campaign that overran a time budget on a loaded host gets a retry.
         start = time.monotonic()
         try:
-            try:
-                run()
-            except (Exception, SystemExit) as error:
-                print(f"RETRY {name} after failure: {error}", file=sys.stderr, flush=True)
-                run()
+            for attempt in range(2):
+                try:
+                    with task_workspace(name, args.keep_workspaces):
+                        run()
+                    break
+                except (Exception, SystemExit) as error:
+                    if attempt:
+                        raise
+                    print(f"RETRY {name} after failure: {error}", file=sys.stderr, flush=True)
         finally:
             print(f"task {name}: {time.monotonic() - start:.0f}s", flush=True)
 
