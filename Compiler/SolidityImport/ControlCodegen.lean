@@ -31,7 +31,7 @@ private partial def usedNames (body : List (Program Stmt Expr))
 preludes execute at every test, and continue reaches the for-loop postlude. -/
 private partial def renderBody (body : List (Program Stmt Expr)) (scope : List String := [])
     (depth : Nat := 0) (indent : Nat := 0) (fields : List Field := [])
-    (inCall : Bool := false) :
+    (inCall : Bool := false) (events : List EventDef := []) :
     StateT (Array (List String)) (Except String) (List String) := do
   let mut chunks : Array (List String) := #[]
   let mut names := scope
@@ -39,24 +39,24 @@ private partial def renderBody (body : List (Program Stmt Expr)) (scope : List S
     match statement with
     | .atom stmt =>
         chunks := chunks.push (ppStmts indent
-          (← compileStmt fields (inScopeNames := names) (stmt := stmt)))
+          (← compileStmt fields events (inScopeNames := names) (stmt := stmt)))
         names := collectStmtBindNames stmt ++ names
     | .branch prelude condition yes no =>
-        let pre ← compileStmtList fields (inScopeNames := names) (stmts := prelude)
+        let pre ← compileStmtList fields events (inScopeNames := names) (stmts := prelude)
         let branchNames := prelude.flatMap collectStmtBindNames ++ names
         let test ← compileExpr fields (expr := condition)
-        let yesCode ← renderBody yes branchNames depth (indent + 1) fields inCall
-        let noCode ← renderBody no branchNames depth (indent + 1) fields inCall
+        let yesCode ← renderBody yes branchNames depth (indent + 1) fields inCall events
+        let noCode ← renderBody no branchNames depth (indent + 1) fields inCall events
         chunks := chunks.push (ppStmts indent pre ++
           [line indent s!"switch {ppExpr test}", line indent "case 0 {"] ++ noCode ++
           [line indent "}", line indent "default {"] ++ yesCode ++ [line indent "}"])
         names := branchNames
     | .loop prelude condition loopBody postlude =>
-        let pre ← compileStmtList fields (inScopeNames := names) (stmts := prelude)
+        let pre ← compileStmtList fields events (inScopeNames := names) (stmts := prelude)
         let loopNames := prelude.flatMap collectStmtBindNames ++ names
         let test ← compileExpr fields (expr := condition)
-        let postCode ← renderBody postlude names depth (indent + 1) fields inCall
-        let bodyCode ← renderBody loopBody loopNames (depth + 1) (indent + 1) fields inCall
+        let postCode ← renderBody postlude names depth (indent + 1) fields inCall events
+        let bodyCode ← renderBody loopBody loopNames (depth + 1) (indent + 1) fields inCall events
         chunks := chunks.push ([line indent "for {} 1 {"] ++ postCode ++
           [line indent "} {"] ++ ppStmts (indent + 1) pre ++
           [line (indent + 1) ("if iszero(" ++ ppExpr test ++ ") { break }")] ++
@@ -70,7 +70,7 @@ private partial def renderBody (body : List (Program Stmt Expr)) (scope : List S
     | .call name results callBody =>
         let used := usedNames callBody
         let captures := names.filter (fun n => used.contains n && !results.contains n)
-        let code ← renderBody callBody (results ++ captures) 0 (indent + 1) fields true
+        let code ← renderBody callBody (results ++ captures) 0 (indent + 1) fields true events
         let returns := if results.isEmpty then "" else " -> " ++ ", ".intercalate results
         let assign := if results.isEmpty then "" else ", ".intercalate results ++ " := "
         modify fun definitions => definitions.push
@@ -86,7 +86,7 @@ private partial def renderBody (body : List (Program Stmt Expr)) (scope : List S
 /-- Compile a scalar call frame for canonical calldata. Dispatch, arbitrary
 ABI-input equivalence and transaction rollback are separate obligations. -/
 def scalarFrame (params : List Param) (body : List (Program Stmt Expr))
-    (fields : List Field := []) :
+    (fields : List Field := []) (events : List EventDef := []) :
     Except String String := do
   unless params.all (isScalarParamType ·.ty) do throw "observed frame requires scalar parameters"
   let loads := params.zipIdx.flatMap fun (param, index) =>
@@ -94,7 +94,7 @@ def scalarFrame (params : List Param) (body : List (Program Stmt Expr))
       (4 + 32 * index)
   let preamble := ["mstore(64, 128)", "if callvalue() { revert(0, 0) }",
     s!"if lt(calldatasize(), {4 + 32 * params.length}) " ++ "{ revert(0, 0) }"]
-  let (code, definitions) ← (renderBody body (params.map (·.name)) (fields := fields)).run #[]
+  let (code, definitions) ← (renderBody body (params.map (·.name)) (fields := fields) (events := events)).run #[]
   return "\n".intercalate (definitions.toList.flatten ++ ["{"] ++
     preamble ++ ppStmts 0 loads ++ code ++ ["}"])
 

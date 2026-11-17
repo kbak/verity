@@ -64,9 +64,48 @@ private def composition : Except String Unit := do
     let outcome ← ObservedExecution.execute slice "spin" Differential.oracle fuel last.world []
     requireCheck outcome.isNone "exhaustion published a source outcome"
 
+private def eventBoundaries : Except String Unit := do
+  let definition : EventDef := {
+    name := "Notice"
+    params := [{ name := "index", ty := .uint16, kind := .indexed }] }
+  let emitted := [.atom (.emit "Notice" [.literal 7])]
+  let fn := { root (emitted ++ [.atom .stop]) with events := [definition] }
+  let world := { Verity.defaultState with thisAddress := Verity.Core.Address.ofNat 4660 }
+  let some final ← ObservedExecution.executeRoot fn Differential.oracle 100 world []
+    | throw "event frame exhausted"
+  let [event] := final.world.events | throw "event journal length differs"
+  let some entry := event.rawLog | throw "event has no encoded observation"
+  requireCheck (entry.emitter == world.thisAddress && entry.data.isEmpty &&
+    entry.topics.map (·.val) == [KeccakEngine.keccak256_str_nat "Notice(uint16)", 7])
+    "event topic or emitter differs"
+  for definitions in [[], [definition, definition]] do
+    requireCheck (ObservedExecution.executeRoot { fn with events := definitions }
+      Differential.oracle 100 world []).toOption.isNone "invalid event metadata admitted"
+  let some next ← ObservedExecution.executeRoot (root [.atom .stop])
+      Differential.oracle 100 final.world [] | throw "following frame exhausted"
+  requireCheck next.world.events.isEmpty "previous frame logs leaked"
+  let some failed ← ObservedExecution.executeRoot
+      { fn with control := { fn.control with body := emitted ++ [.atom .revertEmpty] } }
+      Differential.oracle 100 world [] | throw "event rollback exhausted"
+  requireCheck (!failed.success && failed.world.events.isEmpty) "reverted logs committed"
+  let spin := emitted ++ [.loop [] (.literal 1) [.continueLoop] []]
+  let outcome ← ObservedExecution.executeRoot
+    { fn with control := { fn.control with body := spin } } Differential.oracle 20 world []
+  requireCheck outcome.isNone "event exhaustion published a source outcome"
+
+private def rawEventBoundaries : Except String Unit := do
+  let entry : Verity.EncodedLog := {
+    emitter := Verity.Core.Address.ofNat 42, topics := [7], data := [1, 2, 255] }
+  let event : Verity.Event := { name := "", args := [], indexedArgs := [], rawLog := some entry }
+  let encoded ← EventObservation.encode (Verity.Core.Address.ofNat 99) [] event
+  requireCheck (encoded == entry) "raw opcode log was re-encoded or lost its emitter"
+  let bad := { event with rawLog := some { entry with topics := [1, 2, 3, 4, 5] } }
+  requireCheck (EventObservation.encode (Verity.Core.Address.ofNat 99) [] bad).toOption.isNone
+    "invalid opcode topic count admitted"
+
 /-- Execute the adapter boundaries from a generated smoke driver. -/
 def runObservedExecutionChecks : IO Unit := do
-  for check in [boundaries, composition] do
+  for check in [boundaries, composition, eventBoundaries, rawEventBoundaries] do
     match check with
     | .ok () => pure ()
     | .error message => throw (IO.userError message)

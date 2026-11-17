@@ -119,6 +119,8 @@ private partial def value (node : Json) : M (ControlLowering.Body × Json) := do
 private partial def special (results : Option Results) (node : Json) (_depth : Nat) :
     M (Option ControlLowering.Body) := do
   let kind ← mKind node
+  if kind == "EmitStatement" then
+    return some ((← ObservedSupport.statement node).toList.map Program.atom)
   if kind == "Return" then
     let expression := (field? node "expression").getD Json.null
     if let some bindings := results then
@@ -172,6 +174,7 @@ The caller supplies compiler-indexed declarations and storage layout. -/
 structure Root where
   control : ObservedControlRoot
   fields : List Field
+  events : List EventDef := []
 
 /-- Lower general loops with storage effects and explicit helper return boundaries. -/
 def lowerRoot (fn : Json) : M Root := do
@@ -191,7 +194,7 @@ def lowerRoot (fn : Json) : M Root := do
     control := {
       params := frame.params
       body := frame.initial.toList.map Program.atom ++ body ++ [.atom frame.finish] }
-    fields }
+    fields, events := (← get).usedEvents.map Prod.snd }
 
 /-- One selected root in an observed import. No bounded-model coverage is asserted. -/
 structure Function where
@@ -227,7 +230,8 @@ def importSlice (pkgRoot projectRoot : System.FilePath) (entry contract : String
     env := next
     functions := functions.push { name, root }
   let fields ← observedStorageFields.run' env
-  let imported := functions.toList.map fun f => { f with root := { f.root with fields } }
+  let events := env.usedEvents.map Prod.snd
+  let imported := functions.toList.map fun f => { f with root := { f.root with fields, events } }
   let statuses := imported.map fun f =>
     { function := f.name, denoteCovered := false,
       compilerProof := .unavailable
@@ -238,6 +242,7 @@ def importSlice (pkgRoot projectRoot : System.FilePath) (entry contract : String
       "Compiler/SolidityImport/LoopExecution.lean", "Compiler/SolidityImport/ControlFlow.lean",
       "Compiler/SolidityImport/ControlLowering.lean", "Compiler/SolidityImport/ControlDenote.lean",
       "Compiler/SolidityImport/ControlCodegen.lean", "Compiler/SolidityImport/ObservedImport.lean",
+      "Compiler/SolidityImport/EventObservation.lean", "Compiler/SolidityImport/ObservedExecution.lean",
       "Compiler/SolidityImport/ObservedCommand.lean", "Compiler/SolidityImport/LegacyStructs.lean",
       "Compiler/SolidityImport/TupleReturns.lean", "Compiler/SolidityImport/TypesAndRecords.lean"])
   return ({ functions := imported }, report)

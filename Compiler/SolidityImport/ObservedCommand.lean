@@ -32,9 +32,18 @@ private def quoteObserved (slice : ObservedImport.Slice) : CommandElabM Term := 
     let params ← fn.root.control.params.toArray.mapM fun p => do
       `(Compiler.CompilationModel.Param.mk $(quote p.name) $(← quoteParamType p.ty))
     let fields ← fn.root.fields.toArray.mapM quoteField
+    let events ← fn.root.events.toArray.mapM fun (event : EventDef) => do
+      let params : Array Term ← event.params.toArray.mapM fun (parameter : EventParam) => do
+        let kind ← match parameter.kind with
+          | .indexed => `(Compiler.CompilationModel.EventParamKind.indexed)
+          | .unindexed => `(Compiler.CompilationModel.EventParamKind.unindexed)
+        `(({ name := $(quote parameter.name), ty := $(← quoteParamType parameter.ty),
+             kind := $kind } : Compiler.CompilationModel.EventParam))
+      `(({ name := $(quote event.name), params := [$params,*] } :
+          Compiler.CompilationModel.EventDef))
     `(({ name := $(quote fn.name), root := {
         control := { params := [$params,*], body := $(← quoteControl fn.root.control.body) }
-        fields := [$fields,*] } } : ObservedImport.Function))
+        fields := [$fields,*], events := [$events,*] } } : ObservedImport.Function))
   `(({ functions := [$functions,*] } : ObservedImport.Slice))
 
 /-- Select the observed backend explicitly; bounded imports keep their existing syntax. -/

@@ -1,3 +1,4 @@
+import Compiler.SolidityImport.EventObservation
 import Compiler.SolidityImport.SourceGasInput
 import Compiler.SolidityImport.SourceGasRunner
 import Compiler.SolidityImport.TransactionAccess
@@ -46,49 +47,13 @@ private def hexBytes (bytes : List UInt8) : String :=
 private def hexWord (n : Nat) : String := hexBytes (wordBytes n)
 private def hexAddress (n : Nat) : String := hexBytes ((wordBytes n).drop 12)
 
-/-- Scalar ABI cleanup matching the compiler's event-word normalization. -/
-private def eventWord (ty : ParamType) (value : Nat) : Except String Nat := do
-  match ty with
-  | .uint256 | .bytes32 => pure (value % 2^256)
-  | .uint8 => pure (value % 2^8)
-  | .uint16 => pure (value % 2^16)
-  | .uintN bits =>
-      unless 0 < bits && bits ≤ 256 && bits % 8 == 0 do throw "invalid event integer width"
-      pure (value % 2^bits)
-  | .bytesN 4 => pure ((value % 2^256) &&& ((2^32 - 1) * 2^224))
-  | .bytesN 1 => pure ((value % 2^256) &&& ((2^8 - 1) * 2^248))
-  | .address => pure (value % 2^160)
-  | .bool => pure (if value == 0 then 0 else 1)
-  | _ => throw "unsupported event observation parameter type"
-
-/-- Exact scalar event encoding from actual Denote emissions and model declarations.
-Denote's legacy eventless executor retains arguments in source order. -/
+/-- Render the shared exact log observation for the sequence adapter. -/
 private def encodeEvent (account : Nat) (definitions : List EventDef)
     (event : Verity.Event) : Except String Json := do
-  if let some entry := event.rawLog then
-    unless entry.topics.length ≤ 4 do throw "logged event has more than four topics"
-    return Json.mkObj [("address", toJson (hexAddress entry.emitter.val)),
-      ("topics", toJson (entry.topics.map fun topic => hexWord topic.val)),
-      ("data", toJson (hexBytes entry.data))]
-  let [definition] := definitions.filter (·.name == event.name)
-    | throw s!"observed event must resolve uniquely: {event.name}"
-  let topic0 := hexBytes (KeccakEngine.keccak256_str (eventSignature definition)).data.toList
-  unless event.indexedArgs.isEmpty do
-    -- Closed log transport: the complete logged topics and ABI payload words,
-    -- reported as executed so a wrong selector or topic is an observation.
-    unless event.indexedArgs.length ≤ 4 do throw "logged event has more than four topics"
-    let topics := event.indexedArgs.map fun topic => hexWord topic.val
-    return Json.mkObj [("address", toJson (hexAddress account)), ("topics", toJson topics),
-      ("data", toJson (hexBytes (event.args.flatMap fun word => wordBytes word.val)))]
-  unless definition.params.length == event.args.length do throw "event argument count differs"
-  let pairs ← (definition.params.zip event.args).mapM fun (parameter, value) => do
-    pure (parameter, ← eventWord parameter.ty value.val)
-  let indexed := pairs.filter (fun p => p.1.kind == .indexed)
-  unless indexed.length ≤ 3 do throw "event has more than three indexed parameters"
-  let topics := topic0 :: indexed.map (fun p => hexWord p.2)
-  let data := (pairs.filter (fun p => p.1.kind == .unindexed)).flatMap (fun p => wordBytes p.2)
-  return Json.mkObj [("address", toJson (hexAddress account)),
-    ("topics", toJson topics), ("data", toJson (hexBytes data))]
+  let entry ← EventObservation.encode (Address.ofNat account) definitions event
+  return Json.mkObj [("address", toJson (hexAddress entry.emitter.val)),
+    ("topics", toJson (entry.topics.map fun topic => hexWord topic.val)),
+    ("data", toJson (hexBytes entry.data))]
 
 /-- Requested deployment observations in the `deployment.py` schema: the
 caller's nonce and balance, then exact code, nonce and balance of every planned

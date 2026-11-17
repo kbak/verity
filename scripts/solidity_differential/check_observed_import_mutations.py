@@ -10,11 +10,11 @@ from .engine import ROOT, HarnessError, command, write_json
 from .mutations import snapshot, release
 
 
-def run(output, modifiers=False):
+def run(output, modifiers=False, events=False):
     output = Path(output).resolve()
     output.mkdir(parents=True, exist_ok=False)
     relative = Path('Compiler/SolidityImport/' +
-                    ('ObservedImport.lean' if modifiers else 'ObservedCommand.lean'))
+                    ('ObservedImport.lean' if modifiers or events else 'ObservedCommand.lean'))
     source = (ROOT / relative).read_text()
     before = '| .leaveCall => `(ControlFlow.Program.leaveCall)'
     after = ('| .leaveCall => `(ControlFlow.Program.atom '
@@ -23,6 +23,9 @@ def run(output, modifiers=False):
     if modifiers:
         before = 'post.toList.map Program.atom'
         after = '[]'
+    if events:
+        before = 'return some ((← ObservedSupport.statement node).toList.map Program.atom)'
+        after = 'discard <| ObservedSupport.statement node\n    return some []'
     if source.count(before) != 1:
         raise HarnessError('observed quotation mutation anchor changed')
     directory = output / 'snapshot'
@@ -31,7 +34,8 @@ def run(output, modifiers=False):
                         os.environ.get('PYTHONPATH', ''), 'PYTHONDONTWRITEBYTECODE': '1'}
 
     def campaign(name):
-        campaign = (['solidity_differential.check_observed_modifiers'] if modifiers else
+        campaign = (['solidity_differential.check_observed_events'] if events else
+                    ['solidity_differential.check_observed_modifiers'] if modifiers else
                     ['solidity_differential.check_observed_storage', '--ordinary-import'])
         result = subprocess.run([sys.executable, '-m', *campaign,
             '--output', str(directory/'.lake'/name)], cwd=directory, env=env,
@@ -72,7 +76,8 @@ def run(output, modifiers=False):
         if code != 1 or report['passed'] or not witnesses:
             raise HarnessError('quotation mutation needs completed matching wrong outcomes')
         write_json(output/'complete.json', dict(status='detected', baselinePassed=True,
-            mutation='modifier-post-dropped' if modifiers else 'quoted-helper-return-dropped',
+            mutation='event-emission-dropped' if events else
+                     'modifier-post-dropped' if modifiers else 'quoted-helper-return-dropped',
             witnesses=witnesses))
     finally:
         release(directory)
@@ -81,5 +86,7 @@ def run(output, modifiers=False):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
-    parser.add_argument('--modifiers', action='store_true')
+    family = parser.add_mutually_exclusive_group()
+    family.add_argument('--modifiers', action='store_true')
+    family.add_argument('--events', action='store_true')
     run(**vars(parser.parse_args()))

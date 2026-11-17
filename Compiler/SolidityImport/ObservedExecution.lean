@@ -1,6 +1,7 @@
 import Compiler.SolidityImport.ObservedImport
 import Compiler.SolidityImport.ControlDenote
 import Compiler.SolidityImport.Transactions
+import Compiler.SolidityImport.EventObservation
 
 /-! Downstream frame execution for explicitly imported observed programs.
 No dispatch, arbitrary calldata decoding, gas bound or refinement is asserted. -/
@@ -41,7 +42,12 @@ def executeRoot (root : ObservedImport.Root) (oracle : DenoteOracle) (fuel : Nat
   | none => return none
   | some (.error message) => throw message
   | some (.ok (.normal _)) => throw "observed frame fell through without a source outcome"
-  | some (.ok (.abrupt outcome)) => return some (← Transactions.finishFrame initial outcome)
+  | some (.ok (.abrupt outcome)) =>
+      let final ← Transactions.finishFrame initial outcome
+      let events ← final.world.events.mapM fun event => do
+        let entry ← EventObservation.encode final.world.thisAddress root.events event
+        return { event with rawLog := some entry }
+      return some { final with world := { final.world with events } }
 
 /-- Execute a selected root without falling back to a bounded model or another name. -/
 def execute (slice : ObservedImport.Slice) (name : String) (oracle : DenoteOracle)

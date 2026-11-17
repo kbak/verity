@@ -44,12 +44,17 @@ private def evaluate (root : ObservedImport.Root) (row : Json) : Except String J
   unless slots.length == values.length do throw "initial storage length mismatch"
   let world := (slots.zip values).foldl
     (fun state (slot, value) => state.writePhysicalSlot slot (Verity.Core.Uint256.ofNat value))
-    Verity.defaultState
+    { Verity.defaultState with thisAddress := Verity.Core.Address.ofNat 4660 }
   let some final ← ObservedExecution.executeRoot root Differential.oracle 4000 world args
     | throw "storage case exhausted without a completed observation"
+  let events ← final.world.events.mapM fun event => do
+    let some entry := event.rawLog | throw "observed event has no exact log"
+    return Json.mkObj [("address", toJson (toString entry.emitter.val)),
+      ("topics", toJson (entry.topics.map fun word => hexBytes (Denote.wordBytes word.val))),
+      ("data", toJson (hexBytes entry.data))]
   let status := if final.invalid then "invalid" else if final.success then "ok" else "revert"
   return Json.mkObj [("id", ← row.getObjVal? "id"), ("status", toJson status),
-    ("data", toJson (hexBytes final.data)),
+    ("data", toJson (hexBytes final.data)), ("events", toJson events),
     ("storage", toJson (slots.map fun slot =>
       toString (final.world.storageWords (.slot slot)).val))]
 
@@ -100,7 +105,7 @@ elab "observed_storage_cases " input:str " output " output:str : command => do
       let root ← liftTermElabM <| (ObservedImport.lowerRoot fn).run' env
       let root := { root with control := { root.control with
         body := perturb mutation root.control.body } }
-      let .ok code := ControlCodegen.scalarFrame root.control.params root.control.body root.fields
+      let .ok code := ControlCodegen.scalarFrame root.control.params root.control.body root.fields root.events
         | throwError "{name}: code generation failed"
       compiled := compiled.push (Json.mkObj [("name", toJson name), ("body", toJson code)])
       for row in cases do

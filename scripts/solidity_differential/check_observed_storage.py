@@ -107,6 +107,8 @@ def check(output, optimized=False, mutation=None, ordinary_import=False, spec=No
     functions = [n for n in declaration['nodes'] if n['nodeType'] == 'FunctionDefinition'
                  and n['visibility'] == 'external']
     rows = spec.get('cases', cases)()
+    for row in rows:
+        row['expected'].setdefault('events', [])
     write_json(output/'input.json', dict(source=source, ast=ast, layout=layout, functions=functions,
         cases=rows, bases=declaration['linearizedBaseContracts'], mutation=mutation or ''))
     driver = output/'Driver.lean'
@@ -128,7 +130,11 @@ def check(output, optimized=False, mutation=None, ordinary_import=False, spec=No
             or len(model['observations']) != len(rows)
             or {r['id'] for r in rows} != {r['id'] for r in model['observations']}):
         raise HarnessError('observed storage coverage differs')
-    models = {r['id']: {k: r[k] for k in ('status', 'data', 'storage')} for r in model['observations']}
+    models = {r['id']: {k: r[k] for k in ('status', 'data', 'storage', 'events')} for r in model['observations']}
+    for observation in models.values():
+        for entry in observation['events']:
+            account = int(entry['address'])
+            entry['address'] = '$self' if account == 4660 else f'0x{account:040x}'
     signatures = {r['function']: r['signature'] for r in rows}
     arms = ['case 0x'+source_artifact['evm']['methodIdentifiers'][signatures[f['name']]]+
             ' {\n'+f['body']+'\n}' for f in model['compiled']]
@@ -161,7 +167,10 @@ def check(output, optimized=False, mutation=None, ordinary_import=False, spec=No
                     raise HarnessError(f'{route}: non-source failure {call.get("error")}')
                 observed[route] = dict(status='ok' if success else 'revert', data=call.get('output','0x'),
                     storage=[str(int(node.rpc('eth_getStorageAt', account, hex(int(s)),
-                        trace['receipt']['blockNumber']), 16)) for s in row['slots']])
+                        trace['receipt']['blockNumber']), 16)) for s in row['slots']],
+                    events=[dict(address='$self' if log['address'].lower() == account.lower()
+                                 else log['address'].lower(), topics=log['topics'], data=log['data'])
+                            for log in trace['receipt']['logs']])
             if observed['source'] != row['expected']: failures.append(row['id'])
             elif mutation:
                 if observed['model'] == observed['generated'] and observed['model'] != row['expected']:

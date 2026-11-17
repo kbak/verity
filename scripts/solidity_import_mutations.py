@@ -1152,6 +1152,13 @@ def tasks(update_golden: bool) -> list:
     items += [("observed-import-modifier-post", 1, lambda: module_campaign_output(
         "check_observed_import_mutations", "observed-import-modifier-post", 1800,
         "--modifiers"))]
+    items += [(f"observed-import-events-opt{int(optimized)}", 1,
+               lambda optimized=optimized: module_campaign_output(
+                   "check_observed_events", "observed-import-events", 900,
+                   *(["--optimized"] if optimized else [])))
+              for optimized in (False, True)]
+    items += [("observed-import-event-drop", 1, lambda: module_campaign_output(
+        "check_observed_import_mutations", "observed-import-event-drop", 1800, "--events"))]
     items += [("observed-execution-boundaries", 1, lambda: module_campaign_output(
         "check_observed_execution", "observed-execution", 600))]
     items += [("observed-execution-exhaustion", 1, lambda: module_campaign_output(

@@ -81,7 +81,7 @@ run_elab do
       | throw (IO.userError "downstream root selection failed")
     let root := { selected with control := { selected.control with
       body := perturb mutation selected.control.body } }
-    let .ok code := ControlCodegen.scalarFrame root.control.params root.control.body root.fields
+    let .ok code := ControlCodegen.scalarFrame root.control.params root.control.body root.fields root.events
       | throw (IO.userError "imported code generation failed")
     compiled := compiled.push (Json.mkObj [("name", toJson fn.name), ("body", toJson code)])
     for row in rows do
