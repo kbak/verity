@@ -2,7 +2,9 @@
 import argparse
 import json
 from pathlib import Path
+from eth_utils import keccak
 from .engine import HarnessError, command, write_json
+from .check_legacy_state_transitions import campaign, word, SENDER
 
 CLASSIFIER = '''import Compiler.SolidityImport.LegacyStorageMembers
 open Lean Compiler.CompilationModel.SolidityImport
@@ -61,7 +63,11 @@ CASES = {
     'memory-copy': (SIMPLE, 'Record memory p=value; return p.x;', 'storage copies to memory'),
     'nested': (HEADER, 'value.inner.x=n; return value.inner.x;', 'does not support type struct'),
     'array-path': (SIMPLE, 'records[0].x=n; return 0;', 'does not support type struct'),
-    'mapping-path': (SIMPLE, 'table[n].x=n; return 0;', 'does not support type struct'),
+    'mapping-path': (SIMPLE, 'table[n].x=n; return 0;', None),
+    'mapping-memory-copy': (SIMPLE, 'Record memory p=table[n]; return p.x;',
+                            'storage copies to memory'),
+    'mapping-signed-key': (SIMPLE.replace('mapping(uint256=>Record)', 'mapping(int24=>Record)'),
+                           'table[int24(n)].x=n; return 0;', 'signed mapping storage is outside'),
     'signed-read': (SIMPLE, 'return value.signedCanary==0 ? 1 : 0;', None),
     'signed-write': (SIMPLE, 'value.signedCanary=int24(n); return 0;', None),
     'fixed-bytes': (HEADER, 'value.tag=bytes4(uint32(n)); return 0;', 'memory structs require scalar fields'),
@@ -69,6 +75,31 @@ CASES = {
     'post-callback-read': (SIMPLE, 'I(address(1)).touch(); value.x+=n; return 0;',
                           'closed trailing continuation with storage-free operands'),
 }
+
+
+def mapping_scenario(kind, caller, layout, **_):
+    """Check the original mapping write against independently computed physical slots."""
+    base = int(next(item['slot'] for item in layout['storage'] if item['label'] == 'table'))
+    keys = (0, 1, 17, 255)
+    slots = {key: int.from_bytes(keccak(key.to_bytes(32, 'big') +
+                                      base.to_bytes(32, 'big')), 'big') for key in keys}
+    mask = (1 << 256) - 1
+    # Keep packed neighbors, other keys, and unrelated state nonzero throughout.
+    state = {int(item['slot']): mask for item in layout['storage']}
+    state.update({slot: mask ^ (key << 16) for key, slot in slots.items()})
+    state[9999] = 0xABCDE
+    initial = [(caller, word(slot), word(value)) for slot, value in sorted(state.items())]
+    calls, expected = [], {}
+    for key in (*keys, 17, 0):
+        ident = str(len(calls))
+        state[slots[key]] = (state[slots[key]] & (mask ^ 255)) | key
+        calls.append(dict(id=ident, label='run(uint8)', function='run', args=[key],
+            sender=SENDER, target=caller, value='0x0',
+            data='0x' + (keccak(text='run(uint8)')[:4] + key.to_bytes(32, 'big')).hex(),
+            timestamp=1000000100 + len(calls), blockNumber=2 + len(calls)))
+        expected[ident] = dict(status='ok', data=word(0), events=[],
+            storage=[[caller, word(slot), word(value)] for slot, value in sorted(state.items())])
+    return initial, calls, expected
 
 
 def main():
@@ -100,6 +131,14 @@ def main():
         else:
             if diagnostic is not None:
                 raise HarnessError('unsupported member shape accepted: '+name)
+    # Admission alone is insufficient for a formerly rejected storage path.
+    # Preserve its exact source and verify all three routes, with optimization off/on.
+    for optimized in (False, True):
+        if campaign(out / ('mapping-opt1' if optimized else 'mapping-opt0'),
+                    kind='mapping-member', fixture=out / 'mapping-path.sol', contract='P',
+                    functions=('run(uint8)',), prepared=True, optimized=optimized,
+                    scenario_builder=mapping_scenario):
+            raise HarnessError('mapping member physical storage observations differ')
     write_json(out/'complete.json',{'cases':list(CASES)})
     print('legacy storage member boundaries passed')
 
