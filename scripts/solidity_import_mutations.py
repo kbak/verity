@@ -1144,6 +1144,14 @@ def tasks(update_golden: bool) -> list:
         "check_observed_control", "observed-import-control", 900, "--ordinary-import"))]
     items += [("observed-import-quotation-return", 1, lambda: module_campaign_output(
         "check_observed_import_mutations", "observed-import-quotation", 1800))]
+    items += [(f"observed-import-modifiers-opt{int(optimized)}", 1,
+               lambda optimized=optimized: module_campaign_output(
+                   "check_observed_modifiers", "observed-import-modifiers", 900,
+                   *(["--optimized"] if optimized else [])))
+              for optimized in (False, True)]
+    items += [("observed-import-modifier-post", 1, lambda: module_campaign_output(
+        "check_observed_import_mutations", "observed-import-modifier-post", 1800,
+        "--modifiers"))]
     items += [("observed-execution-boundaries", 1, lambda: module_campaign_output(
         "check_observed_execution", "observed-execution", 600))]
     items += [("observed-execution-exhaustion", 1, lambda: module_campaign_output(

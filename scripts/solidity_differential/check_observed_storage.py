@@ -77,14 +77,17 @@ def cases():
     return rows
 
 
-def identity():
+def identity(fixture=FIXTURE):
     return implementation_hashes() | {
-        str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in (FIXTURE, DRIVER)}
+        str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in (fixture, DRIVER)}
 
 
-def check(output, optimized=False, mutation=None, ordinary_import=False):
+def check(output, optimized=False, mutation=None, ordinary_import=False, spec=None):
+    spec = spec or {}
+    fixture = spec.get('fixture', FIXTURE)
+    contract = spec.get('contract', 'LegacyObservedStorage')
     output = Path(output).resolve(); output.mkdir(parents=True, exist_ok=False)
-    captured = identity(); source = FIXTURE.read_text()
+    captured = identity(fixture); source = fixture.read_text()
     write_json(output/'manifest.json', dict(implementation=captured,
         solcSha256={str(p): hashlib.sha256(p.read_bytes()).hexdigest()
                     for p in (SOLC, Path('.lake/solidity-import/solc-0.7.6'))}))
@@ -95,20 +98,21 @@ def check(output, optimized=False, mutation=None, ordinary_import=False):
         output, output/'source-solc', solc=Path.cwd()/'.lake/solidity-import/solc-0.7.6')
     ast = result['sources']['Source.sol']['ast']
     declaration = next(n for n in ast['nodes'] if n['nodeType'] == 'ContractDefinition')
-    source_artifact = result['contracts']['Source.sol']['LegacyObservedStorage']
+    source_artifact = result['contracts']['Source.sol'][contract]
     layout = source_artifact['storageLayout']
-    if [(n['label'], n['slot'], n['offset']) for n in layout['storage']] != [
-            ('total', '0', 0), ('afterCalls', '1', 0), ('records', '2', 0), ('values', '5', 0)]:
+    expected_layout = spec.get('layout', [
+        ('total', '0', 0), ('afterCalls', '1', 0), ('records', '2', 0), ('values', '5', 0)])
+    if [(n['label'], n['slot'], n['offset']) for n in layout['storage']] != expected_layout:
         raise HarnessError('fixture layout changed')
     functions = [n for n in declaration['nodes'] if n['nodeType'] == 'FunctionDefinition'
                  and n['visibility'] == 'external']
-    rows = cases()
+    rows = spec.get('cases', cases)()
     write_json(output/'input.json', dict(source=source, ast=ast, layout=layout, functions=functions,
         cases=rows, bases=declaration['linearizedBaseContracts'], mutation=mutation or ''))
     driver = output/'Driver.lean'
     if ordinary_import:
         from .observed_import import write_driver
-        write_driver(driver, DRIVER.read_text(), output, source, rows, optimized, True)
+        write_driver(driver, DRIVER.read_text(), output, source, rows, optimized, True, spec)
     else:
         driver.write_text(DRIVER.read_text()+'\nobserved_storage_cases '+
             json.dumps(str(output/'input.json'))+' output '+json.dumps(str(output/'model.json'))+'\n')
@@ -117,8 +121,10 @@ def check(output, optimized=False, mutation=None, ordinary_import=False):
     model = json.loads((output/'model.json').read_text())
     if ordinary_import:
         from .observed_import import validate_metadata
-        validate_metadata(model, optimized, True, {row['function'] for row in rows})
-    if (model['rejected'] != ['ambiguousRecord', 'recursive']
+        validate_metadata(model, optimized, True, {row['function'] for row in rows}, spec)
+    expected_rejections = ([sig.split('(')[0] for sig, _ in spec['negatives']] if spec
+                           else ['ambiguousRecord', 'recursive'])
+    if (model['rejected'] != expected_rejections
             or len(model['observations']) != len(rows)
             or {r['id'] for r in rows} != {r['id'] for r in model['observations']}):
         raise HarnessError('observed storage coverage differs')
@@ -163,7 +169,7 @@ def check(output, optimized=False, mutation=None, ordinary_import=False):
             elif observed['model'] != row['expected'] or observed['generated'] != row['expected']:
                 failures.append(row['id'])
             observations.append(observed)
-    if identity() != captured: raise HarnessError('implementation changed during storage checks')
+    if identity(fixture) != captured: raise HarnessError('implementation changed during storage checks')
     passed = not failures and (not mutation or bool(witnesses))
     write_json(output/'results.json', dict(passed=passed, failures=failures, mutation=mutation,
         completedMutationWitnesses=witnesses, optimized=optimized, observations=observations))

@@ -1,4 +1,4 @@
-"""Require completed wrong observations when command quotation drops helper returns."""
+"""Require completed wrong observations for quotation and modifier-source mutations."""
 import argparse
 import json
 import os
@@ -10,15 +10,19 @@ from .engine import ROOT, HarnessError, command, write_json
 from .mutations import snapshot, release
 
 
-def run(output):
+def run(output, modifiers=False):
     output = Path(output).resolve()
     output.mkdir(parents=True, exist_ok=False)
-    relative = Path('Compiler/SolidityImport/ObservedCommand.lean')
+    relative = Path('Compiler/SolidityImport/' +
+                    ('ObservedImport.lean' if modifiers else 'ObservedCommand.lean'))
     source = (ROOT / relative).read_text()
     before = '| .leaveCall => `(ControlFlow.Program.leaveCall)'
     after = ('| .leaveCall => `(ControlFlow.Program.atom '
              '(Compiler.CompilationModel.Stmt.letVar "__dropped_return" '
              '(Compiler.CompilationModel.Expr.literal 0)))')
+    if modifiers:
+        before = 'post.toList.map Program.atom'
+        after = '[]'
     if source.count(before) != 1:
         raise HarnessError('observed quotation mutation anchor changed')
     directory = output / 'snapshot'
@@ -27,8 +31,9 @@ def run(output):
                         os.environ.get('PYTHONPATH', ''), 'PYTHONDONTWRITEBYTECODE': '1'}
 
     def campaign(name):
-        result = subprocess.run([sys.executable, '-m',
-            'solidity_differential.check_observed_storage', '--ordinary-import',
+        campaign = (['solidity_differential.check_observed_modifiers'] if modifiers else
+                    ['solidity_differential.check_observed_storage', '--ordinary-import'])
+        result = subprocess.run([sys.executable, '-m', *campaign,
             '--output', str(directory/'.lake'/name)], cwd=directory, env=env,
             capture_output=True, text=True, timeout=600)
         (output/(name+'.log')).write_text(result.stdout + result.stderr)
@@ -43,6 +48,7 @@ def run(output):
             raise HarnessError('unmodified observed import control failed')
         (directory/relative).write_text(source.replace(before, after))
         command(['turbo-lean', '--json', 'build', 'Compiler.SolidityImport.ObservedCommand',
+                 'Compiler.SolidityImport.ObservedExecution',
                  '--project-dir', str(directory)], cwd=directory, timeout=600,
                 log=output/'build.log')
         code, report = campaign('mutated')
@@ -66,7 +72,8 @@ def run(output):
         if code != 1 or report['passed'] or not witnesses:
             raise HarnessError('quotation mutation needs completed matching wrong outcomes')
         write_json(output/'complete.json', dict(status='detected', baselinePassed=True,
-            mutation='quoted-helper-return-dropped', witnesses=witnesses))
+            mutation='modifier-post-dropped' if modifiers else 'quoted-helper-return-dropped',
+            witnesses=witnesses))
     finally:
         release(directory)
 
@@ -74,4 +81,5 @@ def run(output):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--modifiers', action='store_true')
     run(**vars(parser.parse_args()))

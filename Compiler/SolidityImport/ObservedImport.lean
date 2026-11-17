@@ -1,7 +1,7 @@
 import Compiler.SolidityImport.Import
 
 /-! Same-frame scalar-result helpers and storage for the observed loop backend.
-The bounded-model backend remains separate. Aggregate results, modifiers,
+The bounded-model backend remains separate. Aggregate results,
 external calls and helper calls nested in larger expressions remain separate work. -/
 
 namespace Compiler.CompilationModel.SolidityImport.ObservedImport
@@ -52,6 +52,17 @@ private def resultNode (call : Json) (name : String) : M Json := do
     ("referencedDeclaration", toJson id), ("name", toJson name),
     ("typeDescriptions", ← mField call "typeDescriptions"), ("src", ← mField call "src")]
 
+/-- A local return boundary leaves modifier post-code in the enclosing continuation.
+Source reverts/INVALID still abort the entire frame, bypassing all post-code. -/
+private def withModifiers (mods : Array Json) (results : List String)
+    (body : M ControlLowering.Body) : M ControlLowering.Body := do
+  if mods.isEmpty then return ← body
+  let (pre, post) ← ObservedSupport.modifiers mods
+  let code ← body
+  let name ← fresh
+  return pre.toList.map Program.atom ++ [.call name results code] ++
+    post.toList.map Program.atom
+
 mutual
 private partial def lowerBody (node : Json) (results : Option Results) : M ControlLowering.Body :=
   ControlLowering.lower ObservedSupport.expression ObservedSupport.statement node 0
@@ -64,8 +75,7 @@ private partial def inlineCall (call : Json) : M (ControlLowering.Body × Option
   let some fn := saved.funs.find? id | failAt call "unresolved observed helper"
   unless [some "internal", some "private", some "public"].contains (optStr fn "visibility") do
     failAt call "observed helpers require same-frame calls"
-  unless (← mArr (← mField fn "modifiers")).isEmpty do
-    failAt fn "observed helper modifiers are unsupported"
+  let mods ← mArr (← mField fn "modifiers")
   let body ← mField fn "body"
   unless !body.isNull do failAt fn "observed helper has no body"
   let params ← mArr (← mField (← mField fn "parameters") "parameters")
@@ -94,7 +104,7 @@ private partial def inlineCall (call : Json) : M (ControlLowering.Body × Option
       writableLocals := e.writableLocals.insert rid binding
       scalarTy := e.scalarTy.insert rid scalar }
   let name ← fresh
-  let code ← lowerBody body (some results)
+  let code ← withModifiers mods (results.toList.map Prod.fst) (lowerBody body (some results))
   restore saved
   return (initial.toList.map Program.atom ++
     [.call name (results.toList.map Prod.fst) code], results[0]?.map Prod.fst)
@@ -113,12 +123,20 @@ private partial def special (results : Option Results) (node : Json) (_depth : N
     let expression := (field? node "expression").getD Json.null
     if let some bindings := results then
       if expression.isNull then return some [.leaveCall]
-      let some (binding, ty) := bindings[0]? | failAt node "value return from void helper"
-      let (pre, replacement) ← value expression
-      let lowered ← ObservedSupport.expression replacement
-      let converted ← ObservedSupport.cast ty (← mType replacement) lowered replacement
-      return some (pre ++ converted.pre.toList.map Program.atom ++
-        [.atom (.assignVar binding converted.expr), .leaveCall])
+      let components ← if bindings.size == 1 then pure #[expression]
+        else ObservedSupport.returnComponents expression
+      unless components.size == bindings.size do failAt node "observed return arity mismatch"
+      let mut pre : ControlLowering.Body := []
+      let mut assignments : ControlLowering.Body := []
+      for ((binding, ty), component) in bindings.zip components do
+        let (before, replacement) ← value component
+        let lowered ← ObservedSupport.expression replacement
+        let converted ← ObservedSupport.cast ty (← mType replacement) lowered replacement
+        let captured ← fresh
+        pre := pre ++ before ++ converted.pre.toList.map Program.atom ++
+          [.atom (.letVar captured converted.expr)]
+        assignments := assignments ++ [.atom (.assignVar binding (.localVar captured))]
+      return some (pre ++ assignments ++ [.leaveCall])
     if !expression.isNull && (← helperCall expression) then
       let (pre, replacement) ← value expression
       let tail ← ObservedSupport.statement (replace node "expression" replacement)
@@ -159,7 +177,14 @@ structure Root where
 def lowerRoot (fn : Json) : M Root := do
   let frame ← prepareObservedControlRoot fn
   noteFn fn
-  let body ← lowerBody (← mField fn "body") none
+  let mods ← mArr (← mField fn "modifiers")
+  let env ← get
+  let mut results : Results := #[]
+  for (expr, ty) in env.rootReturns.zip env.rootReturnTypes do
+    let .localVar name := expr | failAt fn "observed result requires a named binding"
+    results := results.push (name, ty)
+  let body ← withModifiers mods (results.toList.map Prod.fst)
+    (lowerBody (← mField fn "body") (if mods.isEmpty then none else some results))
   LegacyStructs.validateClosure
   let fields ← observedStorageFields
   return {

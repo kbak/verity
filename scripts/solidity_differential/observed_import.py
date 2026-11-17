@@ -24,10 +24,11 @@ elab "expect_import_rejection " code:str " containing " expected:str : command =
 '''
 
 
-def write_driver(path, template, output, source, rows, optimized, storage):
+def write_driver(path, template, output, source, rows, optimized, storage, spec=None):
+    spec = spec or {}
     (output / 'Source.sol').write_text(source)
     signatures = list(dict.fromkeys(row['signature'] for row in rows))
-    contract = 'LegacyObservedStorage' if storage else 'LegacyObservedControl'
+    contract = spec.get('contract', 'LegacyObservedStorage' if storage else 'LegacyObservedControl')
     profile = ('{ solc := "0.7.6+commit.7338295f", evmVersion := "istanbul", '
                'viaIR := false, bytecodeHash := "none", optimizerRuns := ' + ('some 800' if optimized else 'none') + ' }')
 
@@ -42,6 +43,7 @@ def write_driver(path, template, output, source, rows, optimized, storage):
                  [('unguarded(uint256)', 'division/modulo needs a nonzero literal'),
                   ('staleGuard(uint256)', 'division/modulo needs a nonzero literal'),
                   ('unnamedResult()', 'observed control returns must be named')])
+    negatives = spec.get('negatives', negatives)
     rejected = [signature.split('(')[0] for signature, _ in negatives]
     guards = []
     for signature, message in negatives:
@@ -51,8 +53,9 @@ def write_driver(path, template, output, source, rows, optimized, storage):
                (command('rejected', [signatures[0]]).replace('viaIR := false',
                     'viaIR := false, sourceGas := true'), 'without source-gas instrumentation'),
                (command('rejected', [signatures[0]], observed=False),
-                ('a while loop condition must test v != 0 or v > 0' if storage else
-                 'Solidity 0.7.6 while loops require an unsigned local compared with zero'))]
+                spec.get('bounded_rejection',
+                    'a while loop condition must test v != 0 or v > 0' if storage else
+                    'Solidity 0.7.6 while loops require an unsigned local compared with zero'))]
     guarded = '\n'.join('expect_import_rejection ' + json.dumps(code) + ' containing ' +
                         json.dumps(message) for code, message in guards)
     root = 'root' if storage else 'root.control'
@@ -99,7 +102,7 @@ run_elab do
         .replace('EVALUATE_ROOT', root))
 
 
-def validate_metadata(model, optimized, storage, roots):
+def validate_metadata(model, optimized, storage, roots, spec=None):
     settings = json.loads(model['settings'])
     if (settings['evmVersion'] != 'istanbul' or 'viaIR' in settings
             or settings['optimizer'] != dict(enabled=optimized, runs=800 if optimized else 200)
@@ -111,5 +114,8 @@ def validate_metadata(model, optimized, storage, roots):
         included |= {'walkHelper', 'captureHelper', 'recordHelper', 'mappingHelper',
                      'voidHelper', 'forward'}
         excluded = {'ambiguousRecord', 'recursive', 'recursionHelper'}
+    if spec:
+        included = set(roots) | set(spec['helpers'])
+        excluded = set(spec['excluded'])
     if set(model['included']) != included or set(model['excluded']) != excluded:
         raise ValueError('ordinary importer closure reporting differs')

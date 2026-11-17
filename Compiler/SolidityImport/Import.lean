@@ -15230,13 +15230,11 @@ structure ObservedRootFrame where
   finish : Stmt
 
 /-- Bind a nonpayable legacy call frame without imposing a source iteration bound.
-Storage/helper lowering is supplied separately; modifiers and aggregate ABI remain excluded. -/
+The selected backend must separately lower modifiers; aggregate ABI remains excluded. -/
 def prepareObservedControlRoot (fn : Json) : M ObservedRootFrame := do
   unless (← get).legacyWrapping &&
       [some "pure", some "view", some "nonpayable"].contains (optStr fn "stateMutability") do
     failAt fn "observed control roots require nonpayable Solidity 0.7.6 functions"
-  unless (← mArr (← mField fn "modifiers")).isEmpty do
-    failAt fn "observed control roots do not yet support modifiers"
   let rootId ← mNat (← mField fn "id")
   modify fun e => { e with stack := [rootId], unchecked := true }
   validateLegacyDeclaration fn false #[] .observed
@@ -15290,6 +15288,8 @@ def prepareObservedControlRoot (fn : Json) : M ObservedRootFrame := do
 
 /-- Pure scalar observed entry. The ordinary importer keeps its bounded admission. -/
 def lowerObservedControlRoot (fn : Json) : M ObservedControlRoot := do
+  unless (← mArr (← mField fn "modifiers")).isEmpty do
+    failAt fn "observed scalar control requires the modifier-aware import backend"
   unless (← get).legacyWrapping && optStr fn "stateMutability" == some "pure" do
     failAt fn "observed control roots currently require pure Solidity 0.7.6 functions"
   let frame ← prepareObservedControlRoot fn
@@ -15712,6 +15712,20 @@ def observedStorageFields : M (List Field) := do
   return sortedFields.toList
 
 namespace ObservedSupport
+/-- Reuse the checked modifier lowering, requiring an unconditional placeholder.
+Modifier statements and their helper calls retain the bounded backend's admission checks. -/
+def modifiers (invocations : Array Json) : M (Array Stmt × Array Stmt) := do
+  TupleReturns.validateModifiers invocations
+  lowerModifiers invocations
+/-- Scalar tuple results retain the ordinary ambiguous-effect rejection boundary. -/
+def returnComponents (node : Json) : M (Array Json) := do
+  unless optStr node "nodeType" == some "TupleExpression" do
+    failAt node "observed modifier tuple returns require explicit scalar components"
+  let components ← mArr (← mField node "components")
+  for component in components do
+    if component.isNull || statefulCallIn component (← get) || assignmentIn component then
+      failAt component "observed tuple return requires unambiguous scalar components"
+  return components
 /-- Existing expression lowering, retaining all semantic admission checks. -/
 def expression := lowerExpr
 /-- Existing leaf lowering for the current call frame. -/
