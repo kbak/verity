@@ -671,6 +671,11 @@ scripts/check_solidity_differential.sh --reduce --reduce-seconds 120 --output .l
   campaigns with `J` parallel isolated snapshots (`--jobs auto` sizes `J` by
   cores and available memory; `--task NAME` selects single campaigns); CI's
   `import-mutations` job runs six shards from the prepared `build` workspace.
+  Each task attempt uses its own directory under `.lake/import-mutations` and
+  removes it after success, failure, or a Python interruption. Retries start in
+  a fresh directory, and parallel workers only remove their own snapshots.
+  Use `--keep-workspaces` to retain snapshots and print their paths for debugging.
+  These snapshots can be large; remove them when the investigation is complete.
 
 CI runs fixed seeds on every PR (10 minutes) and longer input, program and
 mutant campaigns nightly and on demand (60 minutes), archiving the evidence.
