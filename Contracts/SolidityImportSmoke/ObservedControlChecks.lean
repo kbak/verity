@@ -1,5 +1,5 @@
 import Compiler.SolidityImport.Import
-import Compiler.SolidityImport.ControlDenote
+import Compiler.SolidityImport.ObservedExecution
 import Compiler.SolidityImport.ControlCodegen
 import Compiler.SolidityImport.Differential
 
@@ -39,23 +39,14 @@ private def evaluate (root : ObservedControlRoot) (row : Json) : Except String J
     match s.toNat? with
     | some value => Except.ok value
     | none => Except.error "invalid word"
-  let some bindings := Denote.bindSupportedParams root.params words
-    | throw "invalid scalar bindings"
   let fuel ← row.getObjValAs? Nat "fuel"
-  let result := ControlDenote.observe Differential.oracle [] fuel root.body
-    { world := Verity.defaultState, bindings }
-  let (status, data) ← match result with
-    | none => pure ("exhausted", "0x")
-    | some (.error error) => throw error
-    | some (.ok (.normal _)) => throw "observed root fell through"
-    | some (.ok (.abrupt outcome)) => match outcome with
-      | .return value _ => pure ("ok", bytesHex (Denote.wordBytes value))
-      | .stop final => match final.observedReturnWords with
-        | some values => pure ("ok", bytesHex (values.flatMap Denote.wordBytes))
-        | none => if final.observedStop then pure ("ok", "0x") else throw "missing return words"
-      | .revertWithData bytes => pure ("revert", bytesHex bytes)
-      | .invalid => pure ("invalid", "0x")
-      | _ => throw "unsupported root outcome"
+  let result ← ObservedExecution.executeRoot { control := root, fields := [] }
+    Differential.oracle fuel Verity.defaultState words
+  let (status, data) := match result with
+    | none => ("exhausted", "0x")
+    | some final =>
+        (if final.invalid then "invalid" else if final.success then "ok" else "revert",
+          bytesHex final.data)
   return Json.mkObj [("id", ← row.getObjVal? "id"), ("status", toJson status),
     ("data", toJson data)]
 

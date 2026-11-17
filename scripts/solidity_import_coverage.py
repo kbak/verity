@@ -362,12 +362,15 @@ DIAGNOSTIC = re.compile(r'(?P<file>[^\s:]+\.sol):(?P<line>\d+):(?P<column>\d+): 
                         r'(?P<construct>[^:\n]+): \[solidity-import:unsupported\] (?P<reason>[^\n]+)')
 
 
-def classify(code, output, release=IMPORTER_DEFAULT_SOLC):
+def classify(code, output, release=IMPORTER_DEFAULT_SOLC, backend='bounded'):
+    if backend not in ('bounded', 'observed'):
+        raise MeasurementError('unknown import backend')
     match = DIAGNOSTIC.search(output)
     if code == 0:
-        if 'COVERAGE_IMPORT_OK' not in output:
+        marker = 'COVERAGE_OBSERVED_OK' if backend == 'observed' else 'COVERAGE_IMPORT_OK'
+        if marker not in output:
             return {'status': 'error', 'error': 'missing successful elaboration marker'}
-        return {'status': 'importable'}
+        return {'status': 'observed-importable' if backend == 'observed' else 'importable'}
     if match:
         result = match.groupdict()
         result['line'], result['column'] = int(result['line']), int(result['column'])
@@ -388,6 +391,9 @@ def classify(code, output, release=IMPORTER_DEFAULT_SOLC):
 
 
 def probe(function, target, source_root, out, workspace, timeout):
+    backend = target.get('backend', 'bounded')
+    if backend not in ('bounded', 'observed'):
+        raise MeasurementError('unknown import backend')
     # Escape Lean identifiers, including array type spellings, as one name.
     def ident(value):
         if '»' in value or '«' in value or '\n' in value:
@@ -410,24 +416,37 @@ def probe(function, target, source_root, out, workspace, timeout):
                         f'evmVersion := {json.dumps(profile["evmVersion"])}, '
                         f'viaIR := {via_ir}, optimizerRuns := {runs}, '
                         f'bytecodeHash := {json.dumps(profile.get("bytecodeHash", "none"))} }}')
-    driver.write_text('import Compiler.SolidityImport.Import\n'
+    if target.get('deployedImmutables') is not None:
+        using_clause = using_clause[:-2] + ', deployedImmutables := some ' + \
+            json.dumps(str(target['deployedImmutables'])) + ' }'
+    module = 'ObservedExecution' if backend == 'observed' else 'Import'
+    observed_check = (f'  let .ok _ := Compiler.CompilationModel.SolidityImport.ObservedExecution.findRoot '
+                      f'measured.observed {json.dumps(name)}\n'
+                      '    | throw (IO.userError "missing observed root")\n'
+                      '  unless measured.report.functions.all (!·.denoteCovered) do\n'
+                      '    throw (IO.userError "observed import claims bounded coverage")\n') \
+        if backend == 'observed' else ''
+    driver.write_text(f'import Compiler.SolidityImport.{module}\n'
+        + ('import Compiler.SolidityImport.ObservedCommand\n' if backend == 'observed' else '')
         + f'solidity_import measured from {json.dumps(str(source_root))} entry {json.dumps(target["entry"])}\n'
         + f'  using {using_clause}\n'
-        + f'  contract {ident(target["contract"])}\n'
+        + f'  {"observed " if backend == "observed" else ""}contract {ident(target["contract"])}\n'
         + f'  function {ident(name)}({", ".join(ident(t) for t in function["types"])})\n'
         + '#eval show IO Unit from do\n'
+        + observed_check
         + '  let some root := measured.report.includedFunctions.head? | throw (IO.userError "missing root report")\n'
         + f'  if root.contract != {json.dumps(function["declaring_contract"])} || root.name != {json.dumps(name)} then\n'
         + '    IO.println "COVERAGE_WRONG_ROOT"\n'
-        + '  else IO.println "COVERAGE_IMPORT_OK"\n')
+        + f'  else IO.println "{"COVERAGE_OBSERVED_OK" if backend == "observed" else "COVERAGE_IMPORT_OK"}"\n')
     # The generated file must live beneath the workspace lakefile: the importer
     # determines its package root from the importing Lean source location.
     if not driver.resolve().is_relative_to(workspace):
         raise MeasurementError('report output must be inside the Lean workspace')
-    result = run(['lake', 'env', 'lean', driver], cwd=workspace, timeout=timeout)
+    result = run(['turbo-lean', 'eval', driver, '--project-dir', workspace,
+                  '--timeout-ms', str(timeout * 1000)], cwd=workspace, timeout=timeout + 15)
     output = result.stdout + result.stderr
     (out / 'import.log').write_text(output)
-    classified = classify(result.returncode, output, release)
+    classified = classify(result.returncode, output, release, backend)
     root_closure = re.search(r'^closure: ([^\n]+)', output, re.MULTILINE)
     wrong_root = (result.returncode == 0 and 'COVERAGE_WRONG_ROOT' in output)
     wrong_failure = (classified['status'] == 'rejected' and root_closure is not None
@@ -513,6 +532,7 @@ def summarize(rows):
     blockers = Counter(row['blocker']['construct'] + ': ' + row['blocker']['reason']
                        for row in rows if row['status'] == 'rejected')
     return {'functions': len(rows), 'importable': counts['importable'],
+            'observed_importable': counts['observed-importable'],
             'rejected': counts['rejected'], 'errors': counts['error'],
             'percent_importable': 100 * counts['importable'] / len(rows) if rows else None,
             'complete': not counts['error'] and bool(rows),
@@ -556,14 +576,17 @@ def refresh_report(report):
 
 def markdown(report):
     lines = ['# Solidity import coverage', '', report['scope'], '',
+             'Backend: ' + report.get('backend', 'bounded') + '.', '',
+             'Observed imports are counted separately; they establish neither bounded-model coverage, termination nor source/codegen correspondence.', '',
              'Measurement complete: ' + str(report['complete']).lower() + '.', '',
              'Pending contracts: ' + (', '.join(c['project'] + ':' + c['contract'] for c in report.get('pending', [])) or 'none') + '.', '',
              'Unknown/tool failures stay in the denominator. Percentages are lower bounds when a measurement is incomplete.', '',
-             '| Contract | Imported / declared | % | Unknown |', '| --- | ---: | ---: | ---: |']
+             '| Contract | Bounded / declared | % bounded | Observed | Unknown |',
+             '| --- | ---: | ---: | ---: | ---: |']
     for contract in report['contracts']:
         s = contract['summary']
         pct = 'unavailable' if s['percent_importable'] is None else f'{s["percent_importable"]:.2f}'
-        lines.append(f'| {contract["project"]}:{contract["contract"]} | {s["importable"]}/{s["functions"]} | {pct} | {s["errors"]} |')
+        lines.append(f'| {contract["project"]}:{contract["contract"]} | {s["importable"]}/{s["functions"]} | {pct} | {s.get("observed_importable", 0)} | {s["errors"]} |')
     lines += ['', '## Compiler selection', '',
               'Importer-pinned solc releases: ' + ', '.join(report.get('importer_solc_releases', IMPORTER_SOLC.values())) + '.', '',
               '| Contract | Inventory solc | Importer solc (selected by) | Pinned importer releases accepting source |',
@@ -607,6 +630,8 @@ def main():
     parser.add_argument('--fetch', action='store_true')
     parser.add_argument('--project', action='append', help='measure only named projects (recorded in report)')
     parser.add_argument('--timeout', type=int, default=120)
+    parser.add_argument('--backend', choices=('bounded', 'observed'), default='bounded',
+                        help='observed admission is reported separately from bounded-model coverage')
     args = parser.parse_args()
     workspace, output, cache = args.workspace.resolve(), args.output.resolve(), args.cache.resolve()
     output.mkdir(parents=True, exist_ok=True)
@@ -622,7 +647,8 @@ def main():
             excluded_functions(project)
     except ValueError as exc:
         parser.error(str(exc))
-    report = {'schema': 1, 'scope': manifest['scope'], 'manifest_sha256': sha(args.manifest),
+    report = {'schema': 1, 'scope': manifest['scope'], 'backend': args.backend,
+              'manifest_sha256': sha(args.manifest),
               'selection': [p['id'] for p in projects], 'contracts': [],
               'verity_head': checked(['git', 'rev-parse', 'HEAD'], cwd=workspace).strip(),
               'measurement_script_sha256': sha(Path(__file__)),
@@ -632,7 +658,9 @@ def main():
     write_json(output / 'coverage.json', report)
     (output / 'coverage.md').write_text(markdown(report))
     try:
-        build = run(['lake', 'build', 'Compiler.SolidityImport.Import'], cwd=workspace, timeout=1800)
+        modules = (['ObservedCommand', 'ObservedExecution'] if args.backend == 'observed' else ['Import'])
+        build = run(['turbo-lean', 'build', *['Compiler.SolidityImport.' + m for m in modules],
+                     '--project-dir', workspace], cwd=workspace, timeout=1800)
         (output / 'build.log').write_text(build.stdout + build.stderr)
         if build.returncode:
             raise MeasurementError(f'importer build failed ({build.returncode}); see build.log')
@@ -644,6 +672,7 @@ def main():
     report['implementation_sha256'] = implementation_hashes(workspace)
     for project in projects:
         for target in project['contracts']:
+            target = {**target, 'backend': args.backend}
             item = {'project': project['id'], 'commit': project['commit'], **target, 'functions': []}
             dest = output / project['id'] / target['contract']
             dest.mkdir(parents=True, exist_ok=True)

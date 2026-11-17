@@ -1144,6 +1144,10 @@ def tasks(update_golden: bool) -> list:
         "check_observed_control", "observed-import-control", 900, "--ordinary-import"))]
     items += [("observed-import-quotation-return", 1, lambda: module_campaign_output(
         "check_observed_import_mutations", "observed-import-quotation", 1800))]
+    items += [("observed-execution-boundaries", 1, lambda: module_campaign_output(
+        "check_observed_execution", "observed-execution", 600))]
+    items += [("observed-execution-exhaustion", 1, lambda: module_campaign_output(
+        "check_observed_execution", "observed-execution-mutation", 1200, "--mutation"))]
     items += [(f"observed-storage-ir-{mutation}", 1,
                lambda mutation=mutation: module_campaign_output(
                    "check_observed_storage", "observed-storage-ir-mutation", 900,

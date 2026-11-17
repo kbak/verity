@@ -51,6 +51,41 @@ class CoverageTests(unittest.TestCase):
         self.assertIsNone(summarize([])['percent_importable'])
         self.assertFalse(summarize([])['complete'])
 
+    def test_observed_admission_never_counts_as_bounded_coverage(self):
+        observed = classify(0, 'COVERAGE_OBSERVED_OK', backend='observed')
+        self.assertEqual(observed['status'], 'observed-importable')
+        self.assertEqual(classify(0, 'COVERAGE_IMPORT_OK', backend='observed')['status'], 'error')
+        self.assertEqual(classify(0, 'COVERAGE_OBSERVED_OK')['status'], 'error')
+        counts = summarize([observed, {'status': 'error'}])
+        self.assertEqual(counts['importable'], 0)
+        self.assertEqual(counts['percent_importable'], 0)
+        self.assertEqual(counts['observed_importable'], 1)
+        self.assertFalse(counts['complete'])
+
+    def test_observed_probe_preserves_profile_and_deployment(self):
+        fn = {'kind': 'function', 'name': 'walk', 'types': ['uint256'],
+              'declaring_contract': 'Loops', 'file': 'Loops.sol', 'line': 2, 'column': 1}
+        target = {'entry': 'Loops.sol', 'contract': 'Loops', 'backend': 'observed',
+                  'deployedImmutables': 'checked/deployment.json',
+                  'profile': {'solc': V76, 'evmVersion': 'istanbul',
+                              'viaIR': False, 'optimizerRuns': 800}}
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            with patch('solidity_import_coverage.run', return_value=CompletedProcess(
+                    [], 0, 'COVERAGE_OBSERVED_OK', '')) as run:
+                result = probe(fn, target, root, root, root, 10)
+            self.assertEqual(result['status'], 'observed-importable')
+            text = (root / 'Probe.lean').read_text()
+            self.assertIn('observed contract «Loops»', text)
+            self.assertIn('ObservedExecution.findRoot measured.observed "walk"', text)
+            self.assertIn('solc := "' + V76 + '"', text)
+            self.assertIn('deployedImmutables := some "checked/deployment.json"', text)
+            self.assertIn('measured.report.functions.all (!·.denoteCovered)', text)
+            self.assertEqual(run.call_args.args[0][0:2], ['turbo-lean', 'eval'])
+            with patch('solidity_import_coverage.run', return_value=CompletedProcess(
+                    [], 0, 'COVERAGE_WRONG_ROOT', '')):
+                self.assertEqual(probe(fn, target, root, root, root, 10)['status'], 'rejected')
+
     def test_offsets_count_bytes_as_importer_does(self):
         self.assertEqual(position('// é\nf()', '6:3:0'), {'line': 2, 'column': 1})
 

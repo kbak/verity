@@ -56,7 +56,7 @@ def write_driver(path, template, output, source, rows, optimized, storage):
     guarded = '\n'.join('expect_import_rejection ' + json.dumps(code) + ' containing ' +
                         json.dumps(message) for code, message in guards)
     root = 'root' if storage else 'root.control'
-    path.write_text('import Compiler.SolidityImport.ObservedCommand\n' + template +
+    path.write_text('import Compiler.SolidityImport.ObservedCommand\nimport Compiler.SolidityImport.ObservedExecution\n' + template +
         '\n' + REJECTION_DRIVER + '\n' + guarded + '\n' + command('tested', signatures) +
         '\n' + command('repeated', signatures) + r'''
 run_elab do
@@ -74,8 +74,10 @@ run_elab do
   let mut observed : Array Json := #[]
   let mut compiled : Array Json := #[]
   for fn in tested.observed.functions do
-    let root := { fn.root with control := { fn.root.control with
-      body := perturb mutation fn.root.control.body } }
+    let .ok selected := ObservedExecution.findRoot tested.observed fn.name
+      | throw (IO.userError "downstream root selection failed")
+    let root := { selected with control := { selected.control with
+      body := perturb mutation selected.control.body } }
     let .ok code := ControlCodegen.scalarFrame root.control.params root.control.body root.fields
       | throw (IO.userError "imported code generation failed")
     compiled := compiled.push (Json.mkObj [("name", toJson fn.name), ("body", toJson code)])

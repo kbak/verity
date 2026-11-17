@@ -2,7 +2,7 @@ import Compiler.SolidityImport.ObservedImport
 import Compiler.SolidityImport.ControlDenote
 import Compiler.SolidityImport.ControlCodegen
 import Compiler.SolidityImport.Differential
-import Compiler.SolidityImport.Transactions
+import Compiler.SolidityImport.ObservedExecution
 
 /-! Focused same-frame storage/helper observations using actual pinned compiler ASTs. -/
 open Lean Elab Command Compiler.CompilationModel
@@ -45,14 +45,8 @@ private def evaluate (root : ObservedImport.Root) (row : Json) : Except String J
   let world := (slots.zip values).foldl
     (fun state (slot, value) => state.writePhysicalSlot slot (Verity.Core.Uint256.ofNat value))
     Verity.defaultState
-  let initial := Transactions.beginTransaction world
-  let some bindings := Denote.bindSupportedParams root.control.params args
-    | throw "invalid scalar arguments"
-  let result := ControlDenote.observe Differential.oracle root.fields 4000 root.control.body
-    { world := initial, bindings }
-  let some result := result | throw "storage case exhausted without a completed observation"
-  let .ok (.abrupt outcome) := result | throw "storage case did not return a source outcome"
-  let final ← Transactions.finishFrame initial outcome
+  let some final ← ObservedExecution.executeRoot root Differential.oracle 4000 world args
+    | throw "storage case exhausted without a completed observation"
   let status := if final.invalid then "invalid" else if final.success then "ok" else "revert"
   return Json.mkObj [("id", ← row.getObjVal? "id"), ("status", toJson status),
     ("data", toJson (hexBytes final.data)),
