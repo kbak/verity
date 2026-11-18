@@ -19,6 +19,7 @@ private structure Bounds where
   guards : Std.HashMap String (List (String × Nat × Nat)) := {}
   accesses : Std.HashMap String MemoryAccess := {}
   events : Std.HashMap String EventDef := {}
+  errors : Std.HashMap String ErrorDef := {}
   seen : Std.HashSet String := {}
   deriving Inhabited
 
@@ -171,8 +172,20 @@ private def checkEvent (s : Bounds) (name : String) (args : List Expr) : M Unit 
       s.free.hi + max signatureSize dataSize ≤ 2^32 do
     failRoot s "bounded memory event encoding requires a bounded free pointer"
 
-/-- A successful storage/log suffix cannot re-enter source memory or arbitrary
-control flow. Raw word writes preserve memory; scalar logs may clobber the heap. -/
+/-- A terminal scalar error hashes its word-rounded signature at the free pointer, then
+overwrites low memory with the selector and arguments. Neither region is live afterwards. -/
+private def checkTerminalError (s : Bounds) (name : String) (args : List Expr) : M Unit := do
+  let some err := s.errors[name]? | unsupportedEffects s
+  unless err.params.length == args.length && err.params.all (Denote.errorScalarType · |>.isSome) do
+    unsupportedEffects s
+  let signatureSize := ((bytesFromString (errorSignature err)).length + 31) / 32 * 32
+  let lowSize := max 32 (4 + args.length * 32)
+  unless 128 ≤ s.free.lo && s.free.lo ≤ s.free.hi && s.free.hi + signatureSize ≤ 2^32 &&
+      lowSize ≤ 2^32 do
+    failRoot s "bounded memory custom error encoding exceeds the memory bounds"
+
+/-- A storage/log suffix consumes only memory-independent scalars. Its final statement may
+encode a bounded custom error and revert all preceding effects. -/
 private def effects (s : Bounds) : List Stmt → M Bounds
   | [] => pure s
   | stmt :: rest => do
@@ -183,6 +196,10 @@ private def effects (s : Bounds) : List Stmt → M Bounds
             unless field == rawStorageFieldName do unsupportedEffects s
             pure s
         | .emit name args => do checkEvent s name args; pure s
+        | .requireError (.literal 0) name args | .revertError name args => do
+            unless rest.isEmpty do unsupportedEffects s
+            checkTerminalError s name args
+            pure s
         | .return _ | .returnValues _ | .stop => pure s
         | _ => unsupportedEffects s
       effects next rest
@@ -208,8 +225,7 @@ private def sequence (generated : Std.HashSet String) (s : Bounds) : List Stmt �
 /-- Validate all recorded addresses, including helper-inlined operations, against
 successful guards and the actual preceding free-pointer writes. Generated mapping
 scratch is admitted only as a complete ordered operation. Raw storage writes and
-scalar logs start a memory-independent successful suffix. Control-flow joins,
-loops, later memory observations and post-effect reverts retain a located rejection. -/
+scalar logs start a memory-independent suffix with an optional terminal scalar custom error. -/
 def validate (body : Array Stmt) : M Unit := do
   let env ← get
   let accesses := env.memoryAccesses
@@ -219,7 +235,8 @@ def validate (body : Array Stmt) : M Unit := do
     failAt site.node "bounded memory cannot consume unaudited narrow assembly references"
   let initial : Bounds := {
     accesses := Std.HashMap.ofList (accesses.toList.map fun access => (access.binding, access))
-    events := Std.HashMap.ofList (env.usedEvents.map fun (_, event) => (event.name, event)) }
+    events := Std.HashMap.ofList (env.usedEvents.map fun (_, event) => (event.name, event))
+    errors := Std.HashMap.ofList (env.usedErrors.map fun err => (err.name, err)) }
   let s ← sequence env.mappingScratchBindings initial body.toList
   for access in accesses do
     unless s.seen.contains access.binding do

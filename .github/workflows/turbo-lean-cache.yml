@@ -204,10 +204,10 @@ jobs:
         run: |
           PYTHONPATH=scripts python3 -m solidity_differential.check_packed_storage_updates --prepared --output .lake/bounded-memory/packed-storage-updates
 
-      - name: Prepare full-cleanup rollback regressions
+      - name: Verify full-cleanup packed storage rollback
         timeout-minutes: 15
         run: |
-          PYTHONPATH=scripts python3 -m solidity_differential.check_packed_storage_rollback --prepared --output .lake/bounded-memory/packed-storage-rollback
+          PYTHONPATH=scripts python3 -m solidity_differential.check_packed_storage_rollback --prepared --require-composition --output .lake/bounded-memory/packed-storage-rollback
 
       - name: Archive bounded memory execution and rejection evidence
         if: always()

@@ -68,7 +68,7 @@ class PackedStorageRollbackTests(unittest.TestCase):
                 rollback.require_source_result(bad, self.spec)
 
     def test_oracle_independently_rejects_state_and_log_leaks_with_correct_revert_bytes(self):
-        # Comparator sensitivity only: execution mutants live in the source-EVM campaign.
+        # The campaign separately executes rollback mutants on all three routes.
         failed = next(i for i, row in enumerate(self.spec['expected']) if row['status'] == 'revert')
         for field in ('storage', 'events', 'data'):
             rows = [{**copy.deepcopy(row), 'touched': []} for row in self.spec['expected']]
@@ -101,6 +101,20 @@ class PackedStorageRollbackTests(unittest.TestCase):
         self.assertNotIn('mstore(base, 0) mstore(add(base, 32), 0)', original)
         with self.assertRaises(HarnessError):
             rollback.source_variants(original.replace('revert Rejected(next);', 'revert();'))
+
+    def test_commit_mutant_requires_leaked_effects_only_on_the_mutated_routes(self):
+        rows = [{'id': ident, 'fields': ['status', 'data', 'events', 'storage']}
+                for ident in self.reverted]
+        rows.append({'id': self.spec['expected'][11]['id'], 'fields': ['data', 'storage']})
+        routes = ('model', 'compiled')
+        good = {'routes': list(rollback.ROUTES), 'divergences': ['different status'],
+                'mismatches': {'source': [], **{r: copy.deepcopy(rows) for r in routes}}}
+        rollback.require_rollback_mutation(good, self.spec, 'drop-revert', routes)
+        for route in rollback.ROUTES:
+            bad = copy.deepcopy(good)
+            bad['mismatches'][route] = rows if route == 'source' else []
+            with self.assertRaises(HarnessError):
+                rollback.require_rollback_mutation(bad, self.spec, 'drop-revert', routes)
 
     def test_compiler_boundary_requires_the_exact_structured_result(self):
         rollback.require_compilation({'status': 'compiled'})

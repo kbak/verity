@@ -377,6 +377,6 @@ bounded source memory composed with generated mapping scratch and scalar reads.
 It requires actual combined source/Denote/generated execution against the unchanged
 expectation archives. The [successful-update slice](PACKED_STORAGE_UPDATES.md)
 adds raw storage-word writes and scalar logs under a memory-independent suffix
-restriction, using the unchanged prefix before the first revert. Tail-only
-cleanup, write-then-revert composition and the pinned downstream wrapper remain
-separate obligations, so the #32 milestone gate remains incomplete.
+restriction, using the unchanged prefix before the first revert. The [rollback campaign](PACKED_STORAGE_ROLLBACK.md)
+extends that sequence through bounded terminal custom errors. Tail-only cleanup
+and the pinned downstream wrapper remain open for #32.

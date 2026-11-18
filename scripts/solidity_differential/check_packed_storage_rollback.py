@@ -1,4 +1,4 @@
-"""Prepare full-cleanup rollback regressions without changing importer admission."""
+"""Verify full-cleanup packed storage rollback against independent Cancun expectations."""
 import argparse
 import json
 from pathlib import Path
@@ -55,7 +55,7 @@ def source_variants(source):
     result['void-return'] = replace_once(full, returns + ' returns (uint128, uint256, uint256)',
                                         returns)
     result['wrong-error-argument'] = replace_once(full, 'revert Rejected(next);',
-                                                 'revert Rejected(next ^ 1);')
+        'uint128 changedError = next ^ 1; revert Rejected(changedError);')
     result['wrong-error-selector'] = full.replace('Rejected(', 'DifferentRejected(')
     result['empty-revert'] = replace_once(full, 'revert Rejected(next);', 'revert();')
     return result
@@ -66,7 +66,11 @@ def require_source_result(result, spec, mutant=None):
     if (result.get('routes') != ['source']
             or set(result.get('mismatches', {})) != {'source'}):
         raise HarnessError('rollback preparation requires the actual source route')
-    rows = result['mismatches']['source']
+    require_rollback_rows(result['mismatches']['source'], spec, mutant)
+
+
+def require_rollback_rows(rows, spec, mutant):
+    """A successful execution mutant must change the predicted transaction observations."""
     ids = {tx['id'] for tx in spec['transactions']}
     if (len({row['id'] for row in rows}) != len(rows)
             or any(row['id'] not in ids or not row['fields'] for row in rows)):
@@ -90,6 +94,16 @@ def require_source_result(result, spec, mutant=None):
             raise HarnessError('error-payload mutant must change only every exact revert payload')
     else:
         raise HarnessError('unknown rollback mutation')
+
+
+def require_rollback_mutation(result, spec, mutant, mutated_routes):
+    mismatches = result.get('mismatches', {})
+    if (result.get('routes') != list(ROUTES) or set(mismatches) != set(ROUTES)
+            or not isinstance(result.get('divergences'), list)
+            or bool(result['divergences']) != (set(mutated_routes) != set(ROUTES))):
+        raise HarnessError('rollback mutation requires all three execution routes')
+    for route in ROUTES:
+        require_rollback_rows(mismatches[route], spec, mutant if route in mutated_routes else None)
 
 
 def require_compilation(result, terminal=True):
@@ -180,18 +194,33 @@ def run(output, *, prepared=False, require_composition=False):
         directory.mkdir()
         built = compile_variant(directory, source, solc)
         spec = specs[int(name == 'shifted-layout')]
-        result = replay_expected(spec,
-            {'source': source_adapter(directory / 'execution', built, spec)},
-            required_routes=('source',))
-        write_json(directory / 'execution.json', result)
-        require_source_result(result, spec, name if name in MUTANTS else None)
-        results[name] = {'sourceExpectationsPassed': name in POSITIVE,
-                         'sourceMutationDetected': name in MUTANTS,
-                         'mismatches': result['mismatches']}
-        if name in POSITIVE:
+        path = directory / FIXTURE.name
+        if name == 'empty-revert':
+            result = replay_expected(spec, {'source': source_adapter(directory / 'execution', built, spec)},
+                                     required_routes=('source',))
+            write_json(directory / 'execution.json', result)
+            require_source_result(result, spec, name)
             admission = observe(directory, FIXTURE.name, CONTRACT, SIGNATURES['writeThenRevert'])
             require_rejection(admission, EFFECT_REJECTION)
-            results[name]['admission'] = admission
+            results[name] = {'mismatches': result['mismatches'], 'admission': admission}
+            continue
+        signatures = list(SIGNATURES.values())
+        driver, snapshot = prepare_model(directory / 'model', path, CONTRACT, signatures, compiler)
+        compiled = compile_generated(directory / 'model', snapshot, solc)
+        result = run_routes(directory / 'routes', spec, path, built, driver, compiled)
+        if name in MUTANTS:
+            require_rollback_mutation(result, spec, name, ROUTES)
+        else:
+            require_outcome(result)
+        results[name] = {'threeRouteAgreement': name in POSITIVE, 'mismatches': result['mismatches']}
+        if name == 'original':
+            mutated = directory / 'commit-instead-of-revert'
+            bad_driver, bad_snapshot = prepare_model(mutated, path, CONTRACT, signatures, compiler,
+                                                     mutation='commit-instead-of-revert')
+            bad_compiled = compile_generated(mutated, bad_snapshot, solc)
+            bad = run_routes(mutated / 'routes', spec, path, built, bad_driver, bad_compiled)
+            require_rollback_mutation(bad, spec, 'drop-revert', ('model', 'compiled'))
+            results['commit-instead-of-revert'] = {'mismatches': bad['mismatches']}
     # Supplied-key controls do not substitute for packed-hash composition evidence.
     controls = {}
     for declared in (False, True):
@@ -231,18 +260,15 @@ def run(output, *, prepared=False, require_composition=False):
     identity.verify()
     write_json(output / 'implementation.json', identity.manifest)
     write_json(output / 'results.json', {'rollbackPreparationPassed': True,
-        'packedRollbackThreeRouteAgreement': False, 'variants': results, 'controls': controls,
-        'missingPackedRoutes': ['model', 'compiled']})
+        'packedRollbackThreeRouteAgreement': True, 'variants': results, 'controls': controls,
+        'missingPackedRoutes': []})
     write_json(output / 'manifest.json', {'verityHead': identity.manifest['revision'],
         'compiler': compiler, 'fork': 'cancun', 'stateArchivesSha256': STATE_ARCHIVES,
         'packedArchiveSha256': PACKED_ARCHIVE_SHA256,
-        'scope': 'complete frozen sequence; packed source EVM and supplied-key three-route rollback',
-        'limits': ['no packed rollback admission change',
-                   'packed Denote/generated-EVM composition remains blocked',
-                   'no tail-only cleanup, downstream wrapper or gas/resource equivalence']})
-    print('Full-cleanup source rollback and exact errors pass; mutation sensitivity verified; '
-          'packed Denote/generated-EVM rollback remains blocked')
-    return 1 if require_composition else 0
+        'scope': 'complete frozen full-cleanup packed rollback sequence on all three routes',
+        'limits': ['no tail-only cleanup, downstream wrapper or gas/resource equivalence']})
+    print('Full-cleanup packed rollback and exact custom errors agree on all three routes.')
+    return 0
 
 
 def main():

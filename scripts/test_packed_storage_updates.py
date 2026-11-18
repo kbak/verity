@@ -86,7 +86,7 @@ class PackedStorageUpdatesTests(unittest.TestCase):
         self.assertNotEqual(sources['original'], original)
         cases = list(rejected_sources(original))
         self.assertEqual({name for name, *_ in cases}, {
-            'write-then-revert', 'read-after-log', 'hash-after-log', 'guard-after-write',
+            'error-signature-overflow', 'read-after-log', 'hash-after-log', 'guard-after-write',
             'lookup-after-log', 'log-before-hash', 'event-footprint-overflow'})
         self.assertEqual(len({text for _, text, _, _ in cases}), len(cases))
         self.assertEqual(FIXTURE.read_text(), original)

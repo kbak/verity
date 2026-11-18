@@ -70,22 +70,23 @@ See `PACKED_STORAGE_READ_DESIGN.md` for the precise boundary and remaining work.
 The successful-update extension allows raw storage-word writes and scalar events
 only in a structurally memory-independent suffix. It bounds event signature/data
 stores at the current free pointer and rejects later memory reads/hashes, calls,
-guards, branches, loops and explicit reverts. Generated event memory need not equal
+nonterminal guards, branches and loops. Generated event memory need not equal
 source event memory; that difference remains unobservable in this admitted suffix.
 Existing write/masking and event lowering are unchanged. Frozen successful-prefix
 state, return and log expectations are checked independently on source EVM, actual
 Denote and generated EVM, with addressing and event-deletion mutation controls.
 Recognition remains trusted frontend code; no theorem, axiom, new cryptographic
-premise, gas guarantee or source/compiler correspondence is added. Write-then-revert
-composition, tail-only cleanup and the pinned downstream wrapper remain separate
+premise, gas guarantee or source/compiler correspondence is added. Tail-only cleanup
+and the pinned downstream wrapper remain separate
 #32 obligations; see `PACKED_STORAGE_UPDATES.md`.
 
-The full-cleanup rollback gate retains the complete frozen source sequence and
-its revert-removal/error-payload mutations. The supplied-key declared-return
-control now executes on source EVM, actual Denote and generated Cancun EVM;
-a wrong error argument must change only the reverted payloads on every route.
-Packed rollback still rejects at the post-effect memory audit. No packed
-Denote/generated-EVM agreement is claimed; see `PACKED_STORAGE_ROLLBACK.md`.
+The full-cleanup rollback extension admits a terminal scalar custom error with
+memory-independent arguments after raw storage writes and scalar logs. The trusted
+importer bounds both the word-rounded signature and the low-memory selector and
+argument stores. The campaign requires original bytecode, Denote and generated
+Cancun bytecode to match the frozen state, log and error-byte expectations,
+including subsequent reads. The existing hash and transaction-settlement premises
+apply. This adds no axiom or correspondence theorem. See `PACKED_STORAGE_ROLLBACK.md`.
 
 The literal-zero custom-error guard refinement preserves the imported statements,
 compiler lowering and final return-path check. Only `requireError (literal 0)`

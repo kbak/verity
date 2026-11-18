@@ -1,11 +1,8 @@
 # Full-cleanup successful storage updates and logs
 
 This extends #32's full-cleanup read composition to successful raw storage-word
-updates and scalar events. It does not complete #32: write-then-revert composition,
-tail-only cleanup and the pinned downstream wrapper remain separate work.
-The next [rollback regression preparation and design](PACKED_STORAGE_ROLLBACK.md)
-preserves the complete frozen sequence and isolates the remaining admission and
-compiler-validation blockers without implementing either fix.
+updates and scalar events. The [rollback campaign](PACKED_STORAGE_ROLLBACK.md)
+extends the successful sequence through terminal custom errors and later reads.
 
 ## Admission boundary
 
@@ -14,7 +11,7 @@ complete generated mapping-scratch sequences. The first raw storage-word write
 or scalar event switches structurally to a restricted suffix. That suffix accepts
 word bindings, raw storage reads/writes, scalar events and scalar return/stop.
 Its expressions cannot read or hash memory or use synthetic storage layouts.
-Calls, guards, branches, loops, allocations and explicit reverts are rejected.
+Calls, guards, branches, loops, allocations and nonterminal error guards are rejected.
 There is no path back to the source-memory phase, including through another
 lookup helper. No global effect flag or function-name allowlist is used.
 
@@ -30,11 +27,6 @@ allocator and zero words. This matters because generated scalar events write
 their signature and payload into memory. Source and generated event encodings
 need not leave identical scratch bytes. Later memory loads, hashes and lookups
 therefore remain rejected. Earlier captured clean scalars remain available.
-
-An explicit revert after a write or log remains outside this suffix, even though
-the existing supplied-key control exercises rollback independently. Guard failures
-before these effects retain their existing treatment. The restriction does not
-claim gas or resource adequacy, or successful execution for arbitrary inputs.
 
 ## Independent execution gate
 
@@ -64,8 +56,7 @@ executes it as a mutant: every route must detect both return-data and state
 corruption against the original read expectations. A new memory-after-write
 rejection replaces its obsolete admission boundary. The update campaign also
 requires located rejections for memory reads/hashes and another lookup after
-logging, guards after writes, logging before hashing, overflowing event footprints,
-and explicit write-then-revert roots. Existing tail-only controls remain mandatory.
+logging, guards after writes, logging before hashing, and overflowing event or custom-error signature footprints. Existing tail-only controls remain mandatory.
 
 ## Trust and remaining work
 
