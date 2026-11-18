@@ -20,8 +20,8 @@ when it assigns that hash to its result and ends with a store. The root matches
 the fresh hash and final store bindings, checks each zeroing store's heap bounds,
 and follows copies of the result through the caller. Reassigning a binding drops
 its previous value. The caller may read allocator word `0x40` and restore it to
-the entry value `0x80`. The only accepted exit is a one-word return of the saved
-hash with that pointer restored. Writes carrying dirty scalar bits must stay in
+the entry value `0x80`. With that pointer restored, the caller can return the saved word directly
+or use it as the key for a read-only record lookup. Writes carrying dirty scalar bits must stay in
 the heap. A memory-safe annotation grants no additional access.
 
 ## Executable coverage
@@ -51,14 +51,15 @@ The 10,206 calls are finite source-EVM evidence under the pinned Solidity 0.8.26
 Cancun, via-IR and optimizer settings. There are 3,024 required mismatches. Missing
 observations, reverts, wrong return widths, unexpected mismatches and missing
 sensitivity all fail the campaign. The saved-hash probe must also match every independent return in imported Denote
-and generated Cancun bytecode. The seven other continuations and all five
-storage-reference roots must produce located rejections. Separate import controls
+and generated Cancun bytecode. The seven other continuations and the four write or rollback
+roots must produce located rejections. The original storage-reference read must
+match the archived observations on all three routes. Separate import controls
 exercise a reassigned result, a missing restore and a different final pointer.
 
 The harness archives source variants, inputs, real observations, runtimes,
 compiler/node identities, implementation identities and the frozen expectation
-checksums. The storage campaigns replay the state archives. The remaining
-tail-only storage roots need their own three-route execution.
+checksums. The storage campaigns replay the state archives. The tail-only read also checks every accessed physical slot against the
+independent mapping address, including reads of empty records.
 
 ## Proposed caller contract
 
@@ -216,10 +217,18 @@ three-route campaign exercises that connection for the pinned compiler profile.
 
 ## Subsequent implementation acceptance
 
-The next #32 slice is the consumer that passes the saved word as a mapping key.
-Check the provenance of the mapping scratch writes, the slot hash and the
-storage read against the existing full-cleanup lowering. Callers that observe
-residual memory still require byte-level read and alias analysis.
+The importer follows copies of the saved hash into the key word of a generated
+mapping preimage. It checks the fresh slot binding, the exact layout base and
+the restored allocator before accepting the hash of scratch bytes 0 through 63.
+The suffix may read the resulting raw storage slot and fields at literal word
+offsets, apply a literal field mask and return those words. Its static return
+buffer must fit below byte 128. A substituted key, a memory observation, a write
+or a revert in this suffix still rejects.
+
+The original read runs on source Solidity, imported Denote and generated Cancun
+bytecode using the frozen initial reads. Each route must touch the exact three
+record slots for each key, return the expected bytes and preserve storage and
+logs. A shifted-layout control and a wrong-base control exercise slot selection.
 
 The original tail-only storage helper must then pass its unchanged
 29-transaction state sequence on all three routes, including adjacent slots,
@@ -237,4 +246,4 @@ PYTHONPATH=scripts python3 -m solidity_differential.check_tail_cleanup_liveness 
 requires the saved-hash caller to pass all three routes, the source perturbations
 to expose the expected bytes, and unsupported callers to produce located
 rejections. `--require-composition` also requires the broader tail-only work,
-including the storage roots, and still reports it as pending.
+including writes and rollback, and still reports it as pending.

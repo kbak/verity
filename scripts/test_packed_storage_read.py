@@ -6,7 +6,8 @@ from keccak256 import selector
 from solidity_differential.check_packed_memory_hash import word
 from solidity_differential.check_packed_storage_read import (
     COMPOSITION_REJECTION, DIGEST, FIXTURE, KEY_READ, READ, key_read_inputs,
-    read_prefix, rejected_sources, require_combined, require_rejection, require_source, source_variants,
+    read_prefix, rejected_sources, require_combined, require_record_slots, require_rejection,
+    require_source, source_variants,
 )
 from solidity_differential.pinned_sequence import SENDERS, create_address
 from solidity_differential.engine import HarnessError
@@ -131,11 +132,38 @@ class PackedStorageReadTests(unittest.TestCase):
         variants = source_variants(FIXTURE.read_text())
         self.assertIn('row.accumulator = 1;', variants['storage-write'])
 
+    def test_empty_record_must_touch_its_own_slots_on_every_route(self):
+        spec = read_prefix(self.spec)
+        rows = [{'id': tx['id'], 'touched': [[tx['target'], '0x' + word(int(slot, 16) + i).hex()]
+                                             for i in range(3)]}
+                for tx, slot in zip(spec['transactions'], spec['recordSlots'], strict=True)]
+        result = {stage: {route: copy.deepcopy(rows) for route in ('source', 'model', 'compiled')}
+                  for stage in ('discovery', 'observations')}
+        require_record_slots(result, spec)
+        for stage, routes in result.items():
+            for route in routes:
+                changed = copy.deepcopy(result)
+                changed[stage][route][-1]['touched'] = rows[-2]['touched']
+                with self.subTest(stage=stage, route=route), self.assertRaises(HarnessError):
+                    require_record_slots(changed, spec)
+
+    def test_partial_cleanup_selects_the_original_key_and_independent_layouts(self):
+        source = FIXTURE.read_text()
+        variants = source_variants(source)
+        tail = variants['partial-cleanup']
+        self.assertIn('keccak256(add(base, 12), 58)', tail)
+        self.assertIn('mstore(add(base, 64), 0)', tail)
+        self.assertNotIn('mstore(base, 0)', tail)
+        self.assertEqual(variants['partial-cleanup-shifted'], tail.replace(
+            'uint256 private outerBefore;', 'uint256 private extra; uint256 private outerBefore;'))
+        self.assertEqual(variants['partial-cleanup-wrong-base'], tail.replace(
+            'uint256 private outerBefore;', 'uint256[2] private outerBefore;'))
+
     def test_rejection_matrix_is_distinct_and_source_mutations_leave_fixture_unchanged(self):
         source = FIXTURE.read_text()
         cases = list(rejected_sources(source))
-        self.assertEqual(len(cases), 10)
-        self.assertEqual(len({text for _, text, _, _ in cases}), 10)
+        self.assertEqual(len(cases), 11)
+        self.assertEqual(len({text for _, text, _, _ in cases}), 11)
         for name, text, signature, _ in cases:
             self.assertNotEqual(text, source)
             self.assertEqual(signature, DIGEST if name in {

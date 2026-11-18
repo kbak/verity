@@ -7,7 +7,9 @@ from setup_solc_import import file_sha256
 from .check_packed_memory_hash import SETTINGS, SHIFTS
 from .check_packed_memory_hash_import import observe
 from .check_packed_memory_hash_routes import case, run_root
-from .check_packed_storage_read import require_rejection
+from .check_packed_storage_read import (
+    read_prefix, require_combined, require_record_slots, require_rejection, run_record_reads,
+)
 from .check_storage_reference import compile_variant as compile_storage
 from .check_storage_reference_routes import PACKED_FIXTURE, STATE_ARCHIVES
 from .engine import HarnessError, ROOT, command, write_json
@@ -132,7 +134,7 @@ def check_saved_return_boundaries(output, source):
 
 
 def preparation_exit(require_composition):
-    # More general observing callers and the original storage roots still lack composition.
+    # More general observing callers and the original write/rollback roots still lack composition.
     return 1 if require_composition else 0
 
 
@@ -178,12 +180,23 @@ def run(output, *, prepared=False, require_composition=False):
         write_json(directory / 'result.json', results[name])
     directory = output / 'original-storage'
     directory.mkdir()
-    compile_storage(directory, PACKED_FIXTURE.read_text(), solc)
+    built = compile_storage(directory, PACKED_FIXTURE.read_text(), solc)
     original = {}
     for name, signature in SIGNATURES.items():
         observation = observe(directory, PACKED_FIXTURE.name, 'PackedStorageReference', signature)
-        require_rejection(observation, REJECTION)
-        original[name] = observation
+        if name == 'read':
+            spec = read_prefix(json.loads((output / 'expectations-layout-0.json').read_text()))
+            if observation['status'] != 'admitted':
+                raise HarnessError('original saved-key read must import')
+            result = run_record_reads(directory, spec, directory / PACKED_FIXTURE.name,
+                                      'PackedStorageReference', built, solc, compiler)
+            require_combined(result)
+            require_record_slots(result, spec)
+            original[name] = {'status': 'admitted', 'sourceDigest': observation['sourceDigest'],
+                              'routes': result['routes'], 'mismatches': result['mismatches']}
+        else:
+            require_rejection(observation, REJECTION)
+            original[name] = observation
     boundaries = check_saved_return_boundaries(output, FIXTURE.read_text())
     identity.verify()
     write_json(output / 'implementation.json', identity.manifest)
@@ -192,17 +205,18 @@ def run(output, *, prepared=False, require_composition=False):
         'worktreeStatus': command(['git', 'status', '--porcelain'], cwd=ROOT),
         'compiler': compiler, 'settings': SETTINGS, 'fork': 'cancun',
         'stateArchivesSha256': STATE_ARCHIVES, 'packedArchiveSha256': PACKED_ARCHIVE_SHA256,
-        'scope': 'saved hash on three routes; source perturbations for observing callers',
+        'scope': 'saved hash and original storage read on three routes; source caller perturbations',
         'savedHashRoutes': ['source', 'denote', 'generatedEvm'],
-        'limits': ['state archives retained unchanged, not executed by this stateless campaign',
+        'limits': ['only the initial read transactions of the frozen state archive are replayed',
                    'no universal liveness, storage sequence, gas or compiler correspondence claim'],
     })
     write_json(output / 'results.json', {'preparationPassed': True,
-        'savedHashThreeRouteAgreement': True, 'tailThreeRouteAgreement': False,
+        'savedHashThreeRouteAgreement': True, 'storageReadThreeRouteAgreement': True,
+        'tailThreeRouteAgreement': False,
         'variants': results, 'savedReturnBoundaries': boundaries, 'originalStorage': original})
     calls = sum(row['execution']['calls'] for row in results.values())
     print(f'{calls} source calls; saved hash agrees on three routes; '
-          'observing callers and storage roots remain blocked')
+          'original storage read agrees; observing callers and write/rollback roots remain blocked')
     return preparation_exit(require_composition)
 
 
