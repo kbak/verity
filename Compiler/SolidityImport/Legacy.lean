@@ -41,7 +41,8 @@ private partial def validateLegacyYul (memoryRevert : Bool) (node : Json) : M Un
             #[some "mload", some "mstore", some "add", some "revert"]
             else #[some "mload", some "add", some "sub", some "mul", some "byte", some "chainid",
               some "call", some "delegatecall", some "returndatasize", some "sload",
-              some "iszero", some "or"]
+              some "iszero", some "or", some "not", some "lt", some "gt", some "shl", some "shr",
+              some "div", some "mod", some "mulmod"]
           unless builtins.contains name ||
               (!memoryRevert && name == some "gas" && (← get).sourceGas) do
             failAt node (if memoryRevert then
@@ -88,7 +89,7 @@ def validateLegacyAssemblyReads (node : Json) : M Unit := do
       failAt node "Solidity 0.7.6 memory struct assembly references are outside this slice"
     if let some ty := (← get).scalarTy.find? id then
       match ty with
-      | .int256 | .intN _ =>
+      | .intN _ =>
           failAt node "Solidity 0.7.6 signed assembly references are outside the scalar slice"
       | _ => pure ()
   let ast ← mField node "AST"
@@ -126,11 +127,30 @@ def cleanLegacyStorageAddress (ty : ParamType) (value : Val) : Val :=
 slice; enforce it for named results as well as ordinary writable locals. -/
 def validateLegacyYulAssignment (node : Json) (ty : ParamType) (rhs : Expr) : M Unit := do
   match ty with
-  | .int256 | .intN _ =>
+  | .intN _ =>
       failAt node "Solidity 0.7.6 signed assembly assignments are outside the scalar slice"
   | _ => pure ()
   unless isFullWordYulScalar ty || isProvablyBoundedYulExpr ty rhs do
     failAt node "Solidity 0.7.6 Yul assignment to narrow local requires a bounded value"
+
+/-- Keep ordinary operand evaluation to a single potentially failing sibling. Solidity
+short-circuit operators evaluate their right operand only on the reaching branch. -/
+private def validateArithmeticOrder (node : Json) (kind : String) : M Unit := do
+  let operands ← match kind with
+    | "BinaryOperation" =>
+      if #[some "&&", some "||"].contains (optStr node "operator") then pure #[]
+      else pure #[← mField node "leftExpression", ← mField node "rightExpression"]
+    | "Assignment" => pure #[← mField node "leftHandSide", ← mField node "rightHandSide"]
+    | "FunctionCall" =>
+      let args ← mArr (← mField node "arguments")
+      let callee ← mField node "expression"
+      if optStr callee "nodeType" == some "MemberAccess" then
+        pure (args.push (← mField callee "expression"))
+      else pure args
+    | "TupleExpression" => mArr (← mField node "components")
+    | _ => pure #[]
+  if (operands.filter fun arg => !arg.isNull && !LegacyStructs.totalArgument arg true).size > 1 then
+    failAt node "legacy arithmetic operands with competing failures require evaluation-order support"
 
 /-- Check every reached declaration, including helper bodies. Rejected constructs
 need separate legacy semantics and differential evidence before admission.
@@ -158,6 +178,7 @@ partial def validateLegacyDeclaration (node : Json) (encodingInput : Bool := fal
         validateLegacyYul false ast
       return
     if let some kind := optStr node "nodeType" then
+      if (← get).legacyDivisionHalt then validateArithmeticOrder node kind
       LegacyStructs.validate node storageReturns
       LegacySigned.validate node (loops == .observed)
       unless #["FunctionDefinition", "ParameterList", "VariableDeclaration", "Block",
@@ -171,6 +192,8 @@ partial def validateLegacyDeclaration (node : Json) (encodingInput : Bool := fal
           (loops == .observed && #["Break", "Continue"].contains kind) do
         failAt node s!"Solidity 0.7.6 scalar slice does not support {kind}"
       if kind == "FunctionDefinition" || kind == "ModifierDefinition" then
+        if (← get).legacyDivisionHalt && optStr node "stateMutability" != some "pure" then
+          failAt node "legacyDivisionHalt requires pure functions throughout the import closure"
         validateLegacyControlFlow node loops
         LegacyArrays.validateDeclaration node
       if kind == "FunctionDefinition" then
@@ -327,7 +350,13 @@ partial def validateLegacyDeclaration (node : Json) (encodingInput : Bool := fal
           -- Ordinary reference/overload resolution is checked by the lowering.
           if let some id := (field? callee "referencedDeclaration").bind (·.getInt?.toOption) then
             let allowed := #[some "require", some "revert", some "ecrecover", some "keccak256"]
-            if id < 0 && !allowed.contains (optStr callee "name") &&
+            let modular := (← get).legacyDivisionHalt && id == -16 &&
+              optStr callee "name" == some "mulmod"
+            let integerMetatype := id == -27 && optStr callee "name" == some "type" &&
+              ((field? node "arguments").bind (·.getArr?.toOption)).any fun args =>
+                args.size == 1 && optStr args[0]! "nodeType" == some "ElementaryTypeNameExpression" &&
+                ((field? args[0]! "typeName").bind (optStr · "name")).any (·.startsWith "uint")
+            if id < 0 && !integerMetatype && !modular && !allowed.contains (optStr callee "name") &&
                 !((← get).sourceGas && optStr callee "name" == some "gasleft") then
               failAt node ("Solidity 0.7.6 builtin call is outside the scalar slice " ++
                 "(assert/INVALID is not modeled)")

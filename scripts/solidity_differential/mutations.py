@@ -217,8 +217,8 @@ MUTANTS = {
     'denote-memory-revert-empty': ('Verity/Core/Model/Denote.lean', '  return .revertWithData ((List.range size).map fun i =>\n    UInt8.ofNat (state.world.byteMemory.readByte (offset + i)).val)', '  let _ := (offset, size)\n  return .revertWithData []'),
     'ecm-memory-revert-size': ('Verity/Core/Model/ECM.lean', '  | [offset, size] => pure [.exprStmt (.call "revert" [offset, size])]', '  | [offset, size] => pure [.exprStmt (.call "revert" [offset, .call "add" [size, .lit 1]])]'),
 
-    "import-legacy-root-checked": ("Compiler/SolidityImport/Import.lean", 'legacyWrapping := legacy\n    unchecked := legacy', 'legacyWrapping := legacy\n    unchecked := false'),
-    "import-legacy-helper-checked": ("Compiler/SolidityImport/Import.lean", 'legacyWrapping := legacy\n    unchecked := legacy', 'legacyWrapping := false\n    unchecked := legacy'),
+    "import-legacy-root-checked": ("Compiler/SolidityImport/Import.lean", 'unchecked := legacy', 'unchecked := false'),
+    "import-legacy-helper-checked": ("Compiler/SolidityImport/Import.lean", 'legacyWrapping := legacy', 'legacyWrapping := false'),
     "import-require-condition": ("Compiler/SolidityImport/Import.lean", 'return condition.pre.push (.require condition.expr value)', 'return condition.pre.push (.require (.literal 1) value)'),
     "denote-require-selector": ("Verity/Core/Model/Denote.lean", '[0x08, 0xc3, 0x79, 0xa0]', '[0x08, 0xc3, 0x79, 0xa1]'),
     "import-custom-require-condition": ("Compiler/SolidityImport/Import.lean", '(.requireError condition.expr name values)', '(.requireError (.literal 1) name values)'),

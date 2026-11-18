@@ -305,7 +305,9 @@ theorem evalExpr_shl_arm (oracle : DenoteOracle) (fields : List Field)
     evalExpr oracle fields state (.shl shift value) = (do
       let shiftValue ← evalExpr oracle fields state shift
       let word ← evalExpr oracle fields state value
-      pure (Verity.Core.Uint256.shl shiftValue word).val) := rfl
+      pure (Verity.Core.Uint256.shl shiftValue word).val) := by
+  rw [Verity.Core.Uint256.shl_eq_bounded]
+  rfl
 
 theorem evalExpr_shr_arm (oracle : DenoteOracle) (fields : List Field)
     (state : DenoteState) (shift value : Expr) :

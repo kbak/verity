@@ -102,7 +102,8 @@ MUTANTS.update({
 
 MUTANTS.update({
     'import-modulo-value': ('Stmt.assignVar dest (.mod a.expr b.expr)', 'Stmt.assignVar dest (.div a.expr b.expr)'),
-    'import-modulo-zero': ('iteStmt (.eq b.expr (.literal 0)) divPanic moduloResult', 'iteStmt (.eq b.expr (.literal 1)) divPanic moduloResult'),
+    'import-modulo-zero': ('let moduloGuard := iteStmt (.eq b.expr (.literal 0))',
+                           'let moduloGuard := iteStmt (.eq b.expr (.literal 1))'),
 })
 
 

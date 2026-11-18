@@ -87,23 +87,30 @@ def storageMember (node : Json) (env : Env) : Bool :=
 
 /-- Total scalar syntax for constructor siblings. Calls and indexed reads need
 separate evaluation-order evidence when more than one argument can fail. -/
-partial def totalArgument (node : Json) : Bool :=
+partial def totalArgument (node : Json) (wordArithmetic : Bool := false) : Bool :=
   let kind := optStr node "nodeType" |>.getD ""
-  if #["Identifier", "Literal", "ElementaryTypeNameExpression", "UserDefinedTypeName"].contains kind
+  let total := fun child => totalArgument child wordArithmetic
+  let ty := (field? node "typeDescriptions").bind (optStr · "typeString")
+  if wordArithmetic && ty.any (·.startsWith "enum ") then false
+  else if #["Identifier", "Literal", "ElementaryTypeNameExpression", "UserDefinedTypeName"].contains kind
     then true
   else if kind == "MemberAccess" then
-    (field? node "expression").any totalArgument
+    (field? node "expression").any total
   else if kind == "FunctionCall" && optStr node "kind" == some "typeConversion" then
-    ((field? node "typeDescriptions").bind (optStr · "typeString")).any scalar &&
-      ((field? node "arguments").bind (·.getArr?.toOption)).any (·.all totalArgument)
+    ty.any scalar &&
+      ((field? node "arguments").bind (·.getArr?.toOption)).any (·.all total)
+  else if wordArithmetic && kind == "FunctionCall" &&
+      ((field? node "expression").bind (field? · "referencedDeclaration") >>= (·.getInt?.toOption))
+        == some (-27) then true
   else if kind == "UnaryOperation" && (optStr node "operator").any
       (#["-", "!", "~"].contains ·) then
-    (field? node "subExpression").any totalArgument
+    (field? node "subExpression").any total
   else if kind == "BinaryOperation" && (optStr node "operator").any
-      (#["+", "-", "*", "==", "!=", "<", "<=", ">", ">="].contains ·) then
-    #["leftExpression", "rightExpression"].all fun key => (field? node key).any totalArgument
+      (fun op => #["+", "-", "*", "==", "!=", "<", "<=", ">", ">="].contains op ||
+        (wordArithmetic && #["<<", ">>", "&", "|", "^"].contains op)) then
+    #["leftExpression", "rightExpression"].all fun key => (field? node key).any total
   else if kind == "TupleExpression" then
-    ((field? node "components").bind (·.getArr?.toOption)).any (·.all totalArgument)
+    ((field? node "components").bind (·.getArr?.toOption)).any (·.all total)
   else false
 
 /-- Find memory references even when assignment targets are tuple components. -/

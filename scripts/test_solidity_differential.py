@@ -21,6 +21,7 @@ class SolidityDifferentialTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         preflight_mutation_anchors(root)
         for module, default_source in (
+            ("mutations", None),
             ("check_byte_call_mutations", "Verity/Core/Model/Denote.lean"),
             ("check_environment_mutations", "Compiler/SolidityImport/Import.lean"),
             ("check_struct_abi_mutations", None),

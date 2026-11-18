@@ -26,6 +26,8 @@ structure Profile where
   bytecodeHash : String
   /-- Verify gas against original bytecode evidence. Gas reads cannot be recompiled. -/
   sourceGas : Bool := false
+  /-- Admit unsigned 0.7.6 division in pure roots by modeling a zero divisor as INVALID. -/
+  legacyDivisionHalt : Bool := false
   /-- Deployment evidence JSON, relative to the Solidity project root. The immutable
       words are checked against freshly compiled runtime references and code bytes. -/
   deployedImmutables : Option String := none

@@ -1,7 +1,7 @@
 import Verity.Core.Model.SourceGas
 import Verity.Core.Model.VoidCalls
 import Verity.Core
-import Verity.Core.Uint256
+import Verity.Core.Model.WordShifts
 import Verity.Core.Int256
 import Verity.Core.Model.Constants
 import Verity.Core.Model.DynamicAbi
@@ -1039,7 +1039,7 @@ def evalExpr (oracle : DenoteOracle) (fields : List Field) (state : DenoteState)
   | .shl shift value => do
       let shiftVal ← evalExpr oracle fields state shift
       let wordVal ← evalExpr oracle fields state value
-      pure (Verity.Core.Uint256.shl shiftVal wordVal).val
+      pure (Verity.Core.Uint256.shlBounded shiftVal wordVal).val
   | .shr shift value => do
       let shiftVal ← evalExpr oracle fields state shift
       let wordVal ← evalExpr oracle fields state value
