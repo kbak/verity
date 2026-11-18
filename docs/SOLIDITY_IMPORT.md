@@ -2967,6 +2967,29 @@ instead prove `Progress` for a family of reachable frames. Establishing that a
 downstream caller supplied the captured lexical state and storage remains a separate
 obligation.
 
+#### Packed record snapshots in a selected interval
+
+A standalone assignment can copy a fixed storage array element into a flat memory
+record local when both resolve to the same Solidity struct. The importer captures
+the index, checks the array extent, applies the slot stride and snapshots each
+field before updating the destination. Signed fields retain their sign extension,
+and bool fields have canonical word values. A subsequent write to the source
+array affects the next copy independently.
+
+For an accepted projection, `site.snapshotRecords` lists the destination declaration
+IDs. Read a destination with `site.snapshot? state declaration` to obtain its field
+names and words in declaration order. The returned state is a denotation frame.
+The projected observations cover scalar member values and storage effects.
+Correspondence for raw Solidity heap bytes and allocation addresses lies outside
+this projection. The importer rejects incoming aliased memory parameters, escaped
+record locals, assembly in the defining frame and memory-observing operations in
+the selected iteration.
+
+With the ordinary wrapping arithmetic profile, `site.nonzeroInputs` records
+stable incoming divisors required by the snapshot. A zero divisor lies outside
+its certified domain. An out-of-bounds fixed-array index retains Solidity
+0.7.6's explicit INVALID outcome.
+
 ### Observed scalar control flow (development)
 
 `SolidityImport.LoopExecution` separates finite observations from source outcomes.

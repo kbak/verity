@@ -1,5 +1,6 @@
 import Compiler.SolidityImport.Import
 import Compiler.SolidityImport.CertifiedInterval
+import Compiler.SolidityImport.RecordSnapshot
 
 /-! Extract one checked source iteration for a dependent proof of progress. -/
 
@@ -17,7 +18,6 @@ def importIntervalSite (pkg project : System.FilePath) (entry contract functionN
   let (fn, resolved) ← (selectImportRoot contract functionName types).run' prepared.env
   if profile.legacyDivisionHalt && optStr fn "stateMutability" != some "pure" then
     throwError "legacyDivisionHalt requires pure function roots"
-  (validateLegacyDeclaration fn).run' prepared.env
   let some bytes := prepared.env.files.find? file | throwError "unknown loop source unit {file}"
   let mut current := (1, 1)
   let mut offset := 0
@@ -40,7 +40,12 @@ def importIntervalSite (pkg project : System.FilePath) (entry contract functionN
     e.funs.find? fn.declId <|> e.modifiers.find? fn.declId
   let bodies := #[c.node] ++ callees
   (LegacyStructs.validateBodies bodies).run' e
-  for body in bodies do (validateLegacyDeclaration body).run' e
+  let frame := { c.before with fieldsByName := e.fieldsByName }
+  let snapshots ← (RecordSnapshot.check c.node iteration.body frame).run' e
+  for key in ["parameters", "returnParameters"] do
+    (validateLegacyDeclaration (← field fn key)).run' prepared.env
+  (validateLegacyDeclaration c.node false #[] .bounded false snapshots.assignments).run' e
+  for callee in callees do (validateLegacyDeclaration callee).run' e
   let fields ← observedStorageFields.run' e
   let src ← str (← field c.node "src")
   let root := s!"{contract}.{functionName}({String.intercalate "," resolved.toList})"
@@ -50,6 +55,7 @@ def importIntervalSite (pkg project : System.FilePath) (entry contract functionN
     ("allocation", toJson c.before.next)]
   let sources := #["Compiler/SolidityImport/IntervalSite.lean",
     "Compiler/SolidityImport/IntervalCapture.lean",
+    "Compiler/SolidityImport/RecordSnapshot.lean",
     "Compiler/CompilationModel/ValidationHelpers.lean",
     "Compiler/SolidityImport/CertifiedInterval.lean",
     "Compiler/SolidityImport/IntervalCommand.lean",
@@ -65,7 +71,8 @@ def importIntervalSite (pkg project : System.FilePath) (entry contract functionN
       (id, a.slot, a.length, a.wordCount),
     inputs := IntervalSearch.entryInputs c.before.bound iteration.body, bits := iteration.bits,
     lowName := iteration.lowName, highName := iteration.highName, midName := iteration.midName,
-    doneName := c.doneName,
+    doneName := c.doneName, snapshotRecords := snapshots.destinations.toList.mergeSort,
+    nonzeroInputs := snapshots.nonzero,
     fields, body := iteration.body }
 
 private def quoteIntervalSite (p : CertifiedInterval.Site) : CommandElabM Term := do
@@ -78,6 +85,7 @@ private def quoteIntervalSite (p : CertifiedInterval.Site) : CommandElabM Term :
        sourceRange := $(quote p.sourceRange), callStack := $(quote p.callStack),
        frameAllocation := $(quote p.frameAllocation), locals := [$locals,*],
        structLocals := $(quote p.structLocals), arrayBases := [$bases,*],
+       snapshotRecords := $(quote p.snapshotRecords), nonzeroInputs := $(quote p.nonzeroInputs),
        inputs := $(quote p.inputs), bits := $(quote p.bits),
        lowName := $(quote p.lowName), highName := $(quote p.highName),
        midName := $(quote p.midName), doneName := $(quote p.doneName),

@@ -19,7 +19,17 @@ incomplete frame. The two declared unsigned endpoints must also fit their source
 def Site.framePresent (site : Site) (s : DenoteState) : Bool :=
   let fits (name : String) := (lookupBinding? s.bindings name).any (· < 2 ^ site.bits)
   fits site.lowName && fits site.highName &&
-    site.inputs.all (fun name => (lookupBinding? s.bindings name).isSome)
+    site.inputs.all (fun name => (lookupBinding? s.bindings name).isSome) &&
+    site.nonzeroInputs.all (fun name =>
+      (lookupBinding? s.bindings name).any fun value => decide (0 < value ∧ value < 2^256))
+
+/-- Read the projected scalar values of a copied record in declaration order. Fields use their
+model word representation, including sign extension and Boolean cleanup. -/
+def Site.snapshot? (site : Site) (s : DenoteState) (declaration : Nat) :
+    Option (List (String × Nat)) := do
+  guard (site.snapshotRecords.contains declaration)
+  let (_, members) ← site.structLocals.find? (·.1 == declaration)
+  members.mapM fun (name, _, binding) => do return (name, ← lookupBinding? s.bindings binding)
 
 /-- Execute the actual lowered iteration. A bare denotation fallback is an adapter error.
 Explicit source halts, side effects before a transfer, and the source break flag are retained. -/

@@ -1124,6 +1124,8 @@ def tasks(update_golden: bool) -> list:
                    "check_loop_observer", "loop-observer-mutation", 400,
                    "--mutation", mutation))
               for mutation in ("continue-exits", "break-continues", "condition-failure-erased")]
+    items += [("interval-record-snapshots", 1, lambda: module_campaign_output(
+        "check_interval_record_snapshots", "interval-record-snapshots", 900))]
     items += [("interval-progress-interface", 1, lambda: module_campaign_output(
         "check_interval_progress_interface", "interval-progress-interface", 900))]
     items += [("legacy-interval-search", 1, lambda: module_campaign_output(

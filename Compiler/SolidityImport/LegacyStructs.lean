@@ -125,7 +125,8 @@ private partial def mutationTarget (node : Json) (env : Env)
         (·.any (mutationTarget · env storageReturns)))
 
 /-- Validate each reached record use before common lowering can scalarize it. -/
-def validate (node : Json) (storageReturns : Array Nat := #[]) : M Unit := do
+def validate (node : Json) (storageReturns : Array Nat := #[])
+    (snapshotAssignments : Std.HashSet Nat := {}) : M Unit := do
   let kind := optStr node "nodeType" |>.getD ""
   let ty := (field? node "typeDescriptions").bind (optStr · "typeString") |>.getD ""
   if ty.startsWith "struct " then
@@ -179,7 +180,8 @@ def validate (node : Json) (storageReturns : Array Nat := #[]) : M Unit := do
     else if kind == "UnaryOperation" && (optStr node "operator").any
         (#["++", "--", "delete"].contains ·) then field? node "subExpression" else none
   if let some target := target then
-    if mutationTarget target (← get) storageReturns then
+    let recordedCopy := ((field? node "id").bind (·.getNat?.toOption)).any snapshotAssignments.contains
+    if mutationTarget target (← get) storageReturns && !recordedCopy then
       failAt target ("Solidity 0.7.6 memory struct writes and rebinding " ++
         "are outside the read-only slice")
 

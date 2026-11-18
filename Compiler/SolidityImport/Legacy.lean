@@ -157,10 +157,10 @@ need separate legacy semantics and differential evidence before admission.
 `encodingInput` admits construction only as the direct input to the hash builtin. -/
 partial def validateLegacyDeclaration (node : Json) (encodingInput : Bool := false)
     (storageReturns : Array Nat := #[]) (loops : LoopAdmission := .bounded)
-    (intervalBody : Bool := false) : M Unit := do
+    (intervalBody : Bool := false) (snapshotAssignments : Std.HashSet Nat := {}) : M Unit := do
   match node with
   | .arr children =>
-    children.forM (validateLegacyDeclaration · encodingInput storageReturns loops intervalBody)
+    children.forM (validateLegacyDeclaration · encodingInput storageReturns loops intervalBody snapshotAssignments)
   | .obj fields =>
     let storageReturns := if optStr node "nodeType" == some "FunctionDefinition" then
         TupleReturns.namedStorageIds node else storageReturns
@@ -181,7 +181,7 @@ partial def validateLegacyDeclaration (node : Json) (encodingInput : Bool := fal
       return
     if let some kind := optStr node "nodeType" then
       if (← get).legacyDivisionHalt then validateArithmeticOrder node kind
-      LegacyStructs.validate node storageReturns
+      LegacyStructs.validate node storageReturns snapshotAssignments
       LegacySigned.validate node (loops == .observed)
       unless #["FunctionDefinition", "ParameterList", "VariableDeclaration", "Block",
           "ExpressionStatement", "VariableDeclarationStatement", "IfStatement", "Return",
@@ -374,6 +374,7 @@ partial def validateLegacyDeclaration (node : Json) (encodingInput : Bool := fal
       unless scalarMember && key == "expression" do
         let nested := if isLoop then search && key == "body" else intervalBody
         validateLegacyDeclaration child (isHash && key == "arguments") storageReturns loops nested
+          snapshotAssignments
   | _ => pure ()
 
 /-- Solidity 0.7.6 defaults to ABI coder v1. External decoding uses the

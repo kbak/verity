@@ -17,6 +17,10 @@ structure Site where
   arrayBases : List (Nat × Expr × Nat × Nat)
   /-- Lexical words the iteration may read before assigning them. -/
   inputs : List String
+  /-- Source records whose scalar fields are projected independently of allocation addresses. -/
+  snapshotRecords : List Nat := []
+  /-- Stable incoming divisors required to be nonzero for the legacy word-arithmetic model. -/
+  nonzeroInputs : List String := []
   bits : Nat
   lowName : String
   highName : String
