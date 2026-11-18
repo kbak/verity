@@ -397,8 +397,8 @@ MUTANTS.update({
 MUTANTS.update({
     'import-unchecked-block-end': ('    | "VerityUncheckedEnd" =>\n        -- `unchecked` blocks cannot nest; restore the compiler default.\n        modify fun e => { e with unchecked := e.legacyWrapping }\n',
                                    '    | "VerityUncheckedEnd" =>\n        -- `unchecked` blocks cannot nest; restore the compiler default.\n'),
-    'import-unchecked-block-if-restore': ('yulMemoryStructs := saved.yulMemoryStructs,\n                   unchecked := saved.unchecked }\n        let restReturns',
-                                          'yulMemoryStructs := saved.yulMemoryStructs }\n        let restReturns'),
+    'import-unchecked-block-if-restore': ('yulMemoryStructs := saved.yulMemoryStructs,\n                   unchecked := saved.unchecked }\n        if saved.legacyWrapping then',
+                                          'yulMemoryStructs := saved.yulMemoryStructs }\n        if saved.legacyWrapping then'),
 })
 
 # Literal tuple initializers and skipped declaration components, observed through TupleSequence.
