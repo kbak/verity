@@ -37,13 +37,35 @@ CASES = {
     'signed-shift': ('', 'function run(int128 x) external pure returns(int128) '
         '{ return x >> 1; }', 'run(int128)', 'signed operators require arithmetic'),
     'signed-literal-division': ('', 'function run(int128 x) external pure returns(int128) '
-        '{ return x/2; }', 'run(int128)', 'signed operators require arithmetic'),
+        '{ return x/2; }', 'run(int128)', None),
     'signed-literal-modulo': ('', 'function run(int128 x) external pure returns(int128) '
-        '{ return x%2; }', 'run(int128)', 'signed operators require arithmetic'),
+        '{ return x%2; }', 'run(int128)', None),
     'signed-division': ('', 'function run(int128 x,int128 y) external pure returns(int128) '
-        '{ require(y != 0); return x/y; }', 'run(int128,int128)', 'legacy exceptional halt'),
+        '{ require(y != 0); return x/y; }', 'run(int128,int128)', None),
     'signed-modulo': ('', 'function run(int128 x,int128 y) external pure returns(int128) '
-        '{ require(y != 0); return x%y; }', 'run(int128,int128)', 'legacy exceptional halt'),
+        '{ require(y != 0); return x%y; }', 'run(int128,int128)', None),
+    'negative-literal-division': ('', 'function run(int8 x) external pure returns(int8) '
+        '{ return x / -1; }', 'run(int8)', None),
+    'negative-divisor-arm': ('', 'function run(int24 x,int24 d) external pure returns(int24) '
+        '{ return 0 > d ? x/d : x; }', 'run(int24,int24)', None),
+    'nonzero-after-return': ('', 'function run(int24 x,int24 d) external pure returns(int24) '
+        '{ if (d == 0) return x; return x % d; }', 'run(int24,int24)', None),
+    'unprotected-division': ('', 'function run(int24 x,int24 d) external pure returns(int24) '
+        '{ return x/d; }', 'run(int24,int24)', 'legacy exceptional halt'),
+    'zero-allowed': ('', 'function run(int24 x,int24 d) external pure returns(int24) '
+        '{ require(d >= 0); return x%d; }', 'run(int24,int24)', 'legacy exceptional halt'),
+    'join-without-guard': ('', 'function run(bool f,int24 d) external pure returns(int24) '
+        '{ if (f) require(d != 0); return 1/d; }', 'run(bool,int24)', 'legacy exceptional halt'),
+    'mutated-divisor': ('', 'function run(int24 x,int24 d) external pure returns(int24) '
+        '{ require(d != 0); d = x; return x/d; }', 'run(int24,int24)', 'legacy exceptional halt'),
+    'narrowed-divisor': ('', 'function run(int24 x,int24 d) external pure returns(int24) '
+        '{ require(d != 0); return x/int8(d); }', 'run(int24,int24)', 'legacy exceptional halt'),
+    'caller-only-guard': ('', 'function h(int24 x,int24 d) internal pure returns(int24) '
+        '{ return x/d; } function run(int24 x,int24 d) external pure returns(int24) '
+        '{ require(d != 0); return h(x,d); }', 'run(int24,int24)', 'legacy exceptional halt'),
+    'modifier-argument-before-guard': ('', 'modifier m(int24 q) { require(q != 0); _; } '
+        'function run(int24 x,int24 d) external pure m(x/d) returns(int24) '
+        '{ require(d != 0); return x; }', 'run(int24,int24)', 'legacy exceptional halt'),
     'signed-assembly': ('', 'function run(int256 x) external pure returns(int256 r) '
         '{ assembly { r := x } }', 'run(int256)', 'signed assembly'),
     'signed-address': ('', 'function run(int256 x) external pure returns(address) '

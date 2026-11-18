@@ -241,9 +241,9 @@ partial def validateLegacyDeclaration (node : Json) (encodingInput : Bool := fal
         if ty.startsWith "enum " then
           failAt node "Solidity 0.7.6 enum conditionals are outside the scalar enum slice"
         unless mixedStorageTuple || ty == "bool" || ty == "address" || ty == "address payable" ||
-            ty.startsWith "contract " || (fixedBytesWidth? ty).isSome ||
+            ty.startsWith "contract " || (fixedBytesWidth? ty).isSome || (signedBitsOf ty).isSome ||
             (ty.startsWith "uint" && (bitsOf ty).isSome) do
-          failAt node ("Solidity 0.7.6 conditionals require an unsigned, bool, address " ++
+          failAt node ("Solidity 0.7.6 conditionals require an integer, bool, address " ++
             "or fixed-bytes result")
         unless (← mType (← mField node "condition")) == "bool" do
           failAt node "Solidity 0.7.6 conditional condition must be bool"

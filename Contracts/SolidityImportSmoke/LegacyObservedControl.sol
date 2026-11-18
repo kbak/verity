@@ -102,6 +102,14 @@ contract LegacyObservedControl {
         while (true) { divisor = 0; result = 10 / divisor; break; }
     }
 
+    function skippedDivisorGuard(bool skip, int24 divisor) external pure returns (int24 result) {
+        for (uint256 i = 0; i < 2; result = 1 / divisor) {
+            ++i;
+            if (skip) continue;
+            require(divisor != 0);
+        }
+    }
+
     function viewOnly() external view returns (uint256 result) {
         while (true) { result = 1; break; }
     }

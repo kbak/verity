@@ -5,7 +5,7 @@ from .check_legacy_void_rejections import run
 
 DIVISION = 'legacy exceptional halt is not modeled'
 PREFIX = 'function run(uint256 n,uint256 d) external pure returns(uint256) { '
-SCALAR = 'conditionals require an unsigned, bool, address or fixed-bytes result'
+SCALAR = 'conditionals require an integer, bool, address or fixed-bytes result'
 CASES = {
     'scalar': ('', 'function run(bool f,uint256 a,uint256 b) external pure returns(uint256) '
         '{ return f ? a : b; }', 'run(bool,uint256,uint256)', None),
@@ -55,7 +55,7 @@ CASES = {
         '{ function() internal pure returns(uint256) h=f ? a : b; return h(); }', 'run(bool)',
         'does not support FunctionTypeName'),
     'signed': ('', 'function run(bool f,int256 a,int256 b) external pure returns(int256) '
-        '{ return f ? a : b; }', 'run(bool,int256,int256)', SCALAR),
+        '{ return f ? a : b; }', 'run(bool,int256,int256)', None),
     'unselected-gas': ('', 'function run(bool f) external view returns(uint256) '
         '{ return f ? 1 : gasleft(); }', 'run(bool)', 'builtin call is outside'),
     'effectful-neighbor': ('', 'function h(uint256 a,uint256 b) internal pure returns(uint256) '

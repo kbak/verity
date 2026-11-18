@@ -2,7 +2,7 @@ import Compiler.SolidityImport.ExprHelpers
 import Compiler.SolidityImport.LegacyArrayLoops
 
 /-! Conservative path evidence for legacy division and bounded loop admission.
-Facts concern unsigned local declarations that are never assigned in the reached
+Facts concern integer local declarations that are never assigned in the reached
 function. This intentionally excludes mutable denominators, state reads, casts,
 and interprocedural assumptions; no runtime zero-divisor behavior is invented. -/
 
@@ -26,25 +26,35 @@ private def naturalLiteral? (node : Json) : Option Nat := do
   unless ty.startsWith "int_const " do none
   (ty.drop "int_const ".length).toString.toNat?
 
+/-- A negative integer literal has a unary-minus node in the 0.7.6 AST. -/
+private def nonzeroDivisorLiteral (node rhs : Json) : Bool := Id.run do
+  let rhs := unparen rhs
+  if let some n := naturalLiteral? rhs then return 0 < n && n < 2 ^ 256
+  unless optStr rhs "nodeType" == some "UnaryOperation" && optStr rhs "operator" == some "-" do
+    return false
+  let some bits := (optStr (child node "commonType") "typeString").bind signedBitsOf
+    | return false
+  return (naturalLiteral? (child rhs "subExpression")).any fun n => 0 < n && n ≤ 2 ^ (bits - 1)
+
 private def identifier? (node : Json) : Option Nat := do
   let node := unparen node
   unless optStr node "nodeType" == some "Identifier" do none
   let id ← (field? node "referencedDeclaration").bind (·.getInt?.toOption)
   if id < 0 then none else some id.toNat
 
-private partial def unsignedDeclarations (node : Json)
+private partial def integerDeclarations (node : Json)
     (ids : Std.HashSet Nat := {}) : Std.HashSet Nat := Id.run do
   match node with
-  | .arr xs => return xs.foldl (fun acc x => unsignedDeclarations x acc) ids
+  | .arr xs => return xs.foldl (fun acc x => integerDeclarations x acc) ids
   | .obj fields =>
     let mut ids := ids
     if optStr node "nodeType" == some "VariableDeclaration" &&
         (child node "stateVariable").getBool?.toOption != some true then
       let ty := (field? node "typeDescriptions").bind (optStr · "typeString") |>.getD ""
-      if ty.startsWith "uint" && (bitsOf ty).isSome then
+      if (ty.startsWith "uint" && (bitsOf ty).isSome) || (signedBitsOf ty).isSome then
         if let some id := (field? node "id").bind (·.getNat?.toOption) then
           ids := ids.insert id
-    for (_, value) in fields do ids := unsignedDeclarations value ids
+    for (_, value) in fields do ids := integerDeclarations value ids
     return ids
   | _ => return ids
 
@@ -63,14 +73,12 @@ private partial def branchFacts (node : Json) (truth : Bool)
   let rhs := child node "rightExpression"
   if (op == "&&" && truth) || (op == "||" && !truth) then
     return branchFacts rhs truth eligible (branchFacts lhs truth eligible facts)
-  let candidate :=
-    if naturalLiteral? rhs == some 0 &&
-        ((truth && (op == "!=" || op == ">")) || (!truth && (op == "==" || op == "<="))) then
-      identifier? lhs
-    else if naturalLiteral? lhs == some 0 &&
-        ((truth && (op == "!=" || op == "<")) || (!truth && (op == "==" || op == ">="))) then
-      identifier? rhs
-    else none
+  -- A strict comparison in either direction excludes equality, including for signed values.
+  let excludesZero := if truth then ["!=", "<", ">"].contains op
+    else ["==", "<=", ">="].contains op
+  unless excludesZero do return facts
+  let candidate := if naturalLiteral? rhs == some 0 then identifier? lhs
+    else if naturalLiteral? lhs == some 0 then identifier? rhs else none
   if let some id := candidate then
     if eligible.contains id then return facts.insert id
   return facts
@@ -100,7 +108,7 @@ private partial def validateExpression (node : Json)
   if (kind == some "BinaryOperation" && (op == "/" || op == "%")) ||
       (kind == some "Assignment" && (op == "/=" || op == "%=")) then
     let rhs := child node (if kind == some "Assignment" then "rightHandSide" else "rightExpression")
-    let constant := (naturalLiteral? rhs).any (fun n => 0 < n && n < 2 ^ 256)
+    let constant := nonzeroDivisorLiteral node rhs
     let guarded := (identifier? rhs).any facts.contains
     unless constant || guarded do
       failAt node ("Solidity 0.7.6 division/modulo needs a nonzero literal or an " ++
@@ -149,6 +157,17 @@ inductive LoopAdmission where
   | observed
   deriving BEq
 
+/-- A continue skips the remaining body statements and reaches this loop's update. -/
+private partial def continuesHere (node : Json) : Bool :=
+  match node with
+  | .arr xs => xs.any continuesHere
+  | .obj fields =>
+    match optStr node "nodeType" with
+    | some "Continue" => true
+    | some "WhileStatement" | some "ForStatement" => false
+    | _ => fields.toList.any (fun (_, value) => continuesHere value)
+  | _ => false
+
 private partial def validateFlow (admission : LoopAdmission) (node : Json) (eligible facts : Std.HashSet Nat) :
     M (Option (Std.HashSet Nat)) := do
   match optStr node "nodeType" with
@@ -175,8 +194,12 @@ private partial def validateFlow (admission : LoopAdmission) (node : Json) (elig
     let current := init.getD facts
     let cond := child node "condition"
     validateExpression cond eligible current
-    let body ← validateFlow admission (child node "body") eligible (branchFacts cond true eligible current)
-    discard (validateFlow admission (child node "loopExpression") eligible (body.getD current))
+    let entry := branchFacts cond true eligible current
+    let loopBody := child node "body"
+    let body ← validateFlow admission loopBody eligible entry
+    let update :=
+      if admission == .observed && continuesHere loopBody then entry else body.getD entry
+    discard (validateFlow admission (child node "loopExpression") eligible update)
     return some current
   | some "ExpressionStatement" =>
     let expr := child node "expression"
@@ -196,9 +219,10 @@ are never imported. Restricting facts to never-assigned local IDs makes them
 stable across joins, loop iterations, inline assembly, and internal calls. -/
 def validateLegacyControlFlow (fn : Json) (admission : LoopAdmission := .bounded) : M Unit := do
   let body := child fn "body"
-  let writes := (bodyAssignedIds body).foldl (fun (s : Std.HashSet Nat) id => s.insert id) {}
-  let eligible := (unsignedDeclarations fn).toList.foldl
+  let writes := (bodyAssignedIds fn).foldl (fun (s : Std.HashSet Nat) id => s.insert id) {}
+  let eligible := (integerDeclarations fn).toList.foldl
     (fun (s : Std.HashSet Nat) id => if writes.contains id then s else s.insert id) {}
+  validateExpression (child fn "modifiers") eligible {}
   discard (validateFlow admission body eligible {})
 
 /-- Normalize the legacy existing-counter spelling for the exact counted-loop

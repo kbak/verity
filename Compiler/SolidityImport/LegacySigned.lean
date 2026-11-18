@@ -1,6 +1,6 @@
 import Compiler.SolidityImport.LegacyStructs
 
-/-! Bounded admission of legacy signed scalar arithmetic. Division, storage and
+/-! Bounded admission of legacy signed scalar arithmetic. Storage and
 assembly need separate legacy semantics; admitting a scalar type does not admit
 those uses. All arithmetic here reuses the wrapping expression lowering. -/
 namespace Compiler.CompilationModel.SolidityImport.LegacySigned
@@ -38,7 +38,7 @@ def validate (node : Json) (observedLocals : Bool := false) : M Unit := do
     let right ← mType (← mField node "rightExpression")
     if (signedBitsOf left).isSome || (signedBitsOf right).isSome then
       unless (optStr node "operator").any
-          (#["+", "-", "*", "==", "!=", "<", "<=", ">", ">="].contains ·) do
+          (#["+", "-", "*", "/", "%", "==", "!=", "<", "<=", ">", ">="].contains ·) do
         failAt node "Solidity 0.7.6 signed operators require arithmetic or a comparison"
   if kind == "UnaryOperation" then
     if (signedBitsOf (← mType (← mField node "subExpression"))).isSome then

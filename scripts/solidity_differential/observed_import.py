@@ -42,6 +42,7 @@ def write_driver(path, template, output, source, rows, optimized, storage, spec=
                   ('recursive(uint256)', 'recursive observed helper call')] if storage else
                  [('unguarded(uint256)', 'division/modulo needs a nonzero literal'),
                   ('staleGuard(uint256)', 'division/modulo needs a nonzero literal'),
+                  ('skippedDivisorGuard(bool,int24)', 'division/modulo needs a nonzero literal'),
                   ('unnamedResult()', 'observed control returns must be named')])
     negatives = spec.get('negatives', negatives)
     rejected = [signature.split('(')[0] for signature, _ in negatives]
@@ -109,7 +110,7 @@ def validate_metadata(model, optimized, storage, roots, spec=None):
             or settings['metadata'] != dict(bytecodeHash='none')):
         raise ValueError('ordinary importer changed the selected source profile')
     included = set(roots)
-    excluded = {'unguarded', 'staleGuard', 'viewOnly', 'unnamedResult'}
+    excluded = {'unguarded', 'staleGuard', 'skippedDivisorGuard', 'viewOnly', 'unnamedResult'}
     if storage:
         included |= {'walkHelper', 'captureHelper', 'recordHelper', 'mappingHelper',
                      'voidHelper', 'forward'}
