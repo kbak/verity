@@ -28,6 +28,9 @@ def cases():
     narrow_min = -(1 << 23)
     wide_min = -(1 << 255)
     yield 'guarded(int24,int24)', [narrow_min, -1], 'ok', [narrow_min, 0]
+    # The narrow quotient controls a branch before ABI return cleanup can mask an overflow.
+    for x, y, selected in [(narrow_min, -1, narrow_min), (7, -3, 7), (-1, 3, 3)]:
+        yield 'selectByQuotientSign(int24,int24)', [x, y], 'ok', [selected]
     yield 'choose(bool,int256,int256)', [True, wide_min, -1], 'ok', [wide_min]
     yield 'choose(bool,int256,int256)', [False, wide_min, -1], 'ok', [0]
     yield 'guarded(int24,int24)', [-7, 0], 'revert', []

@@ -16,6 +16,11 @@ contract LegacySignedDivision {
         return divide ? x / y : x % y;
     }
 
+    function selectByQuotientSign(int24 x, int24 y) external pure returns (int256) {
+        require(y != 0);
+        return x / y < 0 ? x : int256(y);
+    }
+
     function alignTowardZero(int24 x, int24 step) external pure returns (int24) {
         require(step > 0);
         return (x / step) * step;
