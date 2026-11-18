@@ -1,5 +1,6 @@
 import Compiler.SolidityImport.ExprHelpers
 import Compiler.SolidityImport.LegacyArrayLoops
+import Compiler.SolidityImport.IntervalSearch
 
 /-! Conservative path evidence for legacy division and bounded loop admission.
 Facts concern integer local declarations that are never assigned in the reached
@@ -122,6 +123,7 @@ private partial def validateExpression (node : Json)
 
 /-- Loop admission excludes alternate modern lowering paths with heuristic bounds. -/
 def validateLegacyLoop (node : Json) : M Unit := do
+  if IntervalSearch.candidate node then return
   let cond := unparen (child node "condition")
   unless optStr cond "nodeType" == some "BinaryOperation" do
     failAt node "Solidity 0.7.6 loops require a supported monotone bound"

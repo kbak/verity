@@ -10132,6 +10132,25 @@ private partial def boundedRangePopBounds? (fn sdecl : Json) : M (Option (String
     3. `while (true)` do-while style loops (`Strings.toString`) where the penult statement divides an unsigned local `v`
        by a constant `d ≥ 2` (or right-shifts by `k ≥ 1`) and the final statement is `if (v == 0) break;`. -/
 private partial def lowerWhile (s : Json) (lowerBody : Json → M (Array Stmt)) : M (Array Stmt) := do
+  if (← get).legacyWrapping && IntervalSearch.candidate s then
+    let saved ← get
+    let writes := bodyAssignedIds (← mField s "body")
+    modify fun e => { e with zeroInitLocals := e.zeroInitLocals.filter (!writes.contains ·) }
+    let out ← IntervalSearch.lower s lowerExpr lowerBody
+    modify fun e =>
+      { e with
+        values := saved.values, writableLocals := saved.writableLocals,
+        fnPtrs := saved.fnPtrs, paths := saved.paths,
+        storageMappingVars := saved.storageMappingVars,
+        fixedStructArrayVars := saved.fixedStructArrayVars, snapshots := saved.snapshots,
+        mems := saved.mems, abiElements := saved.abiElements, calldataBytes := saved.calldataBytes,
+        scalarArrays := saved.scalarArrays, byteBuffers := saved.byteBuffers,
+        stringBuffers := saved.stringBuffers, storageBytesVars := saved.storageBytesVars,
+        storageDynamicArrayVars := saved.storageDynamicArrayVars, flatStructs := saved.flatStructs,
+        scalarTy := saved.scalarTy, yulNames := saved.yulNames,
+        yulMemoryArrays := saved.yulMemoryArrays, yulMemoryStructs := saved.yulMemoryStructs,
+        zeroInitLocals := saved.zeroInitLocals.filter (!writes.contains ·) }
+    return out
   if (← get).legacyWrapping && LegacyArrayLoops.candidate s then
     return ← LegacyArrayLoops.lower s lowerExpr lowerBody
   let cond ← mField s "condition"
@@ -15995,6 +16014,7 @@ def finishImportReport (pkgRoot : System.FilePath) (contract : String)
   let legacySrc ← moduleText sourceRoot "Compiler/SolidityImport/Legacy.lean"
   let legacyFlowSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyControlFlow.lean"
   let legacyArraysSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyArrays.lean"
+  let intervalSrc ← moduleText sourceRoot "Compiler/SolidityImport/IntervalSearch.lean"
   let legacyArrayLoopsSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyArrayLoops.lean"
   let abiLoweringSrc ← moduleText sourceRoot "Compiler/SolidityImport/AbiLowering.lean"
   let exprHelpersSrc ← moduleText sourceRoot "Compiler/SolidityImport/ExprHelpers.lean"
@@ -16047,6 +16067,7 @@ def finishImportReport (pkgRoot : System.FilePath) (contract : String)
       ("LegacyControlFlow.lean", Json.str legacyFlowSrc),
       ("LegacyArrays.lean", Json.str legacyArraysSrc),
       ("LegacyArrayLoops.lean", Json.str legacyArrayLoopsSrc),
+      ("IntervalSearch.lean", Json.str intervalSrc),
       ("LegacyBytePointers.lean", Json.str bytePointersSrc),
       ("LegacyPacked.lean", Json.str packedSrc),
       ("LegacyAbi.lean", Json.str legacyAbiSrc),

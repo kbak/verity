@@ -2888,6 +2888,34 @@ mixed results; named reference initialization is checked before modifier lowerin
 The read-only memory-record restrictions above are unchanged. This extension
 adds finite correspondence evidence, not a new frontend correctness theorem.
 
+### Solidity 0.7.6 inclusive interval searches
+
+The bounded importer recognizes a literal-true loop starting with
+`mid = (low + high) / 2`, followed by the source exit
+`if (mid <= low || mid >= high) break;`. All three are distinct writable
+unsigned locals of the same width. A later conditional break preserves the
+current bindings. A conditional continue must first assign `low = mid + 1` or
+`high = mid - 1` and skips the remaining statements. The final if/else must
+choose between those same updates. All other body statements and conditions
+must preserve the bounds and midpoint.
+
+On every continuing iteration the midpoint lies strictly between the endpoints.
+The unit updates therefore cannot wrap, and either removes at least half the
+inclusive interval. If the midpoint sum wraps, the wrapped average is already
+below the low endpoint, so the original endpoint guard exits. A budget of one
+iteration per bit plus one covers the final source exit. A data-dependent
+break without progress evidence remains rejected by the bounded backend. A
+caller relying on valid data would need to
+establish a nonempty initial interval, safe midpoint arithmetic and preservation
+of a reachable exit on every taken update. The observed backend can retain
+such source control flow with its explicit observation budget.
+
+`IntervalSearchProofs.lean` proves the arithmetic bounds for both updates and
+the wrapped midpoint. Its finite-exit theorem applies to the source-step
+observer when each continuing step preserves a nonempty interval of at most
+half its previous size. The theorem leaves the storage-history invariant to
+the caller and makes no claim about EVM gas.
+
 ### Observed scalar control flow (development)
 
 `SolidityImport.LoopExecution` separates finite observations from source outcomes.
