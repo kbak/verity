@@ -21,6 +21,7 @@ private structure Bounds where
   events : Std.HashMap String EventDef := {}
   errors : Std.HashMap String ErrorDef := {}
   seen : Std.HashSet String := {}
+  savedHashCleanup : Option SavedHashCleanup := none
   deriving Inhabited
 
 private def exact (n : Nat) : Range := ⟨n, n⟩
@@ -89,8 +90,9 @@ private def failure (access : MemoryAccess) (reason : String) : M α := do
   modify fun e => { e with currentFile := access.file, stack := access.stack }
   failAt access.node reason
 
-private def check (access : MemoryAccess) (range : Range) : M Unit := do
-  let metadata := access.metadata && range == exact 64
+private def check (s : Bounds) (access : MemoryAccess) (range : Range) : M Unit := do
+  let metadata := access.metadata && range == exact 64 &&
+    !(s.savedHashCleanup.isSome && access.dirtyStore)
   unless range.lo ≤ range.hi && (metadata ||
       (128 ≤ range.lo && range.hi + access.size ≤ 2^32)) do
     failure access "bounded memory requires nonwrapping addresses in [128, 2^32), or word 0x40"
@@ -115,7 +117,7 @@ private def bind (s : Bounds) (name : String) (value : Expr) : M Bounds := do
     versions := s.versions.insert name (s.versions[name]?.getD 0 + 1)
     guards := s.guards.insert name constraints }
   if let some access := s.accesses[name]? then
-    check access range
+    check s access range
     s := { s with seen := s.seen.insert name }
   return s
 
@@ -204,6 +206,52 @@ private def effects (s : Bounds) : List Stmt → M Bounds
         | _ => unsupportedEffects s
       effects next rest
 
+private def visibleResidual (site : SavedHashCleanup) : M α := do
+  modify fun e => { e with currentFile := site.file, stack := site.stack }
+  failAt site.node "bounded memory leaves dirty scalar bytes visible after assembly"
+
+/-- Follow copies of the captured hash through the inlined caller. The only memory it may
+read or restore is the allocator word. A terminal singleton return encodes at [0, 32). -/
+private def savedReturn (site : SavedHashCleanup) (s : Bounds) (saved : Std.HashSet String) :
+    List Stmt → M Bounds
+  | [.returnValues [.localVar result]] => do
+      unless saved.contains result && s.free == exact 128 do visibleResidual site
+      return { s with savedHashCleanup := none }
+  | stmt :: rest => do
+      match stmt with
+      | .letVar name value | .assignVar name value =>
+        let aliases ← match value with
+          | .localVar rhs =>
+            pure (if saved.contains rhs then saved.insert name else saved.erase name)
+          | .literal _ | .mload (.literal 64) => pure (saved.erase name)
+          | _ => visibleResidual site
+        savedReturn site (← bind s name value) aliases rest
+      | .mstore address value =>
+        unless evaluate s address == exact 64 && evaluate s value == exact 128 do
+          visibleResidual site
+        match value with
+        | .localVar _ | .literal _ => savedReturn site (← store s address value) saved rest
+        | _ => visibleResidual site
+      | _ => visibleResidual site
+  | [] => visibleResidual site
+
+/-- Match each zeroing store with its fresh, bounded address. The scratch bytes can only be
+above the ABI and allocator words, and the original hash binding survives every store. -/
+private def hashCleanup (site : SavedHashCleanup) (s : Bounds) (saved : String) :
+    List Stmt → M Bounds
+  | .letVar binding address :: .mstore (.localVar target) (.literal 0) :: rest => do
+      unless binding == target && binding != saved && s.accesses.contains binding do
+        visibleResidual site
+      match address with
+      | .localVar _ | .literal _ | .add (.localVar _) (.literal _) => pure ()
+      | _ => visibleResidual site
+      let next ← bind s binding address
+      unless 128 ≤ (evaluate next (.localVar target)).lo do visibleResidual site
+      let next ← store next (.localVar target) (.literal 0)
+      if target == site.lastStore then savedReturn site next {saved} rest
+      else hashCleanup site next saved rest
+  | _ => visibleResidual site
+
 /-- Consume only an intact mapping sequence carrying fresh lowering provenance.
 Its scratch footprint is [0,64); allocator metadata and bounded source buffers
 are unchanged. Storage words and hash results remain unknown to interval analysis. -/
@@ -218,6 +266,11 @@ private def sequence (generated : Std.HashSet String) (s : Bounds) : List Stmt �
       unless scalar key && scalar baseSlot do unsupported s
       let next ← bind s name (.keccak256 (.literal 0) (.literal 64))
       sequence (generated.erase name) next tail
+  | stmt@(.assignVar saved (.keccak256 (.localVar address) (.literal _))) :: rest => do
+      let next ← step s stmt
+      if let some site := s.savedHashCleanup then
+        if address == site.hashAddress then return ← hashCleanup site next saved rest
+      sequence generated next rest
   | stmt :: rest => do
       let next ← step s stmt
       sequence generated next rest
@@ -234,10 +287,12 @@ def validate (body : Array Stmt) : M Unit := do
     modify fun e => { e with currentFile := site.file, stack := site.stack }
     failAt site.node "bounded memory cannot consume unaudited narrow assembly references"
   let initial : Bounds := {
+    savedHashCleanup := env.savedHashCleanup
     accesses := Std.HashMap.ofList (accesses.toList.map fun access => (access.binding, access))
     events := Std.HashMap.ofList (env.usedEvents.map fun (_, event) => (event.name, event))
     errors := Std.HashMap.ofList (env.usedErrors.map fun err => (err.name, err)) }
   let s ← sequence env.mappingScratchBindings initial body.toList
+  if let some site := s.savedHashCleanup then visibleResidual site
   for access in accesses do
     unless s.seen.contains access.binding do
       failure access "bounded-memory access is outside the supported root sequence"

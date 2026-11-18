@@ -9,7 +9,8 @@ from solidity_differential.check_packed_memory_hash import SHIFTS
 from solidity_differential.check_packed_memory_hash_routes import case
 from solidity_differential.check_tail_cleanup_liveness import (
     CONTINUATIONS, FIXTURE, POISONS, REJECTION, SIGNATURE, archive_expectations,
-    caller_cases, check_observations, preparation_exit, required_mismatches, source_variants,
+    caller_cases, check_observations, preparation_exit, require_saved_routes, required_mismatches,
+    source_variants,
 )
 from solidity_differential.check_packed_storage_read import require_rejection
 from solidity_differential.engine import HarnessError
@@ -117,6 +118,24 @@ class TailCleanupLivenessTests(unittest.TestCase):
             with self.assertRaises(HarnessError):
                 source_variants(malformed)
         self.assertEqual(FIXTURE.read_text(), source)
+
+    def test_saved_hash_requires_complete_independent_three_route_results(self):
+        row = {'calls': 3, 'mismatches': [], 'hashMismatches': []}
+        routes = {name: row.copy() for name in ('source', 'denote', 'generatedEvm')}
+        report = {'status': 'admitted', 'execution': {'status': 'executed', 'routes': routes}}
+        self.assertEqual(require_saved_routes(report, 3), routes)
+        for name in routes:
+            for mutation in ('missing', 'short', 'wrong-word'):
+                changed = copy.deepcopy(report)
+                actual = changed['execution']['routes']
+                if mutation == 'missing':
+                    del actual[name]
+                elif mutation == 'short':
+                    actual[name]['calls'] = 2
+                else:
+                    actual[name]['hashMismatches'] = ['1']
+                with self.subTest(route=name, mutation=mutation), self.assertRaises(HarnessError):
+                    require_saved_routes(changed, 3)
 
     def test_current_rejection_and_missing_routes_gate_remain_mandatory(self):
         require_rejection({'status': 'rejected', 'reason': REJECTION}, REJECTION)

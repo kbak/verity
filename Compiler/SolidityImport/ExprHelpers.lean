@@ -83,11 +83,18 @@ structure AssemblyReference where
   file : String
   stack : List Nat
 
+/-- Fresh address bindings identify the clean hash and the final store of one assembly block.
+Its residual memory must be checked against the complete inlined caller before admission. -/
+structure SavedHashCleanup extends AssemblyReference where
+  hashAddress : String
+  lastStore : String
+
 /-- A source memory access whose fresh address binding must pass the root bounds audit. -/
 structure MemoryAccess where
   binding : String
   size : Nat
   metadata : Bool
+  dirtyStore : Bool := false
   node : Json
   file : String
   stack : List Nat
@@ -183,6 +190,7 @@ structure Env where
   legacyCleanParams : List Nat := []
   rawBindings : RBMap Nat String compare := RBMap.empty
   memoryAccesses : Array MemoryAccess := #[]
+  savedHashCleanup : Option SavedHashCleanup := none
   /-- Fresh result bindings of generated, ordered mapping-preimage scratch sequences. -/
   mappingScratchBindings : Std.HashSet String := {}
   uncheckedAssemblyReferences : Array AssemblyReference := #[]

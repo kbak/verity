@@ -1,4 +1,4 @@
-"""Prepare caller-liveness evidence; tail-only importer admission stays closed."""
+"""Execute the saved-hash caller on three routes and check the remaining caller boundaries."""
 import argparse
 import json
 from pathlib import Path
@@ -6,7 +6,7 @@ from pathlib import Path
 from setup_solc_import import file_sha256
 from .check_packed_memory_hash import SETTINGS, SHIFTS
 from .check_packed_memory_hash_import import observe
-from .check_packed_memory_hash_routes import case
+from .check_packed_memory_hash_routes import case, run_root
 from .check_packed_storage_read import require_rejection
 from .check_storage_reference import compile_variant as compile_storage
 from .check_storage_reference_routes import PACKED_FIXTURE, STATE_ARCHIVES
@@ -36,6 +36,11 @@ CONTINUATIONS = {
     'overlapping-byte-read': 'result := xor(result, byte(0, mload(add(base, 11))))',
     'parameter-alias': 'mstore(add(base, cleanupOffset), 0)\n'
                        'result := xor(result, shr(160, mload(base)))',
+}
+# These two continuations reach an unsupported operation while lowering the caller itself.
+CALLER_REJECTIONS = {
+    'overlapping-byte-read': 'unsupported bounded-memory word operation',
+    'parameter-alias': 'unsupported bounded-memory address expression',
 }
 
 
@@ -95,8 +100,39 @@ def archive_expectations(output):
     return specs[0]['packedExpectations']
 
 
+def require_saved_routes(report, count):
+    execution = report['execution']
+    routes = execution.get('routes', {})
+    if (report['status'] != 'admitted' or execution['status'] != 'executed'
+            or set(routes) != {'source', 'denote', 'generatedEvm'}
+            or any(row != {'calls': count, 'mismatches': [], 'hashMismatches': []}
+                   for row in routes.values())):
+        raise HarnessError('saved hash requires all three routes to match every frozen return')
+    return routes
+
+
+def check_saved_return_boundaries(output, source):
+    restore = 'mstore(0x40, original)'
+    if source.count(restore) != 1:
+        raise HarnessError('caller restore site changed')
+    controls = {
+        'reassigned-return': 'result := 0\n            ' + restore,
+        'unrestored-pointer': '',
+        'different-pointer': 'mstore(0x40, add(original, 32))',
+    }
+    results = {}
+    for name, replacement in controls.items():
+        directory = output / name
+        directory.mkdir()
+        (directory / FIXTURE.name).write_text(source.replace(restore, replacement))
+        observation = observe(directory, FIXTURE.name, CONTRACT, SIGNATURE)
+        require_rejection(observation, REJECTION)
+        results[name] = observation
+    return results
+
+
 def preparation_exit(require_composition):
-    # No source-only experiment can discharge the missing model/generated routes.
+    # More general observing callers and the original storage roots still lack composition.
     return 1 if require_composition else 0
 
 
@@ -108,7 +144,8 @@ def run(output, *, prepared=False, require_composition=False):
     solc, compiler = pinned_compiler()
     if not prepared:
         command(['turbo-lean', '--json', 'build', 'Compiler.SolidityImport.Import',
-                 '--project-dir', ROOT], cwd=ROOT, timeout=1800, log=output / 'build.log')
+                 'Compiler.SolidityImport.Differential', '--project-dir', ROOT], cwd=ROOT,
+                timeout=1800, log=output / 'build.log')
     identity = ImplementationIdentity(FIXTURE, extra_inputs=(PACKED_FIXTURE,))
     expected = archive_expectations(output)
     results = {}
@@ -119,13 +156,23 @@ def run(output, *, prepared=False, require_composition=False):
         path.write_text(source)
         built = compile_source(directory, path.name, CONTRACT, solc)
         cases = caller_cases(expected, name)
+        if name == 'saved-hash':
+            report = run_root(directory / 'routes', path.name, CONTRACT, SIGNATURE, cases,
+                              built, solc, compiler, False)
+            routes = require_saved_routes(report, len(cases))
+            results[name] = {'sourceSha256': file_sha256(path), 'execution': routes['source'],
+                             'threeRouteExecution': report['execution'],
+                             'admission': {'status': report['status'],
+                                           'sourceDigest': report['sourceDigest']}}
+            write_json(directory / 'result.json', results[name])
+            continue
         validate_cases(SIGNATURE, cases)
         verify_abi(built, SIGNATURE, cases)
         write_json(directory / 'cases.json', cases)
         rows, _ = execute_evm(directory / 'source-evm', built, cases)
         execution = check_observations(rows, cases, name)
         admission = observe(directory, path.name, CONTRACT, SIGNATURE)
-        require_rejection(admission, REJECTION)
+        require_rejection(admission, CALLER_REJECTIONS.get(name, REJECTION))
         results[name] = {'sourceSha256': file_sha256(path), 'execution': execution,
                          'admission': admission}
         write_json(directory / 'result.json', results[name])
@@ -137,6 +184,7 @@ def run(output, *, prepared=False, require_composition=False):
         observation = observe(directory, PACKED_FIXTURE.name, 'PackedStorageReference', signature)
         require_rejection(observation, REJECTION)
         original[name] = observation
+    boundaries = check_saved_return_boundaries(output, FIXTURE.read_text())
     identity.verify()
     write_json(output / 'implementation.json', identity.manifest)
     write_json(output / 'manifest.json', {
@@ -144,16 +192,17 @@ def run(output, *, prepared=False, require_composition=False):
         'worktreeStatus': command(['git', 'status', '--porcelain'], cwd=ROOT),
         'compiler': compiler, 'settings': SETTINGS, 'fork': 'cancun',
         'stateArchivesSha256': STATE_ARCHIVES, 'packedArchiveSha256': PACKED_ARCHIVE_SHA256,
-        'scope': 'finite source-only caller-liveness preparation; no importer admission change',
-        'missingRoutes': ['model', 'compiled'],
+        'scope': 'saved hash on three routes; source perturbations for observing callers',
+        'savedHashRoutes': ['source', 'denote', 'generatedEvm'],
         'limits': ['state archives retained unchanged, not executed by this stateless campaign',
                    'no universal liveness, storage sequence, gas or compiler correspondence claim'],
     })
     write_json(output / 'results.json', {'preparationPassed': True,
-        'tailThreeRouteAgreement': False, 'variants': results, 'originalStorage': original})
+        'savedHashThreeRouteAgreement': True, 'tailThreeRouteAgreement': False,
+        'variants': results, 'savedReturnBoundaries': boundaries, 'originalStorage': original})
     calls = sum(row['execution']['calls'] for row in results.values())
-    print(f'{calls} source calls across 8 callers; 13 located rejections; '
-          'tail-only composition remains blocked')
+    print(f'{calls} source calls; saved hash agrees on three routes; '
+          'observing callers and storage roots remain blocked')
     return preparation_exit(require_composition)
 
 
