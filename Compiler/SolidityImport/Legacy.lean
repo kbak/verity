@@ -133,6 +133,25 @@ def validateLegacyYulAssignment (node : Json) (ty : ParamType) (rhs : Expr) : M 
   unless isFullWordYulScalar ty || isProvablyBoundedYulExpr ty rhs do
     failAt node "Solidity 0.7.6 Yul assignment to narrow local requires a bounded value"
 
+/-- Keep ordinary operand evaluation to a single potentially failing sibling. Solidity
+short-circuit operators evaluate their right operand only on the reaching branch. -/
+private def validateArithmeticOrder (node : Json) (kind : String) : M Unit := do
+  let operands ← match kind with
+    | "BinaryOperation" =>
+      if #[some "&&", some "||"].contains (optStr node "operator") then pure #[]
+      else pure #[← mField node "leftExpression", ← mField node "rightExpression"]
+    | "Assignment" => pure #[← mField node "leftHandSide", ← mField node "rightHandSide"]
+    | "FunctionCall" =>
+      let args ← mArr (← mField node "arguments")
+      let callee ← mField node "expression"
+      if optStr callee "nodeType" == some "MemberAccess" then
+        pure (args.push (← mField callee "expression"))
+      else pure args
+    | "TupleExpression" => mArr (← mField node "components")
+    | _ => pure #[]
+  if (operands.filter fun arg => !arg.isNull && !LegacyStructs.totalArgument arg true).size > 1 then
+    failAt node "legacy arithmetic operands with competing failures require evaluation-order support"
+
 /-- Check every reached declaration, including helper bodies. Rejected constructs
 need separate legacy semantics and differential evidence before admission.
 `encodingInput` admits construction only as the direct input to the hash builtin. -/
@@ -159,6 +178,7 @@ partial def validateLegacyDeclaration (node : Json) (encodingInput : Bool := fal
         validateLegacyYul false ast
       return
     if let some kind := optStr node "nodeType" then
+      if (← get).legacyDivisionHalt then validateArithmeticOrder node kind
       LegacyStructs.validate node storageReturns
       LegacySigned.validate node (loops == .observed)
       unless #["FunctionDefinition", "ParameterList", "VariableDeclaration", "Block",
@@ -172,6 +192,8 @@ partial def validateLegacyDeclaration (node : Json) (encodingInput : Bool := fal
           (loops == .observed && #["Break", "Continue"].contains kind) do
         failAt node s!"Solidity 0.7.6 scalar slice does not support {kind}"
       if kind == "FunctionDefinition" || kind == "ModifierDefinition" then
+        if (← get).legacyDivisionHalt && optStr node "stateMutability" != some "pure" then
+          failAt node "legacyDivisionHalt requires pure functions throughout the import closure"
         validateLegacyControlFlow node loops
         LegacyArrays.validateDeclaration node
       if kind == "FunctionDefinition" then
@@ -328,7 +350,13 @@ partial def validateLegacyDeclaration (node : Json) (encodingInput : Bool := fal
           -- Ordinary reference/overload resolution is checked by the lowering.
           if let some id := (field? callee "referencedDeclaration").bind (·.getInt?.toOption) then
             let allowed := #[some "require", some "revert", some "ecrecover", some "keccak256"]
-            if id < 0 && !allowed.contains (optStr callee "name") &&
+            let modular := (← get).legacyDivisionHalt && id == -16 &&
+              optStr callee "name" == some "mulmod"
+            let integerMetatype := id == -27 && optStr callee "name" == some "type" &&
+              ((field? node "arguments").bind (·.getArr?.toOption)).any fun args =>
+                args.size == 1 && optStr args[0]! "nodeType" == some "ElementaryTypeNameExpression" &&
+                ((field? args[0]! "typeName").bind (optStr · "name")).any (·.startsWith "uint")
+            if id < 0 && !integerMetatype && !modular && !allowed.contains (optStr callee "name") &&
                 !((← get).sourceGas && optStr callee "name" == some "gasleft") then
               failAt node ("Solidity 0.7.6 builtin call is outside the scalar slice " ++
                 "(assert/INVALID is not modeled)")

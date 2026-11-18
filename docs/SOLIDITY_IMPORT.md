@@ -2723,6 +2723,20 @@ The 0.7.6 importer lowers pure Yul `div`, `mod`, `mulmod`, `not`, `lt` and
 divisor. Yul `mulmod` takes the remainder of the full mathematical product,
 including when the low 256 bits alone would yield a different result.
 
+### Pure unsigned division with exceptional halts
+
+The optional 0.7.6 import setting `legacyDivisionHalt := true` admits
+unsigned division, remainder and global `mulmod` in pure function closures.
+The lowering tests the divisor or modulus and emits the closed `INVALID`
+instruction on zero. The ordinary guarded profile still requires a source
+nonzero fact for division. Signed division uses its existing guard in both
+profiles. Unsigned `type(T).min` and `type(T).max` resolve at the declared width.
+
+The setting changes importer admission only. The pinned source compiler settings
+are independent. The import digest records the setting. Operands with competing
+potential failures require separate evaluation-order support. Short-circuit
+operators and conditional branches execute only the selected expression.
+
 ### Legacy signed scalars and source-checked casts
 
 The 0.7.6 frontend admits signed integer parameters, locals, helper arguments and

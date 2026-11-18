@@ -210,6 +210,8 @@ def importSlice (pkgRoot projectRoot : System.FilePath) (entry contract : String
     (roots : Array (String × Array String)) (profile : Profile) :
     Lean.MetaM (Slice × ImportReport) := do
   let prepared ← prepareImportSlice pkgRoot projectRoot entry contract profile
+  if profile.legacyDivisionHalt then
+    throwError "legacyDivisionHalt requires the ordinary compilation model"
   unless prepared.legacy && !profile.sourceGas do
     throwError "observed imports require Solidity 0.7.6 without source-gas instrumentation"
   let mut env := prepared.env

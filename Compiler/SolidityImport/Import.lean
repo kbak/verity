@@ -126,6 +126,8 @@ private def resolveSolcRelease (profile : Profile) : MetaM SolcRelease := do
     throwError "evmVersion {profile.evmVersion} is not supported for solc {release.longVersion}"
   if profile.sourceGas && profile.solc != "0.7.6+commit.7338295f" then
     throwError "sourceGas requires the explicit Solidity 0.7.6 profile"
+  if profile.legacyDivisionHalt && (profile.solc != "0.7.6+commit.7338295f" || profile.sourceGas) then
+    throwError "legacyDivisionHalt requires a gas-free Solidity 0.7.6 profile"
   if profile.viaIR && !release.supportsViaIR then
     throwError "viaIR is not supported for solc {release.longVersion}"
   pure release
@@ -4164,23 +4166,25 @@ private partial def checkedSub (left right : Val) : M Val := do
 private partial def checkedDiv (left right : Val) : M Val := do
   let a ← atom left
   let b ← atom right
-  -- Legacy declaration admission establishes a nonzero divisor on every path.
-  if (← get).legacyWrapping then
+  let env ← get
+  if env.legacyWrapping && !env.legacyDivisionHalt then
     return { pre := a.pre ++ b.pre, expr := .div a.expr b.expr }
   let dest ← fresh
   let ok := Stmt.assignVar dest (.div a.expr b.expr)
-  let ite := iteStmt (.eq b.expr (.literal 0)) divPanic ok
+  let onZero := if env.legacyWrapping then LegacyArrays.invalid else divPanic
+  let ite := iteStmt (.eq b.expr (.literal 0)) onZero ok
   pure { pre := a.pre ++ b.pre |>.push (.letVar dest (.literal 0)) |>.push ite, expr := .localVar dest }
 
 private partial def checkedModulo (left right : Val) : M Val := do
   let a ← atom left
   let b ← atom right
-  -- Legacy declaration admission establishes a nonzero divisor on every path.
-  if (← get).legacyWrapping then
+  let env ← get
+  if env.legacyWrapping && !env.legacyDivisionHalt then
     return { pre := a.pre ++ b.pre, expr := .mod a.expr b.expr }
   let dest ← fresh
   let moduloResult := Stmt.assignVar dest (.mod a.expr b.expr)
-  let moduloGuard := iteStmt (.eq b.expr (.literal 0)) divPanic moduloResult
+  let onZero := if env.legacyWrapping then LegacyArrays.invalid else divPanic
+  let moduloGuard := iteStmt (.eq b.expr (.literal 0)) onZero moduloResult
   pure { pre := a.pre ++ b.pre |>.push (.letVar dest (.literal 0)) |>.push moduloGuard,
          expr := .localVar dest }
 
@@ -7170,7 +7174,8 @@ private partial def lowerCall (j : Json) : M Val := do
           argExprs := argExprs.push bound.expr
         let #[a, b, m] := argExprs
           | failAt j s!"{bname} requires three uint256 arguments"
-        let modCheck : Stmt := .ite (.eq m (.literal 0)) [.panic .divisionByZero] []
+        let onZero := if (← get).legacyWrapping then LegacyArrays.invalid else divPanic
+        let modCheck : Stmt := .ite (.eq m (.literal 0)) [onZero] []
         let modVal ← if isMul then lowerYulMulmod a b m else lowerYulAddmod a b m
         return { pre := pre.push modCheck ++ modVal.pre, expr := modVal.expr }
       if calleeId ≥ 0 then
@@ -15822,6 +15827,7 @@ def prepareImportSlice
   env := { env with
     files := fileBytes
     legacyWrapping := legacy
+    legacyDivisionHalt := profile.legacyDivisionHalt
     unchecked := legacy
     sourceGas := profile.sourceGas }
   let sourcesOut ← field parsed "sources"
@@ -16030,6 +16036,7 @@ def finishImportReport (pkgRoot : System.FilePath) (contract : String)
     ("functions", Json.arr signatures),
     ("solcInput", prepared.input),
     ("sourceGas", Json.bool profile.sourceGas),
+    ("legacyDivisionHalt", Json.bool profile.legacyDivisionHalt),
     ("deployment", prepared.deployment),
     ("importerSources", Json.mkObj [
       ("DeployedImmutables.lean", Json.str
@@ -16094,6 +16101,8 @@ private def importSlice
   let mut rootIds : Array Nat := #[]
   for (functionName, written) in roots do
     let (fn, paramTys) ← (selectFunction contract functionName written).run' env
+    if profile.legacyDivisionHalt && optStr fn "stateMutability" != some "pure" then
+      throwError "legacyDivisionHalt requires pure function roots"
     if legacy then
       (validateLegacyDeclaration fn).run' env
     let rootId ← flexNat (← field fn "id")

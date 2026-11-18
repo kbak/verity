@@ -110,7 +110,8 @@ private partial def validateExpression (node : Json)
     let rhs := child node (if kind == some "Assignment" then "rightHandSide" else "rightExpression")
     let constant := nonzeroDivisorLiteral node rhs
     let guarded := (identifier? rhs).any facts.contains
-    unless constant || guarded do
+    let checkedUnsigned := (← get).legacyDivisionHalt && (← mType node).startsWith "uint"
+    unless constant || guarded || checkedUnsigned do
       failAt node ("Solidity 0.7.6 division/modulo needs a nonzero literal or an " ++
         "immutable local guarded on every reaching path; legacy exceptional halt is not modeled")
   match node with

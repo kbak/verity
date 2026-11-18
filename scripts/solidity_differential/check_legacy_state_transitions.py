@@ -174,7 +174,8 @@ def scenario(kind, caller, layout, *, initial_count=3, random_cases=8, seed=7611
 def campaign(output, *, kind='links', context=0, optimized=False, initial_count=3,
              fixture=FIXTURE, contract=None, functions=None, extra_sources=None,
              fields=None, errors=None, events=None, dirty_mappings=False, prepared=False,
-             scenario_builder=scenario, import_functions=None, optimizer_runs=200):
+             scenario_builder=scenario, import_functions=None, optimizer_runs=200,
+             legacy_division_halt=False):
     output = Path(output).resolve()
     output.mkdir(parents=True, exist_ok=False)
     # Parallel execution must share fixed artifacts: build once before workers.
@@ -204,6 +205,8 @@ def campaign(output, *, kind='links', context=0, optimized=False, initial_count=
                                 '\n'.join('  function ' + f.replace('address[]', '«address[]»') for f in (import_functions or functions)))
     if optimized:
         template = template.replace('optimizerRuns := none', f'optimizerRuns := some {optimizer_runs}')
+    if legacy_division_halt:
+        template = template.replace('bytecodeHash := "none"', 'bytecodeHash := "none", legacyDivisionHalt := true')
     driver = output / 'Driver.lean'
     driver.write_text(template)
     original = solc_compile({'language': 'Solidity', 'sources': sources, 'settings': {
