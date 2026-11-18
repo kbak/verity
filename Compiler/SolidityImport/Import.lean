@@ -16052,6 +16052,8 @@ def finishImportReport (pkgRoot : System.FilePath) (contract : String)
       ("LegacyAbi.lean", Json.str legacyAbiSrc),
       ("LegacyMemory.lean", Json.str legacyMemorySrc),
       ("LegacySigned.lean", Json.str legacySignedSrc),
+      ("LegacyStructs.lean", Json.str
+        (← moduleText sourceRoot "Compiler/SolidityImport/LegacyStructs.lean")),
       ("BoundedMemory.lean", Json.str boundedMemorySrc),
       ("MemoryBounds.lean", Json.str memoryBoundsSrc),
       ("StorageLayout.lean", Json.str storageLayoutSrc),
