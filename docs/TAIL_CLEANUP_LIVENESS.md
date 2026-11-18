@@ -1,9 +1,9 @@
 # Tail-only cleanup and caller liveness
 
-This is regression and design preparation for #32, stacked on fork PR #49.
-Importer admission remains unchanged. Wait for #39 to merge before implementing
-any admission extension; the full-cleanup read composition in
-[the preceding design](PACKED_STORAGE_READ_DESIGN.md) remains the earlier slice.
+This document tracks the tail-only caller work for #32. The importer
+still rejects the tail-only caller. Earlier fork work covers bounded-memory
+lowering and full-cleanup storage reads. [PR #39](https://github.com/kbak/verity/pull/39)
+and [PR #56](https://github.com/kbak/verity/pull/56).
 
 ## What remains observable
 
@@ -126,8 +126,7 @@ consumers connecting writes to modular EVM addresses must establish their bounds
 
 This supplies proof ingredients for the earlier design. A complete caller effect
 analysis, ABI-return/allocator reasoning and source/importer correspondence are
-still pending. No importer rule, fixture, independent expectation or current
-rejection changes; the full-cleanup admission slice still comes first after #39.
+still pending.
 
 ## Bounded literal execution bridge
 
@@ -157,9 +156,7 @@ This bridge proves source execution and observations for literal blocks. It does
 not derive equal operands for arbitrary expressions, infer aliases or residual
 masks, erase earlier captured scalar values, prove ABI return/allocator behavior,
 or establish source/compiler correspondence or generated-EVM equivalence. The
-existing rejection gates and independent expectations remain unchanged. Importer
-admission still waits for #39, with full-cleanup composition before tail-only
-caller analysis.
+existing rejection gates and independent expectations remain unchanged.
 
 ## Parameter and local-variable store bridge
 
@@ -187,15 +184,37 @@ A value captured from dirty memory before cleanup is not made equal by later
 stores. This slice does not analyze aliases, assignments, branches or calls,
 prove ABI return/allocator behavior, or establish compiler/generated-EVM
 correspondence or gas/memory-size equality. It adds no importer admission rule;
-all independent expectations and rejection gates remain unchanged. Full-cleanup
-hash/storage-read admission still waits for #39 and precedes tail-only analysis.
+all independent expectations and rejection gates remain unchanged.
+
+## Returning a saved hash after cleanup
+
+`SavedHashReturn.lean` proves the canonical execution of a hash assignment,
+a store-only cleanup block, and a return of the saved local. The initial word
+and byte views must agree, and the rounded word window used to read the hash
+must fit in the address space. The digest covers exactly the requested bytes.
+Each cleanup store has a resolved address, value, and nonwrapping footprint.
+The proof identifies the exact poststate after those writes, including the
+original digest in the return words.
+
+Two executions with the same physical preimage therefore return the same word.
+Their bytes outside the preimage may differ, and their cleanup stores may
+overwrite part or all of the preimage after capture. For the source probe, the
+tail store overwrites the final six bytes of the 58-byte input after hashing.
+The proof takes the preimage at capture as a premise. Establishing it from the
+preceding packing stores belongs to the caller analysis.
+
+For an external return of a single local, the compiler emits `mstore(0, local)`
+and `return(0, 32)`. Given the saved word in that IR local, the IR interpreter
+returns it and writes its big-endian bytes at offsets 0 through 31. Connecting
+the source and IR bindings through helper inlining and restoring the caller's
+free-memory pointer remain separate obligations.
 
 ## Subsequent implementation acceptance
 
-After #39 and the preceding full-cleanup slice merge, first prove the minimal
-straight-line caller relation and integrate it with structural effect analysis.
-Use small kernel-checked lemmas, explicit address bounds, the existing hash
-premises, and existing state lenses; add no axiom or proof shortcut.
+The next step is to recognize the saved-hash continuation in the importer and
+discharge its preimage, cleanup, binding, and allocator obligations from the
+actual caller. Memory reads in more general continuations still require
+structural effect analysis.
 
 A separate implementation PR must replace appropriate positive rejection checks
 with actual imported Denote and generated Cancun execution against the same
