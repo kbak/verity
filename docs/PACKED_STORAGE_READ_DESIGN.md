@@ -1,9 +1,9 @@
-# Full-cleanup packed hash and storage read
+# Packed hash and read-only storage lookup
 
-This implements the read-only full-cleanup composition slice of #32 after #39
-merged. [Successful writes and logs](PACKED_STORAGE_UPDATES.md) extend this base
-in a separate campaign. Tail-only cleanup, rollback and the pinned downstream
-wrapper remain separate work; these slices do not complete #32.
+The read-only slice of #32 covers full cleanup and a tail-only helper that
+captures its hash before cleanup. Full-cleanup writes and logs have a separate
+[campaign](PACKED_STORAGE_UPDATES.md). Tail-only writes, rollback and the pinned
+downstream wrapper remain open.
 
 ## Executable boundary
 
@@ -16,7 +16,9 @@ wrapper remain separate work; these slices do not complete #32.
 | Combined `read`, helper rename, shifted layout | The unchanged initial reads match the independent oracle across source EVM, actual Denote and generated Cancun EVM. |
 | Caller reads the cleared buffer after lookup | All three routes preserve the same independent reads; the source checks that all cleanup words remain zero. |
 | Wrong mapping base, shortened hash | All three real execution routes must disagree with the oracle only in return data, and agree with each other; failures or state corruption do not count as detection. |
-| Partial cleanup, dirty hash, dirty word read, unknown cleanup alias | Source-valid roots retain their respective located rejections. |
+| Tail-only read, shifted layout | The saved hash selects the three independently computed record slots on all three routes. |
+| Tail-only wrong mapping base | The independent return-data oracle detects the wrong record on each route. |
+| Substituted key, heap read after tail-only lookup, dirty hash, dirty word read, unknown cleanup alias | Source-valid roots retain their respective located rejections. |
 | ABI allocation before the hash | Retains the synthetic-memory-write rejection. |
 | Raw scratch read after lookup | Retains the existing `unsupported Yul builtin mload` rejection. |
 | Unexpected storage write | All three routes detect return-data and state corruption against the unchanged read expectations. |
@@ -74,8 +76,11 @@ remain unknown words in the interval analysis, as do hash results. Reading stora
 does not establish a pointer bound. Existing successful guards and binding-version
 invalidation still apply. Raw writes and scalar logs require the separate
 memory-independent successful suffix; external calls, loops and unsupported
-branches remain excluded. Dirty-bit cleanup requirements in `BoundedMemory.lean` are
-unchanged, so tail-only cleanup still rejects before this composition audit.
+branches remain excluded. For tail-only cleanup, the compiler-generated slot hash must use a surviving
+copy of the captured key and a fixed mapping base. The read-only suffix accepts
+masked or full record words at that slot or a literal offset. It bounds the
+static return window below the heap. The direct digest and combined lookup both
+run on three routes.
 
 The mapping-slot preimage remains the independent `word32(key) ++ word32(base)`
 expectation. Layout resolution and field extraction must remain construct-generic;

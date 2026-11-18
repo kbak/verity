@@ -1,7 +1,7 @@
 # Tail-only cleanup and caller liveness
 
-This document tracks the tail-only caller work for #32. The importer
-still rejects the tail-only caller. Earlier fork work covers bounded-memory
+The importer admits an inlined helper with tail-only cleanup when the caller
+returns the saved hash. Earlier fork work covers bounded-memory
 lowering and full-cleanup storage reads. [PR #39](https://github.com/kbak/verity/pull/39)
 and [PR #56](https://github.com/kbak/verity/pull/56).
 
@@ -14,12 +14,17 @@ nonzero payload bytes are not automatically dirty: liveness must track unknown
 bits separately from known data. Rehashing the buffer after cleanup is not an
 acceptable replacement for preserving the saved digest.
 
-The current bounded-memory analysis rejects remaining dirty scalar bytes at
-assembly exit, before a caller can establish their irrelevance. That boundary
-stays mandatory in this PR. A memory-safe annotation alone supplies no proof that
-a caller cannot observe the residual bytes.
+The assembly-level dirty-byte masks must show that the hash reads clean bytes.
+If residual bytes remain, an inlined helper may defer its exit check to the root
+when it assigns that hash to its result and ends with a store. The root matches
+the fresh hash and final store bindings, checks each zeroing store's heap bounds,
+and follows copies of the result through the caller. Reassigning a binding drops
+its previous value. The caller may read allocator word `0x40` and restore it to
+the entry value `0x80`. With that pointer restored, the caller can return the saved word directly
+or use it as the key for a read-only record lookup. Writes carrying dirty scalar bits must stay in
+the heap. A memory-safe annotation grants no additional access.
 
-## Executable preparation
+## Executable coverage
 
 `TailCleanupCaller.sol` is a separate, unannotated assembly probe. It injects
 0, 1, or the maximum 96-bit value into the address word's upper bits. These bits
@@ -45,15 +50,16 @@ mismatches, not new expected digests or ignored failures.
 The 10,206 calls are finite source-EVM evidence under the pinned Solidity 0.8.26,
 Cancun, via-IR and optimizer settings. There are 3,024 required mismatches. Missing
 observations, reverts, wrong return widths, unexpected mismatches and missing
-sensitivity all fail the campaign. Eight probe imports and all five unchanged
-storage-reference roots must retain the located dirty-byte rejection.
+sensitivity all fail the campaign. The saved-hash probe must also match every independent return in imported Denote
+and generated Cancun bytecode. The seven other continuations and the four write or rollback
+roots must produce located rejections. The original storage-reference read must
+match the archived observations on all three routes. Separate import controls
+exercise a reassigned result, a missing restore and a different final pointer.
 
 The harness archives source variants, inputs, real observations, runtimes,
 compiler/node identities, implementation identities and the frozen expectation
-checksums. Full state archives are preserved as provenance; this stateless campaign
-does not replay their transactions. The existing storage sequence campaigns still
-own those obligations. Denote/generated-EVM execution of these tail-only roots
-is explicitly missing; separate full-cleanup controls cannot fill that gap.
+checksums. The storage campaigns replay the state archives. The tail-only read also checks every accessed physical slot against the
+independent mapping address, including reads of empty records.
 
 ## Proposed caller contract
 
@@ -205,22 +211,26 @@ preceding packing stores belongs to the caller analysis.
 
 For an external return of a single local, the compiler emits `mstore(0, local)`
 and `return(0, 32)`. Given the saved word in that IR local, the IR interpreter
-returns it and writes its big-endian bytes at offsets 0 through 31. Connecting
-the source and IR bindings through helper inlining and restoring the caller's
-free-memory pointer remain separate obligations.
+returns it and writes its big-endian bytes at offsets 0 through 31. The importer checks the
+copy chain through the inlined caller and the final free-memory pointer. The
+three-route campaign exercises that connection for the pinned compiler profile.
 
 ## Subsequent implementation acceptance
 
-The next step is to recognize the saved-hash continuation in the importer and
-discharge its preimage, cleanup, binding, and allocator obligations from the
-actual caller. Memory reads in more general continuations still require
-structural effect analysis.
+The importer follows copies of the saved hash into the key word of a generated
+mapping preimage. It checks the fresh slot binding, the exact layout base and
+the restored allocator before accepting the hash of scratch bytes 0 through 63.
+The suffix may read the resulting raw storage slot and fields at literal word
+offsets, apply a literal field mask and return those words. Its static return
+buffer must fit below byte 128. A substituted key, a memory observation, a write
+or a revert in this suffix still rejects.
 
-A separate implementation PR must replace appropriate positive rejection checks
-with actual imported Denote and generated Cancun execution against the same
-frozen hashes. Unsafe callers, unresolved aliases and unsupported observations
-must retain explicit rejections. Do not turn failed perturbations into passing
-expectations. The original tail-only storage helper must then pass its unchanged
+The original read runs on source Solidity, imported Denote and generated Cancun
+bytecode using the frozen initial reads. Each route must touch the exact three
+record slots for each key, return the expected bytes and preserve storage and
+logs. A shifted-layout control and a wrong-base control exercise slot selection.
+
+The original tail-only storage helper must then pass its unchanged
 29-transaction state sequence on all three routes, including adjacent slots,
 other keys, events and rollback. That broader storage support and the pinned
 downstream wrapper remain later #32 acceptance work, not claims of this PR.
@@ -232,8 +242,8 @@ PYTHONPATH=scripts python3 -m solidity_differential.check_tail_cleanup_liveness 
   --output .lake/tail-cleanup
 ```
 
-`--prepared` reuses the importer build. Default exit 0 certifies preparation only.
-`--require-composition` exits 1 after successful preparation because the tail-only
-model/generated routes remain absent. Unexpected admission or rejection changes,
-invalid observations, and infrastructure failures exit 2. CI retains the evidence
-with the other bounded-memory campaigns.
+`--prepared` reuses the importer and differential runner. The default gate
+requires the saved-hash caller to pass all three routes, the source perturbations
+to expose the expected bytes, and unsupported callers to produce located
+rejections. `--require-composition` also requires the broader tail-only work,
+including writes and rollback, and still reports it as pending.

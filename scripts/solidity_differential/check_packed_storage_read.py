@@ -1,4 +1,4 @@
-"""Require full-cleanup packed-hash/storage reads on three actual execution routes."""
+"""Check packed-hash storage reads after full and partial cleanup on three execution routes."""
 import argparse
 import copy
 import json
@@ -49,8 +49,15 @@ def key_read_inputs(spec):
     return result
 
 
+def partial_cleanup(source):
+    clears = '            mstore(base, 0)\n            mstore(add(base, 32), 0)\n'
+    if source.count(clears) != 1:
+        raise HarnessError('full-cleanup source anchor changed')
+    return source.replace(clears, '')
+
+
 def source_variants(source):
-    return {
+    variants = {
         'original': source,
         'renamed': source.replace('packedKey', 'deriveKey').replace('locate', 'findRecord'),
         'shifted-layout': source.replace('uint256 private outerBefore;',
@@ -73,22 +80,32 @@ def source_variants(source):
             'Record storage row = locate(account, left, right, salt);\n'
             '        row.accumulator = 1;').replace('external view returns', 'external returns'),
     }
+    return {**variants, 'partial-cleanup': partial_cleanup(source),
+            'partial-cleanup-shifted': partial_cleanup(variants['shifted-layout']),
+            'partial-cleanup-wrong-base': partial_cleanup(variants['wrong-mapping-base'])}
 
 
 def rejected_sources(source):
-    for name, before, after, reason in (
-        ('partial-cleanup', '            mstore(base, 0)\n            mstore(add(base, 32), 0)\n',
-         '', 'bounded memory leaves dirty scalar bytes visible after assembly'),
-        ('dirty-hash', 'keccak256(add(base, 12), 58)', 'keccak256(base, 58)',
+    tail = partial_cleanup(source)
+    lookup = 'return bucket.records[packedKey(account, left, right, salt)];'
+    if tail.count(lookup) != 1:
+        raise HarnessError('mapping key source anchor changed')
+    yield ('partial-cleanup-unrelated-key', tail.replace(lookup,
+           'bytes32 key = packedKey(account, left, right, salt); key = salt; return bucket.records[key];'),
+           READ, 'bounded memory leaves dirty scalar bytes visible after assembly')
+    yield ('partial-cleanup-caller-read', partial_cleanup(source_variants(source)['caller-buffer-read']),
+           READ, 'bounded memory leaves dirty scalar bytes visible after assembly')
+    for name, signature, before, after, reason in (
+        ('dirty-hash', DIGEST, 'keccak256(add(base, 12), 58)', 'keccak256(base, 58)',
          'bounded memory hash observes dirty scalar bytes'),
-        ('dirty-read', 'keccak256(add(base, 12), 58)', 'mload(base)',
+        ('dirty-read', DIGEST, 'keccak256(add(base, 12), 58)', 'mload(base)',
          'bounded memory observes dirty scalar bits'),
-        ('unknown-cleanup-alias', 'mstore(base, 0)', 'mstore(128, 0)',
+        ('unknown-cleanup-alias', DIGEST, 'mstore(base, 0)', 'mstore(128, 0)',
          'bounded memory cannot establish disjointness from dirty bytes'),
     ):
         if source.count(before) != 1:
             raise HarnessError('rejection source anchor changed')
-        yield name, source.replace(before, after), DIGEST, reason
+        yield name, source.replace(before, after), signature, reason
     # This allocation has observable effects on the free pointer and synthetic memory layout.
     allocated = source.replace('        assembly ("memory-safe") {',
         '        bytes32 encoded = keccak256(abi.encode(salt));\n'
@@ -171,6 +188,32 @@ def require_combined(result, mutant=False, *, mutation_fields=('data',)):
                        mutant=True, mutation_fields=mutation_fields)
 
 
+def require_record_slots(result, spec):
+    """Even an empty record must be read at its independently computed physical slots."""
+    for stage in ('discovery', 'observations'):
+        for route in ('source', 'model', 'compiled'):
+            rows = result[stage][route]
+            for tx, slot, row in zip(spec['transactions'], spec['recordSlots'], rows, strict=True):
+                expected = {(tx['target'], '0x' + word(int(slot, 16) + offset).hex())
+                            for offset in range(3)}
+                if row['id'] != tx['id'] or set(map(tuple, row['touched'])) != expected:
+                    raise HarnessError(f'{stage} {route} {tx["id"]}: wrong physical record slots')
+
+
+def run_record_reads(directory, spec, path, contract, built, solc, compiler):
+    driver, snapshot = prepare_model(directory / 'combined-model', path, contract, [READ], compiler)
+    compiled = compile_generated(directory / 'combined-model', snapshot, solc)
+    return run_routes(directory / 'combined-routes', spec, path, built, driver, compiled)
+
+
+def run_digest_control(directory, path, expected, built, solc, compiler):
+    digest = run_root(directory / 'digest', path.name, CONTRACT, DIGEST,
+                      packed_cases('digest', expected), built, solc, compiler, False)
+    if digest['status'] != 'admitted' or digest['execution']['status'] != 'executed':
+        raise HarnessError('required three-route digest control did not execute')
+    write_json(directory / 'digest-result.json', digest)
+
+
 def run(output, *, prepared=False):
     output = output.resolve()
     if not output.is_relative_to(ROOT):
@@ -196,30 +239,27 @@ def run(output, *, prepared=False):
     for name, text in source_variants(source).items():
         directory = output / name
         path, built = compile_variant(directory, text, solc)
-        spec = read_prefix(specs[int(name == 'shifted-layout')])
+        spec = read_prefix(specs[int(name in ('shifted-layout', 'partial-cleanup-shifted'))])
         write_json(directory / 'read-prefix.json', spec)
         result = replay_expected(spec, {'source': source_adapter(directory / 'source', built, spec)},
                                  required_routes=('source',))
         write_json(directory / 'execution.json', result)
-        mutant = name in ('wrong-mapping-base', 'short-hash', 'storage-write')
+        mutant = name in ('wrong-mapping-base', 'partial-cleanup-wrong-base', 'short-hash', 'storage-write')
         mutation_fields = ('data', 'storage') if name == 'storage-write' else ('data',)
         require_source(result, mutant, mutation_fields=mutation_fields)
         results[name] = {'sourceSha256': file_sha256(path), 'sourceReads': 6,
                          'mismatches': result['mismatches'], 'combinedThreeRouteAgreement': False}
-        driver, snapshot = prepare_model(directory / 'combined-model', path, CONTRACT,
-                                         [READ], compiler)
-        compiled = compile_generated(directory / 'combined-model', snapshot, solc)
-        combined = run_routes(directory / 'combined-routes', spec, path, built, driver, compiled)
+        combined = run_record_reads(directory, spec, path, CONTRACT, built, solc, compiler)
         require_combined(combined, mutant, mutation_fields=mutation_fields)
+        if not mutant:
+            require_record_slots(combined, spec)
         results[name].update({'combinedThreeRouteAgreement': not mutant,
                               'mutationDetectedOnAllRoutes': mutant,
                               'mismatches': combined['mismatches']})
+        if name in ('original', 'partial-cleanup'):
+            run_digest_control(directory, path, spec['packedExpectations'], built, solc, compiler)
+            results[name]['controls'] = {'hashThreeRouteCases': len(spec['packedExpectations'])}
         if name == 'original':
-            digest = run_root(directory / 'digest', path.name, CONTRACT, DIGEST,
-                packed_cases('digest', spec['packedExpectations']), built, solc, compiler, False)
-            if digest['status'] != 'admitted' or digest['execution']['status'] != 'executed':
-                raise HarnessError('required full-cleanup hash control did not execute')
-            write_json(directory / 'digest-result.json', digest)
             key_spec = key_read_inputs(spec)
             write_json(directory / 'key-inputs.json', key_spec['transactions'])
             driver, snapshot = prepare_model(directory / 'key-model', path, CONTRACT,
@@ -227,8 +267,7 @@ def run(output, *, prepared=False):
             compiled = compile_generated(directory / 'key-model', snapshot, solc)
             key_result = run_routes(directory / 'key-routes', key_spec, path, built, driver, compiled)
             require_outcome(key_result)
-            results[name]['controls'] = {'hashThreeRouteCases': len(spec['packedExpectations']),
-                                        'suppliedKeyThreeRouteReads': 6}
+            results[name]['controls']['suppliedKeyThreeRouteReads'] = 6
     for name, text, signature, reason in rejected_sources(source):
         directory = output / name
         path, _ = compile_variant(directory, text, solc)
@@ -243,14 +282,14 @@ def run(output, *, prepared=False):
         'compiler': compiler, 'settings': SETTINGS, 'fork': 'cancun',
         'stateArchivesSha256': STATE_ARCHIVES, 'packedArchiveSha256': PACKED_ARCHIVE_SHA256,
         'readProjection': 'unchanged first six transactions and observations from each full archive',
-        'scope': 'full-cleanup packed-hash and storage-read composition',
+        'scope': 'full and partial cleanup before packed-key storage reads',
         'missingCombinedRoutes': [],
         'limits': ['execution regression evidence is not an importer correspondence theorem',
-                   'no tail-only cleanup, write/log, constructor, gas or whole-world equivalence',
+                   'no tail-only writes, logs, rollback, constructor or gas equivalence',
                    'pinned downstream wrapper and compiler correspondence remain pending'],
     })
     write_json(output / 'results.json', {'combinedThreeRouteAgreement': True, 'variants': results})
-    print('Full-cleanup reads and controls agree across source, Denote and generated EVM; '
+    print('Packed-key reads and controls agree across source, Denote and generated EVM; '
           'source defects remain detectable and excluded roots remain rejected')
     return 0
 

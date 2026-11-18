@@ -96,12 +96,12 @@ private def writeMask (node : Json) (addr value : Value) : B Unit := do
       if mask == 0 then s.bytes.erase at_ else s.bytes.insert at_ mask }
 
 private def register (node : Json) (value : Value) (size : Nat)
-    (metadata : Bool := false) : B Val := do
+    (metadata dirtyStore : Bool := false) : B Val := do
   clean node value
   let binding ← liftM fresh
   modifyEnv fun e => { e with
     memoryAccesses := e.memoryAccesses.push
-      { binding, size, metadata, node, file := e.currentFile, stack := e.stack } }
+      { binding, size, metadata, dirtyStore, node, file := e.currentFile, stack := e.stack } }
   return { pre := value.term.pre.push (.letVar binding value.term.expr), expr := .localVar binding }
 
 private def shifted (a b : Value) : Option (String × Int) :=
@@ -208,6 +208,25 @@ def scalarReferences (refs : Array Json) : M Bool := do
     ((field? ref "declaration").bind (·.getNat?.toOption)).any fun id =>
       env.scalarTy.contains id && !env.enumBounds.contains id
 
+/-- Defer the block-exit check only for a captured clean hash and a trailing source store.
+The root audit matches both fresh bindings in execution order and checks every later statement. -/
+private def deferSavedHash (assembly : Json) (out : Array Stmt) : M Unit := do
+  let env ← get
+  let rejectBlock := failAt (α := Unit) assembly
+    "bounded memory leaves dirty scalar bytes visible after assembly"
+  let _ :: _ :: _ := env.stack | rejectBlock
+  let some (result, _) := env.helperResult | rejectBlock
+  let some (.mstore (.localVar lastStore) _) := out.back? | rejectBlock
+  let some hashAddress := out.findSome? (fun
+    | .assignVar name (.keccak256 (.localVar address) (.literal _)) =>
+      if name == result then some address else none
+    | _ => none) | rejectBlock
+  if env.savedHashCleanup.isSome then rejectBlock
+  else
+    let site := { hashAddress, lastStore, node := assembly, file := env.currentFile,
+                  stack := env.stack : SavedHashCleanup }
+    modify fun e => { e with savedHashCleanup := some site }
+
 /-- Admit only straight-line assembly; unsupported effects stay located failures. -/
 def lower (assembly : Json) (stmts refs : Array Json) (leafLower : Json → M Val)
     (assign : Json → Json → Val → M Stmt) : M (Array Stmt) := do
@@ -273,12 +292,12 @@ def lower (assembly : Json) (stmts refs : Array Json) (leafLower : Json → M Va
         let addr ← expression args[0]! refs leafLower
         let value ← expression args[1]! refs leafLower
         writeMask stmt addr value
-        let at_ ← register call addr 32 true
+        let at_ ← register call addr 32 true (value.dirty != 0)
         out := out ++ at_.pre ++ value.term.pre
         out := out.push (.mstore at_.expr value.term.expr)
       | _ => reject stmt "bounded memory requires straight-line assembly"
     unless (← get).bytes.isEmpty do
-      reject assembly "bounded memory leaves dirty scalar bytes visible after assembly"
+      liftM (deferSavedHash assembly out)
     return out
   action.run' {}
 
