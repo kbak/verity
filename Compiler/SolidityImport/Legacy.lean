@@ -41,7 +41,8 @@ private partial def validateLegacyYul (memoryRevert : Bool) (node : Json) : M Un
             #[some "mload", some "mstore", some "add", some "revert"]
             else #[some "mload", some "add", some "sub", some "mul", some "byte", some "chainid",
               some "call", some "delegatecall", some "returndatasize", some "sload",
-              some "iszero", some "or", some "shl", some "shr"]
+              some "iszero", some "or", some "not", some "lt", some "gt", some "shl", some "shr",
+              some "div", some "mod", some "mulmod"]
           unless builtins.contains name ||
               (!memoryRevert && name == some "gas" && (← get).sourceGas) do
             failAt node (if memoryRevert then

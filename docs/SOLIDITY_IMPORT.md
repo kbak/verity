@@ -2716,6 +2716,13 @@ Semantic references: [Solidity 0.7.6 storage layout](https://docs.soliditylang.o
 [modifier execution](https://docs.soliditylang.org/en/v0.7.6/contracts.html#function-modifiers)
 and [exceptions](https://docs.soliditylang.org/en/v0.7.6/control-structures.html#error-handling-assert-require-revert-and-exceptions).
 
+### Legacy arithmetic in straight-line assembly
+
+The 0.7.6 importer lowers pure Yul `div`, `mod`, `mulmod`, `not`, `lt` and
+`gt` over full words. Yul division and remainder return zero for a zero
+divisor. Yul `mulmod` takes the remainder of the full mathematical product,
+including when the low 256 bits alone would yield a different result.
+
 ### Legacy signed scalars and source-checked casts
 
 The 0.7.6 frontend admits signed integer parameters, locals, helper arguments and
