@@ -4251,6 +4251,8 @@ private partial def checkedSignedMul (left right : Val) : M Val := do
 private partial def signedDiv (isUnchecked : Bool) (left right : Val) : M Val := do
   let a ← atom left
   let b ← atom right
+  if (← get).legacyWrapping then
+    return { pre := a.pre ++ b.pre, expr := .sdiv a.expr b.expr }
   let dest ← fresh
   let ok := Stmt.assignVar dest (.sdiv a.expr b.expr)
   let nonZero :=
@@ -4265,13 +4267,15 @@ private partial def signedDiv (isUnchecked : Bool) (left right : Val) : M Val :=
          expr := .localVar dest }
 
 /-- Solidity signed `%`: EVM `smod` (truncated remainder, carrying the sign of
-the dividend, so `(-7) % 4 == -3`) after the zero-divisor guard (`Panic(0x12)`).
+the dividend, so `(-7) % 4 == -3`) with a nonzero divisor in 0.7.6 or a zero-divisor panic in 0.8.
 Unlike `/` it cannot overflow (`type(intN).min % -1 == 0`), and Solidity 0.8
 keeps the zero-divisor guard inside `unchecked`. For narrow `intN` the
 sign-extended operands give an in-range, already sign-extended result. -/
 private partial def signedModulo (left right : Val) : M Val := do
   let a ← atom left
   let b ← atom right
+  if (← get).legacyWrapping then
+    return { pre := a.pre ++ b.pre, expr := .smod a.expr b.expr }
   let dest ← fresh
   let ok := Stmt.assignVar dest (.smod a.expr b.expr)
   let check := iteStmt (.eq b.expr (.literal 0)) divPanic ok

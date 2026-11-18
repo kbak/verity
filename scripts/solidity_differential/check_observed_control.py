@@ -134,8 +134,10 @@ def check(output, optimized=False, mutation=None, ordinary_import=False):
     if ordinary_import:
         from .observed_import import validate_metadata
         validate_metadata(model, optimized, False, {row['function'] for row in rows})
-    if (model['rejected'] != (['unguarded', 'staleGuard', 'unnamedResult'] if ordinary_import
-                                  else ['unguarded', 'staleGuard', 'viewOnly', 'unnamedResult'])
+    rejected = ['unguarded', 'staleGuard', 'skippedDivisorGuard']
+    if not ordinary_import:
+        rejected.append('viewOnly')
+    if (model['rejected'] != rejected + ['unnamedResult']
             or {r['id'] for r in model['observations']} != {r['id'] for r in rows}
             or len(model['observations']) != len(rows)):
         raise HarnessError('observed lowering coverage is incomplete')

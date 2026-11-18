@@ -1028,6 +1028,16 @@ def tasks(update_golden: bool) -> list:
                    "--context", "2" if optimized else "0",
                    *(["--optimized"] if optimized else []), *(["--abi-v2"] if v2 else [])))
               for optimized in (False, True) for v2 in (False, True)]
+    items += [(f"legacy-signed-division-source-opt{int(optimized)}", 1,
+               lambda optimized=optimized: module_campaign_output(
+                   "check_legacy_signed_division_source", "legacy-signed-division-source", 600,
+                   *(["--optimized"] if optimized else [])))
+              for optimized in (False, True)]
+    items += [(f"legacy-signed-division-opt{int(optimized)}", 1,
+               lambda optimized=optimized: module_campaign_output(
+                   "check_legacy_signed_division", "legacy-signed-division", 1800, "--prepared",
+                   *(["--optimized", "--mutations"] if optimized else [])))
+              for optimized in (False, True)]
     items += [(f"legacy-signed-{mutation}", 1,
                lambda mutation=mutation: module_campaign_output(
                    "check_legacy_signed_scalars", "legacy-signed-mutation", 1800, "--prepared",

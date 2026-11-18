@@ -75,7 +75,8 @@ elab "observed_control_cases " input:str " output " output:str : command => do
       currentFile := "Source.sol", files := RBMap.empty.insert "Source.sol" source.toUTF8,
       funs := RBMap.empty.insert id fn }
     let expectedRejection := match name with
-      | "unguarded" | "staleGuard" => some "division/modulo needs a nonzero literal"
+      | "unguarded" | "staleGuard" | "skippedDivisorGuard" =>
+        some "division/modulo needs a nonzero literal"
       | "viewOnly" => some "observed control roots currently require pure Solidity 0.7.6 functions"
       | "unnamedResult" => some "observed control returns must be named"
       | _ => none
