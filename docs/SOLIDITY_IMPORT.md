@@ -437,6 +437,13 @@ paths that use heuristic iteration limits. General loops, `do` loops,
 `break`/`continue`, narrow for counters, inclusive for bounds, and mutations of
 the loop counter from its body remain rejected.
 
+The 0.7.6 bounded importer can select an inlined helper’s `if` branch when
+its lowered condition has a closed constant value. This covers immutable
+literal arguments tested with `==` and `!=`. Argument evaluation still runs
+before the helper body. A selected early return skips the helper’s remaining
+statements, and the closure report records the helpers reached during lowering.
+Runtime-dependent conditions keep both branches.
+
 Unsigned `/`, `%`, `/=`, and `%=` are admitted only for a positive integer literal
 or an unsigned local/parameter whose nonzero value follows from a guard on every
 reaching path. The analysis understands `require`, zero comparisons, negation,

@@ -10799,6 +10799,19 @@ private partial def lowerHelperFrom (stmts : List Json) (retName : String) :
           { e with values := saved.values, writableLocals := saved.writableLocals, fnPtrs := saved.fnPtrs, paths := saved.paths, storageMappingVars := saved.storageMappingVars, fixedStructArrayVars := saved.fixedStructArrayVars, snapshots := saved.snapshots, mems := saved.mems, abiElements := saved.abiElements, calldataBytes := saved.calldataBytes, scalarArrays := saved.scalarArrays, byteBuffers := saved.byteBuffers, stringBuffers := saved.stringBuffers, storageBytesVars := saved.storageBytesVars, storageDynamicArrayVars := saved.storageDynamicArrayVars, flatStructs := saved.flatStructs,
                    scalarTy := saved.scalarTy, yulNames := saved.yulNames, yulMemoryArrays := saved.yulMemoryArrays, yulMemoryStructs := saved.yulMemoryStructs,
                    unchecked := saved.unchecked }
+        if saved.legacyWrapping then
+          if let some value := evalConstVal? condition then
+            let branch := if value == 0 then no else yes
+            let returns := if value == 0 then noReturns else yesReturns
+            if returns || (← listContainsReturn branch) then
+              let live := if returns then branch.toList else branch.toList ++ rest
+              let (pre, result) ← lowerHelperFrom live retName
+              restore
+              return (condition.pre ++ pre, result)
+            let (pre, _) ← lowerHelperFrom branch.toList retName
+            restore
+            let (tail, result) ← lowerHelperFrom rest retName
+            return (condition.pre ++ pre ++ tail, result)
         let restReturns ← helperListReturns rest.toArray
         let yesHasReturn ← listContainsReturn yes
         let noHasReturn ← listContainsReturn no
@@ -11099,6 +11112,13 @@ private partial def lowerVoidHelperFrom (stmts : List Json) (k : M (Array Stmt))
           { e with values := saved.values, writableLocals := saved.writableLocals, fnPtrs := saved.fnPtrs, paths := saved.paths, storageMappingVars := saved.storageMappingVars, fixedStructArrayVars := saved.fixedStructArrayVars,
                    snapshots := saved.snapshots, mems := saved.mems, abiElements := saved.abiElements, calldataBytes := saved.calldataBytes, scalarArrays := saved.scalarArrays, byteBuffers := saved.byteBuffers, stringBuffers := saved.stringBuffers, storageBytesVars := saved.storageBytesVars, storageDynamicArrayVars := saved.storageDynamicArrayVars, flatStructs := saved.flatStructs,
                    scalarTy := saved.scalarTy, yulNames := saved.yulNames, yulMemoryArrays := saved.yulMemoryArrays, yulMemoryStructs := saved.yulMemoryStructs }
+        if saved.legacyWrapping then
+          if let some value := evalConstVal? condition then
+            let branch := if value == 0 then no else yes
+            let kBranch : M (Array Stmt) := do restore; kRest
+            let live ← lowerVoidHelperFrom branch.toList kBranch
+            restore
+            return condition.pre ++ live
         if !yesAny && !noAny then
           let yesStmts ← lowerVoidHelperFrom yes.toList (pure #[])
           restore
