@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 from solidity_differential.engine import HarnessError
 from solidity_differential.identity import ImplementationIdentity
+from verification_runner.artifacts import MARKER
 
 
 class IdentityTests(unittest.TestCase):
@@ -59,6 +60,21 @@ class IdentityTests(unittest.TestCase):
     def test_unchanged(self):
         self.identity.verify()
         self.assertEqual(self.identity.manifest['revision'], 'test-revision')
+
+    def test_private_cas_churn_isolated_but_real_edits_still_rejected(self):
+        cas = self.root / 'cas.olean'
+        os.link(self.artifact, cas)
+        (self.root / '.lake' / MARKER).touch()
+        identity = ImplementationIdentity(self.source)
+        os.link(cas, self.root / 'another-checkout.olean')
+        identity.verify()
+        self.assertNotEqual(self.artifact.stat().st_ino, cas.stat().st_ino)
+        before = self.artifact.stat()
+        self.artifact.write_bytes(b'modified fixture')
+        os.utime(self.artifact, ns=(before.st_atime_ns, before.st_mtime_ns))
+        with self.assertRaisesRegex(HarnessError, 'implementation changed'):
+            identity.verify()
+        self.assertEqual(cas.read_bytes(), b'compiled fixture')
 
     def test_revision_change_without_source_or_artifact_changes(self):
         self.revision = 'other-revision'

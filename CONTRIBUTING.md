@@ -1,5 +1,8 @@
 # Contributing to Verity
 
+For resource-bounded local campaigns, see the
+[local verification runner](docs/LOCAL_VERIFICATION_RUNNER.md).
+
 ## Pull requests
 
 Title with a category prefix (`[Layer 3]`, `[Trust Reduction]`,

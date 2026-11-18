@@ -1,6 +1,7 @@
 """Fail closed if the local Lean implementation changes during a campaign."""
 import hashlib
 from pathlib import Path
+from verification_runner.artifacts import isolate_private_build
 
 from .engine import HarnessError, command
 
@@ -17,6 +18,7 @@ class ImplementationIdentity:
         self.workspace = Path.cwd().resolve()
         self.driver = Path(driver).resolve()
         self.extra_inputs = tuple(Path(path).resolve() for path in extra_inputs)
+        isolate_private_build(self.workspace)
         self.toolchain = Path(command(['lake', 'env', 'lean', '--print-prefix']).strip())
         self.paths = self._inventory()
         self.stats = {str(p): self._stat(p) for p in self.paths}

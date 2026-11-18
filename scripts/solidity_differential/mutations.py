@@ -4,6 +4,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+from verification_runner.artifacts import MARKER
 
 from .engine import ROOT, WORKSPACE, MUTANT_BUILD_TIMEOUT, HarnessError, command, write_json
 
@@ -252,6 +253,9 @@ def snapshot(destination):
         command(["/bin/cp", "-cRL", build, cache / "build"], timeout=300)
     else:
         command(["cp", "-aL", "--reflink=auto", build, cache / "build"], timeout=300)
+    # Later Turbo-Lean builds may reintroduce CAS hardlinks. Identity capture
+    # detaches those artifacts before recording strict inode/ctime observations.
+    (cache / MARKER).write_text('private mutation snapshot\n')
     (cache / "solidity-import").mkdir()
     for compiler_name in ("solc-0.7.6", "solc-0.8.34", "solc-0.8.26", "solc-0.8.10"):
         compiler_src = WORKSPACE / ".lake/solidity-import" / compiler_name
