@@ -2757,6 +2757,9 @@ private partial def lowerExpr (j : Json) : M Val := do
               pure { pre := #[], expr := .literal (2 ^ 256 - n) }
             else
               failAt j "negative constant out of int256 range"
+          else if (← get).legacyWrapping && jTy == subTy && jTy.startsWith "uint" then
+            let some ty := paramType jTy | failAt j s!"unsupported unsigned negation type {jTy}"
+            pure { v with expr := LegacyMemory.cleanScalar ty (.sub (.literal 0) v.expr) }
           else if let some bits := signedBitsOf jTy then
             unless signedBitsOf subTy == some bits do
               failAt j s!"unary negation requires an {jTy} operand, found {subTy}"

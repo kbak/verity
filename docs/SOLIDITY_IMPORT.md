@@ -90,7 +90,10 @@ state and mapping reads, conditionals, local assignments, and the admitted inter
 forms. Function boundaries restore wrapping for 0.7.6 and checked arithmetic
 for 0.8; an explicit 0.8 `unchecked` block does not leak into a helper. In
 particular a wrap-then-`require` idiom must evaluate the wrapped result before
-its explicit guard. The additional declaration gate is conservative and runs
+its explicit guard. In 0.7.6, negating a `uintN` computes zero minus its
+value modulo `2^N`, even when the result is then widened. For a nonzero
+unsigned word, `x & -x` isolates its least significant set bit.
+The additional declaration gate is conservative and runs
 on roots and reached helpers; existing construct checks still apply. Functions
 may be `pure`, `view`, or `nonpayable`; the state-transition extension below
 adds scoped write/modifier/event evidence. Named payable entrypoints are covered by

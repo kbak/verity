@@ -40,6 +40,9 @@ contract LegacySignedScalars {
     function unsignedCasts(uint256 x) external pure returns (int8, int24, int128, int256) {
         return (int8(x), int24(x), int128(x), int256(x));
     }
+    function negateUnsigned(uint256 x) external pure returns (uint256, uint256, uint256, uint256) {
+        return (-x, uint256(-uint8(x)), uint256(-uint128(x)), x & -x);
+    }
     function widen(int8 x, uint8 y) external pure returns (int256, uint16, int16) {
         return (int256(x), uint16(x), int16(y));
     }
