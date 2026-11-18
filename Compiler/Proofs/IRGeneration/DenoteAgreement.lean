@@ -170,8 +170,12 @@ theorem denote_evalExpr_eq (fields : List Field) (s : DenoteState)
   | .arrayElementDynamicWord _ a _ | .arrayElementDynamicDataOffset _ a
   | .arrayElementDynamicMemberLength _ a _ | .arrayElementDynamicMemberDataOffset _ a _
   | .memoryArrayElement _ a => bindAgree (denote_evalExpr_eq fields s hraw a) fun _ => rfl
+  | .shl a b =>
+      bindAgree (denote_evalExpr_eq fields s hraw a) fun x =>
+        bindAgree (denote_evalExpr_eq fields s hraw b) fun y =>
+          congrArg (fun f => some (f x y).val) Verity.Core.Uint256.shl_eq_bounded.symm
   | .add a b | .sub a b | .mul a b | .div a b | .sdiv a b | .mod a b | .smod a b | .bitAnd a b
-  | .bitOr a b | .bitXor a b | .shl a b | .shr a b | .sar a b | .byte a b | .signextend a b
+  | .bitOr a b | .bitXor a b | .shr a b | .sar a b | .byte a b | .signextend a b
   | .eq a b | .ge a b | .gt a b | .sgt a b | .lt a b | .slt a b | .le a b | .logicalAnd a b
   | .logicalOr a b | .ceilDiv a b | .wMulDown a b | .wDivUp a b | .min a b | .max a b
   | .keccak256 a b | .mapping2 _ a b | .mapping2Word _ a b _ | .mappingChain _ [a, b]

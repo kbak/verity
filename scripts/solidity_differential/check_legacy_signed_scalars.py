@@ -20,7 +20,7 @@ FUNCTIONS = [
     'applyDelta(uint128,int128)', 'checkedUnsigned(uint256)',
     'checkedNarrow(int256)', 'checkedSign(uint256)', 'signedCasts(int256)',
     'unsignedCasts(uint256)', 'widen(int8,uint8)', 'literals()', 'defaultLocal()',
-    'explicitAbi(int8,bytes)', 'negateUnsigned(uint256)',
+    'explicitAbi(int8,bytes)', 'negateUnsigned(uint256)', 'shifted(int256,uint256)',
 ] + [f'{op}{bits}(int{bits},int{bits})' for bits in WIDTHS for op in ('arithmetic', 'compare')]
 
 
@@ -82,6 +82,11 @@ def scenario(kind, caller, layout, **_):
                 x = decoded[0]
                 result = [(-x) % (1 << bits) for bits in (256, 8, 128)]
                 result.append(gcd(x, MODULUS) if x else 0)
+            elif name == 'shifted':
+                x, n = decoded
+                bits, narrow = x % MODULUS, signed(x, 8)
+                combined = ((bits << n) % MODULUS | bits >> n) if n < 256 else 0
+                result = [combined, signed(narrow << n, 8) if n < 8 else 0, narrow >> min(n, 8)]
             elif name == 'widen':
                 x, y = decoded
                 result = [x, x % (1 << 16), y]
@@ -130,6 +135,9 @@ def scenario(kind, caller, layout, **_):
         add(signature,[0],truncated=True)
     for x in (0, 1, 6, 128, 255, 256, 257, (1 << 128) - 1, 1 << 128, 1 << 255, MODULUS - 1):
         add('negateUnsigned(uint256)', [x])
+    for x in (-1, -128, 127, 128, -(1 << 255), (1 << 255) - 1):
+        for n in (0, 1, 7, 128, 255, 256, MODULUS - 1):
+            add('shifted(int256,uint256)', [x, n])
     for x,y in [(0,0),(0,-1),(1,-1),(0,1),(1<<127,-(1<<127)),
         ((1<<127)-1,-(1<<127)),((1<<128)-1,1),((1<<128)-1,0),
         ((1<<128)-1,-1),(0,-(1<<127)),((1<<128)-1,(1<<127)-1),

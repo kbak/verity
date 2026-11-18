@@ -38,8 +38,8 @@ def validate (node : Json) (observedLocals : Bool := false) : M Unit := do
     let right ← mType (← mField node "rightExpression")
     if (signedBitsOf left).isSome || (signedBitsOf right).isSome then
       unless (optStr node "operator").any
-          (#["+", "-", "*", "/", "%", "==", "!=", "<", "<=", ">", ">="].contains ·) do
-        failAt node "Solidity 0.7.6 signed operators require arithmetic or a comparison"
+          (#["+", "-", "*", "/", "%", "<<", ">>", "==", "!=", "<", "<=", ">", ">="].contains ·) do
+        failAt node "Solidity 0.7.6 signed operators require arithmetic, a shift or a comparison"
   if kind == "UnaryOperation" then
     if (signedBitsOf (← mType (← mField node "subExpression"))).isSome then
       unless optStr node "operator" == some "-" do

@@ -16064,7 +16064,8 @@ def finishImportReport (pkgRoot : System.FilePath) (contract : String)
       ("LegacyCalls.lean", Json.str legacyCallsSrc),
       ("LegacyNativeCalls.lean", Json.str nativeCallsSrc),
       ("LegacyStaticCalls.lean", Json.str staticCallsSrc),
-      ("ECM.lean", Json.str ecmSrc), ("Denote.lean", Json.str denoteSrc)])]
+      ("ECM.lean", Json.str ecmSrc), ("Denote.lean", Json.str denoteSrc),
+      ("WordShifts.lean", Json.str (← moduleText sourceRoot "Verity/Core/Model/WordShifts.lean"))])]
   let digest := sha256Hex digestInput.compress.toUTF8
   let report : ImportReport :=
     { importerVersion, solcLongVersion := prepared.solcLongVersion,

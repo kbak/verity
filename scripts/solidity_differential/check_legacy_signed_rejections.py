@@ -35,7 +35,9 @@ CASES = {
     'signed-compound': ('', 'function run(int128 x) external pure returns(int128) '
         '{ x += 1; return x; }', 'run(int128)', 'signed compound assignments are outside'),
     'signed-shift': ('', 'function run(int128 x) external pure returns(int128) '
-        '{ return x >> 1; }', 'run(int128)', 'signed operators require arithmetic'),
+        '{ return x >> 1; }', 'run(int128)', None),
+    'signed-bitwise': ('', 'function run(int128 x) external pure returns(int128) '
+        '{ return x ^ 1; }', 'run(int128)', 'signed operators require arithmetic'),
     'signed-literal-division': ('', 'function run(int128 x) external pure returns(int128) '
         '{ return x/2; }', 'run(int128)', None),
     'signed-literal-modulo': ('', 'function run(int128 x) external pure returns(int128) '
@@ -67,6 +69,10 @@ CASES = {
         'function run(int24 x,int24 d) external pure m(x/d) returns(int24) '
         '{ require(d != 0); return x; }', 'run(int24,int24)', 'legacy exceptional halt'),
     'signed-assembly': ('', 'function run(int256 x) external pure returns(int256 r) '
+        '{ assembly { r := x } }', 'run(int256)', None),
+    'narrow-signed-assembly-read': ('', 'function run(int24 x) external pure returns(int256 r) '
+        '{ assembly { r := x } }', 'run(int24)', 'signed assembly'),
+    'narrow-signed-assembly-write': ('', 'function run(int256 x) external pure returns(int24 r) '
         '{ assembly { r := x } }', 'run(int256)', 'signed assembly'),
     'signed-address': ('', 'function run(int256 x) external pure returns(address) '
         '{ return address(x); }', 'run(int256)', 'signed casts require integer'),

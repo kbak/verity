@@ -43,6 +43,14 @@ contract LegacySignedScalars {
     function negateUnsigned(uint256 x) external pure returns (uint256, uint256, uint256, uint256) {
         return (-x, uint256(-uint8(x)), uint256(-uint128(x)), x & -x);
     }
+    function shifted(int256 x, uint256 n) external pure returns (int256, int8, int8) {
+        int256 shiftedWord;
+        assembly {
+            let upper := shl(n, x)
+            shiftedWord := or(upper, shr(n, x))
+        }
+        return (shiftedWord, int8(x) << n, int8(x) >> n);
+    }
     function widen(int8 x, uint8 y) external pure returns (int256, uint16, int16) {
         return (int256(x), uint16(x), int16(y));
     }

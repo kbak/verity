@@ -223,7 +223,7 @@ theorem evalExpr_insertByte (oracle : DenoteOracle) (fields : List Field)
     have : 256 < Verity.Core.Uint256.modulus := by decide
     omega
   have placed : 256^lane * byte < Verity.Core.Uint256.modulus := by omega
-  simp only [evalExpr, wordEval, shiftEval, byteEval]
+  simp only [evalExpr, wordEval, shiftEval, byteEval, ← Verity.Core.Uint256.shl_eq_bounded]
   change some (((value % Verity.Core.Uint256.modulus) +
     (((byte % Verity.Core.Uint256.modulus) <<< ((8 * lane) % Verity.Core.Uint256.modulus)) %
       Verity.Core.Uint256.modulus % Verity.Core.Uint256.modulus)) %

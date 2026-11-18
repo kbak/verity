@@ -424,6 +424,7 @@ theorem exprRefines_shl
   refine ⟨Evaluates.binary hVal.1 hShift.1 rfl,
     option_bind₂_some _ hShift.2 hVal.2 ?_⟩
   rw [Word.toUint256_ofNat_val, Word.toUint256_ofNat_val]
+  rw [← Verity.Core.Uint256.shl_eq_bounded]
   exact (Word.word_shiftLeft_val_eq wval wshift).symm
 
 theorem exprRefines_shr
