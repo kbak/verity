@@ -190,12 +190,8 @@ private partial def findNode? (predicate : Json → Bool) (node : Json) : Option
     | .obj fields => fields.toList.findSome? (fun (_, child) => findNode? predicate child)
     | _ => none
 
-/-- Flattening does not preserve allocation addresses. Reject assembly throughout
-reached declarations, including helpers/modifiers without a direct record argument. -/
-def validateClosure : M Unit := do
-  let env ← get
-  let declarations := env.included.filterMap fun reached =>
-    env.funs.find? reached.declId <|> env.modifiers.find? reached.declId
+/-- Check allocation-address observability across all source bodies in a slice. -/
+def validateBodies (declarations : Array Json) : M Unit := do
   let hasStruct := declarations.any fun node =>
     (findNode? (fun n =>
       let ty := ((field? n "typeDescriptions").bind (optStr · "typeString")).getD ""
@@ -207,5 +203,12 @@ def validateClosure : M Unit := do
       if let some assembly := findNode?
           (fun n => optStr n "nodeType" == some "InlineAssembly") declaration then
         failAt assembly "legacy memory structs cannot share a reached closure with assembly"
+
+/-- Flattening does not preserve allocation addresses. Check each reached declaration,
+including helpers and modifiers without a direct record argument. -/
+def validateClosure : M Unit := do
+  let env ← get
+  validateBodies <| env.included.filterMap fun reached =>
+    env.funs.find? reached.declId <|> env.modifiers.find? reached.declId
 
 end Compiler.CompilationModel.SolidityImport.LegacyStructs

@@ -1,4 +1,5 @@
 import Compiler.SolidityImport.ExprHelpers
+import Compiler.CompilationModel.ValidationHelpers
 
 /-! Bounded inclusive interval searches with source-derived exits. -/
 
@@ -133,6 +134,49 @@ private partial def lowerTail (nodes : List Json) (b : Bounds) (doneVar : String
   let pre ← lowerBody (block #[node])
   return pre ++ (← lowerTail rest b doneVar lowerExpr lowerBody)
 
+/-- Backward liveness across the iteration. Branches both start with the enclosing suffix.
+Scalar assignments kill their previous value only after evaluating the right-hand side. -/
+private partial def liveInputs (body : List Stmt) (after : Std.HashSet String) :
+    Std.HashSet String := Id.run do
+  let mut live := after
+  for stmt in body.reverse do
+    match stmt with
+    | .letVar name rhs | .assignVar name rhs =>
+      live := (collectExprNames rhs).foldl (·.insert ·) (live.erase name)
+    | .ite cond yes no =>
+      live := (collectExprNames cond).foldl (·.insert ·)
+        ((liveInputs yes live).union (liveInputs no live))
+    | _ => live := (collectStmtNames stmt).foldl (·.insert ·) live
+  return live
+
+/-- Intersect reads with actual allocations in the specialized outer frame. Generated
+iteration temporaries, field names and other metadata are outside that lexical scope. -/
+def entryInputs (names : List String) (body : List Stmt) : List String :=
+  let live := liveInputs body {}
+  names.filter live.contains
+
+/-- Names and source-ordered model statements shared by both interval backends. -/
+structure Iteration where
+  bits : Nat
+  lowName : String
+  highName : String
+  midName : String
+  body : List Stmt
+
+/-- Lower exactly one iteration in its current call frame. This routine imposes no fuel
+and does not grant default admission to a loop with data-dependent progress. -/
+def lowerIteration (node : Json) (doneVar : String) (lowerExpr : Json → M Val)
+    (lowerBody : Json → M (Array Stmt)) : M Iteration := do
+  let body := statements (child node "body")
+  let some bounds := bounds? body | failAt node "unsupported interval search"
+  let locals := (← get).writableLocals
+  let some lowName := locals.find? bounds.low | failAt node "missing writable lower bound"
+  let some highName := locals.find? bounds.high | failAt node "missing writable upper bound"
+  let some midName := locals.find? bounds.mid | failAt node "missing writable midpoint"
+  let first ← lowerBody (block #[body[0]!])
+  let tail ← lowerTail body.toList.tail! bounds doneVar lowerExpr lowerBody
+  return { bits := bounds.bits, lowName, highName, midName, body := (first ++ tail).toList }
+
 /-- A strict-interior midpoint gives a nonwrapping unit update and at most half as many
 remaining indices. An overflowing sum gives a midpoint below the low endpoint and reaches
 the source exit. Consequently word width plus one includes the final test. -/
@@ -144,15 +188,11 @@ def lower (node : Json) (lowerExpr : Json → M Val) (lowerBody : Json → M (Ar
   unless endpointExit guardNode bounds do
     failAt node ("interval search needs progress evidence: each continuing step must retain " ++
       "a nonempty interval and exclude the midpoint without wraparound until a source exit")
-  let env ← get
-  unless [bounds.low, bounds.high, bounds.mid].all (env.writableLocals.contains ·) do
-    failAt node "interval search bounds and midpoint must be writable scalar locals"
   let doneVar ← fresh
   let counter ← fresh
-  let first ← lowerBody (block #[body[0]!])
-  let tail ← lowerTail body.toList.tail! bounds doneVar lowerExpr lowerBody
+  let iteration ← lowerIteration node doneVar lowerExpr lowerBody
   return #[.letVar doneVar (.literal 0),
-    .forEach counter (.literal (bounds.bits + 1))
-      [.ite (.eq (.localVar doneVar) (.literal 0)) (first ++ tail).toList []]]
+    .forEach counter (.literal (iteration.bits + 1))
+      [.ite (.eq (.localVar doneVar) (.literal 0)) iteration.body []]]
 
 end Compiler.CompilationModel.SolidityImport.IntervalSearch

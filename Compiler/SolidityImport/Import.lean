@@ -24,6 +24,7 @@ import Compiler.SolidityImport.StorageLayout
 import Compiler.SolidityImport.InlineAssemblyShims
 import Compiler.SolidityImport.BoundedMemory
 import Compiler.SolidityImport.MemoryBounds
+import Compiler.SolidityImport.IntervalCapture
 import Compiler.SolidityImport.ControlLowering
 
 /-!
@@ -10136,6 +10137,7 @@ private partial def lowerWhile (s : Json) (lowerBody : Json → M (Array Stmt)) 
     let saved ← get
     let writes := bodyAssignedIds (← mField s "body")
     modify fun e => { e with zeroInitLocals := e.zeroInitLocals.filter (!writes.contains ·) }
+    IntervalCapture.atSite s lowerExpr lowerBody
     let out ← IntervalSearch.lower s lowerExpr lowerBody
     modify fun e =>
       { e with
@@ -15742,6 +15744,9 @@ def observedStorageFields : M (List Field) := do
     else
       sortedFields
   return sortedFields.toList
+
+/-- Lower in the checked root frame up to a selected interval capture. -/
+def visitIntervalRoot (fn : Json) : M Unit := discard <| lowerRoot fn
 
 namespace ObservedSupport
 /-- Reuse the checked modifier lowering, requiring an unconditional placeholder.

@@ -2916,6 +2916,57 @@ observer when each continuing step preserves a nonempty interval of at most
 half its previous size. The theorem leaves the storage-history invariant to
 the caller and makes no claim about EVM gas.
 
+#### Conditional execution on a certified loop-head state
+
+Import `Compiler.SolidityImport.IntervalCommand` to extract a single unguarded
+interval iteration from the compiler-checked source and deployment configuration.
+For example, the unguarded search in the control-flow fixture is selected by its
+one-based source line and UTF-8 byte column.
+
+```lean
+solidity_import search from "Contracts/SolidityImportSmoke" entry "LegacyLoopControl.sol"
+  using { solc := "0.7.6+commit.7338295f", evmVersion := "istanbul", viaIR := false,
+          optimizerRuns := some 800, bytecodeHash := "none" }
+  interval contract LegacyLoopControl
+  function search(uint256,uint256,uint256,uint256)
+  loop "LegacyLoopControl.sol" line 27 column 9
+```
+
+`search.site` identifies the first static lowering instance of this loop within the
+selected root. It retains the source range, declaration stack, allocation position,
+source/deployment digest, scalar bindings, flattened struct members, storage array
+bases and storage layout. Its `step` evaluates the same source-ordered body used by
+the guarded importer. Missing captured inputs or endpoints outside their declared
+unsigned range produce an adapter error.
+
+To run the entire loop, supply a Lean proof of
+`CertifiedInterval.Progress search.site oracle Valid` and `initial : Valid s` to
+`search.site.execute oracle certificate s initial`. The domain must establish
+successful evaluation, positive width bounded by the source word size, and
+preservation of the domain with at most half as many candidates at every actual
+continuation. The execution returns the final loop state on a source break or
+propagates an explicit source halt. The caller supplies the loop-head state and
+its relationship to the real storage, calldata, oracle and calling context.
+Deriving that state from deployment and the enclosing function requires a separate
+reachability argument.
+
+For searches over ordered keys, import
+`Compiler.SolidityImport.IntervalHistoryCertificate`. Build a virtual row lookup
+returning an initialization flag and a key. `OrderedSearchWindow.ofRows?` checks the
+uninitialized prefix and adjacent key order. For a fixed-width clock with at most
+one wrap relative to the reference time, `IntervalSearch.cyclicKey` lifts timestamps
+into a common order. A target between the first key (inclusive) and the last key
+(exclusive) has an adjacent bracketing pair.
+
+Given that bracket and starting bounds that retain it, `site.checkEntry` checks each
+continuing edge of the emitted iteration against the table and returns a proof for the
+specific starting frame. A contradictory update or adapter error fails the check.
+`progress_of_checked_history` combines that proof domain with the source word-width
+bound for `site.execute`. This concrete validation costs one replay. A caller can
+instead prove `Progress` for a family of reachable frames. Establishing that a
+downstream caller supplied the captured lexical state and storage remains a separate
+obligation.
+
 ### Observed scalar control flow (development)
 
 `SolidityImport.LoopExecution` separates finite observations from source outcomes.
