@@ -62,8 +62,8 @@ def validate_snapshot(snapshot, signatures, contract, compiler, mutation):
 
 
 def prepare_model(directory, source, contract, signatures, compiler, mutation='none'):
-    """Import all real roots, optionally mutate event statements, and compile that model to Yul."""
-    if mutation not in ('none', 'drop-events'):
+    """Import the requested roots and compile the baseline or a specific faulty model to Yul."""
+    if mutation not in ('none', 'drop-events', 'commit-instead-of-revert'):
         raise HarnessError('unknown storage model mutation')
     directory.mkdir(parents=True, exist_ok=False)
     roots = '\n'.join('  function ' + s for s in signatures) + '\n'
@@ -79,6 +79,14 @@ def prepare_model(directory, source, contract, signatures, compiler, mutation='n
   { imported.model with functions := imported.model.functions.map fun fn =>
       { fn with body := fn.body.filter fun stmt =>
           match stmt with | .emit .. => false | _ => true } }
+'''
+    elif mutation == 'commit-instead-of-revert':
+        definition = '''def activeModel : CompilationModel :=
+  { imported.model with functions := imported.model.functions.map fun fn =>
+      { fn with body := fn.body.map fun stmt =>
+          match stmt with
+          | .requireError (.literal 0) _ _ => .returnValues (fn.returns.map fun _ => .literal 0)
+          | _ => stmt } }
 '''
     driver = directory / 'Model.lean'
     driver.write_text(header + definition)

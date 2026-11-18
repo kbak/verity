@@ -63,7 +63,10 @@ def require_source_mutant(result, required_field):
 
 def rejected_sources(source):
     full = source_variants(source)['original']
-    yield 'write-then-revert', full, SIGNATURES['writeThenRevert'], EFFECT_REJECTION
+    overflow = full.replace('let base := mload(0x40)',
+                            f'mstore(0x40, {2**32 - 96})\n            let base := mload(0x40)')
+    yield ('error-signature-overflow', overflow.replace('Rejected', 'Rejected' + 'X' * 96),
+           SIGNATURES['writeThenRevert'], 'bounded memory custom error encoding exceeds the memory bounds')
     anchor = '        emit Changed(0, next);'
     for name, text in (
         ('read-after-log', anchor + '\n        uint256 observed; assembly ("memory-safe") { '
@@ -154,14 +157,14 @@ def run(output, *, prepared=False):
     write_json(output / 'implementation.json', identity.manifest)
     write_json(output / 'results.json', {'successfulUpdatesThreeRouteAgreement': True,
         'variants': results, 'fullStorageSequenceAgreement': False,
-        'remaining': ['write-then-revert composition', 'tail-only cleanup', 'pinned downstream wrapper']})
+        'remaining': ['tail-only cleanup', 'pinned downstream wrapper']})
     write_json(output / 'manifest.json', {
         'verityHead': identity.manifest['revision'], 'compiler': compiler, 'fork': 'cancun',
         'stateArchivesSha256': STATE_ARCHIVES, 'packedArchiveSha256': PACKED_ARCHIVE_SHA256,
         'projection': 'unchanged contiguous prefix ending immediately before the first revert',
         'scope': 'full-cleanup successful raw-word updates, scalar logs and scalar returns',
         'limits': ['finite regression evidence, not source/importer or compiler correspondence',
-                   'no post-effect source memory, control flow, explicit revert or external call',
+                   'successful prefix only; terminal custom errors are checked by the rollback campaign',
                    'no gas/resource, constructor or whole-world equivalence'],
     })
     print('Successful full-cleanup updates and exact logs agree on all three routes; '

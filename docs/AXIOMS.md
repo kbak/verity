@@ -45,17 +45,18 @@ see `PACKED_STORAGE_READ_DESIGN.md` and `TRUST_ASSUMPTIONS.md`.
 The successful-update extension admits a structurally restricted suffix of raw
 storage-word writes, scalar logs and memory-independent scalar returns. Event
 encoding footprints are bounded; later memory observations, calls, control flow
-and explicit reverts remain rejected. This adds no theorem or axiom and keeps
+and nonterminal error guards remain rejected. This adds no theorem or axiom and keeps
 the existing hash premises. The unchanged successful state/log prefix executes
 on all three routes; that finite evidence does not prove frontend or compiler
 correspondence. See `PACKED_STORAGE_UPDATES.md` for the remaining #32 obligations.
 
-The full-cleanup rollback gate retains the complete frozen source sequence and
-its revert-removal/error-payload mutations. The supplied-key declared-return
-control now executes on source EVM, actual Denote and generated Cancun EVM;
-a wrong error argument must change only the reverted payloads on every route.
-Packed rollback still rejects at the post-effect memory audit. No packed
-Denote/generated-EVM agreement is claimed; see `PACKED_STORAGE_ROLLBACK.md`.
+The full-cleanup rollback extension admits a terminal scalar custom error with
+memory-independent arguments after raw storage writes and scalar logs. The trusted
+importer bounds both the word-rounded signature and the low-memory selector and
+argument stores. The campaign requires original bytecode, Denote and generated
+Cancun bytecode to match the frozen state, log and error-byte expectations,
+including subsequent reads. The existing hash and transaction-settlement premises
+apply. This adds no axiom or correspondence theorem. See `PACKED_STORAGE_ROLLBACK.md`.
 
 The literal-zero custom-error guard refinement preserves the imported statements,
 compiler lowering and final return-path check. Only `requireError (literal 0)`
