@@ -74,8 +74,9 @@ remain unknown words in the interval analysis, as do hash results. Reading stora
 does not establish a pointer bound. Existing successful guards and binding-version
 invalidation still apply. Raw writes and scalar logs require the separate
 memory-independent successful suffix; external calls, loops and unsupported
-branches remain excluded. Dirty-bit cleanup requirements in `BoundedMemory.lean` are
-unchanged, so tail-only cleanup still rejects before this composition audit.
+branches remain excluded. The tail-only fixture can return the saved digest directly. Passing it into the
+mapping lookup still requires a separate caller rule. The campaign executes the
+direct digest on three routes and requires a located rejection for the lookup.
 
 The mapping-slot preimage remains the independent `word32(key) ++ word32(base)`
 expectation. Layout resolution and field extraction must remain construct-generic;

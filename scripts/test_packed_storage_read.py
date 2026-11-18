@@ -139,7 +139,7 @@ class PackedStorageReadTests(unittest.TestCase):
         for name, text, signature, _ in cases:
             self.assertNotEqual(text, source)
             self.assertEqual(signature, DIGEST if name in {
-                'partial-cleanup', 'dirty-hash', 'dirty-read', 'unknown-cleanup-alias',
+                'dirty-hash', 'dirty-read', 'unknown-cleanup-alias',
                 'abi-allocation'} else READ)
         with self.assertRaises(HarnessError):
             list(rejected_sources(source.replace('mstore(base, 0)', 'mstore(base, 1)')))

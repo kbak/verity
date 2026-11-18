@@ -76,19 +76,19 @@ def source_variants(source):
 
 
 def rejected_sources(source):
-    for name, before, after, reason in (
-        ('partial-cleanup', '            mstore(base, 0)\n            mstore(add(base, 32), 0)\n',
+    for name, signature, before, after, reason in (
+        ('partial-cleanup', READ, '            mstore(base, 0)\n            mstore(add(base, 32), 0)\n',
          '', 'bounded memory leaves dirty scalar bytes visible after assembly'),
-        ('dirty-hash', 'keccak256(add(base, 12), 58)', 'keccak256(base, 58)',
+        ('dirty-hash', DIGEST, 'keccak256(add(base, 12), 58)', 'keccak256(base, 58)',
          'bounded memory hash observes dirty scalar bytes'),
-        ('dirty-read', 'keccak256(add(base, 12), 58)', 'mload(base)',
+        ('dirty-read', DIGEST, 'keccak256(add(base, 12), 58)', 'mload(base)',
          'bounded memory observes dirty scalar bits'),
-        ('unknown-cleanup-alias', 'mstore(base, 0)', 'mstore(128, 0)',
+        ('unknown-cleanup-alias', DIGEST, 'mstore(base, 0)', 'mstore(128, 0)',
          'bounded memory cannot establish disjointness from dirty bytes'),
     ):
         if source.count(before) != 1:
             raise HarnessError('rejection source anchor changed')
-        yield name, source.replace(before, after), DIGEST, reason
+        yield name, source.replace(before, after), signature, reason
     # This allocation has observable effects on the free pointer and synthetic memory layout.
     allocated = source.replace('        assembly ("memory-safe") {',
         '        bytes32 encoded = keccak256(abi.encode(salt));\n'
@@ -171,6 +171,14 @@ def require_combined(result, mutant=False, *, mutation_fields=('data',)):
                        mutant=True, mutation_fields=mutation_fields)
 
 
+def run_digest_control(directory, path, expected, built, solc, compiler):
+    digest = run_root(directory / 'digest', path.name, CONTRACT, DIGEST,
+                      packed_cases('digest', expected), built, solc, compiler, False)
+    if digest['status'] != 'admitted' or digest['execution']['status'] != 'executed':
+        raise HarnessError('required three-route digest control did not execute')
+    write_json(directory / 'digest-result.json', digest)
+
+
 def run(output, *, prepared=False):
     output = output.resolve()
     if not output.is_relative_to(ROOT):
@@ -215,11 +223,7 @@ def run(output, *, prepared=False):
                               'mutationDetectedOnAllRoutes': mutant,
                               'mismatches': combined['mismatches']})
         if name == 'original':
-            digest = run_root(directory / 'digest', path.name, CONTRACT, DIGEST,
-                packed_cases('digest', spec['packedExpectations']), built, solc, compiler, False)
-            if digest['status'] != 'admitted' or digest['execution']['status'] != 'executed':
-                raise HarnessError('required full-cleanup hash control did not execute')
-            write_json(directory / 'digest-result.json', digest)
+            run_digest_control(directory, path, spec['packedExpectations'], built, solc, compiler)
             key_spec = key_read_inputs(spec)
             write_json(directory / 'key-inputs.json', key_spec['transactions'])
             driver, snapshot = prepare_model(directory / 'key-model', path, CONTRACT,
@@ -231,10 +235,14 @@ def run(output, *, prepared=False):
                                         'suppliedKeyThreeRouteReads': 6}
     for name, text, signature, reason in rejected_sources(source):
         directory = output / name
-        path, _ = compile_variant(directory, text, solc)
+        path, built = compile_variant(directory, text, solc)
         observation = observe(directory, path.name, CONTRACT, signature)
         require_rejection(observation, reason)
         results[name] = {'sourceSha256': file_sha256(path), 'admission': observation}
+        if name == 'partial-cleanup':
+            expected = specs[0]['packedExpectations']
+            run_digest_control(directory, path, expected, built, solc, compiler)
+            results[name]['controls'] = {'hashThreeRouteCases': len(expected)}
     identity.verify()
     write_json(output / 'implementation.json', identity.manifest)
     write_json(output / 'manifest.json', {
@@ -246,7 +254,7 @@ def run(output, *, prepared=False):
         'scope': 'full-cleanup packed-hash and storage-read composition',
         'missingCombinedRoutes': [],
         'limits': ['execution regression evidence is not an importer correspondence theorem',
-                   'no tail-only cleanup, write/log, constructor, gas or whole-world equivalence',
+                   'no tail-only storage lookup, write/log, constructor, gas or whole-world equivalence',
                    'pinned downstream wrapper and compiler correspondence remain pending'],
     })
     write_json(output / 'results.json', {'combinedThreeRouteAgreement': True, 'variants': results})
