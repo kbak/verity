@@ -106,8 +106,15 @@ private def failRoot (s : Bounds) (reason : String) : M α := do
     | throwError "missing bounded-memory source access"
   failure access reason
 
+private def visibleResidual (site : SavedHashCleanup) : M α := do
+  modify fun e => { e with currentFile := site.file, stack := site.stack }
+  failAt site.node "bounded memory leaves dirty scalar bytes visible after assembly"
+
 private def unsupported (s : Bounds) : M α :=
-  failRoot s "bounded memory requires a straight-line scalar root with successful guards"
+  -- An unsupported root cannot discharge the deferred block-exit check.
+  match s.savedHashCleanup with
+  | some site => visibleResidual site
+  | none => failRoot s "bounded memory requires a straight-line scalar root with successful guards"
 
 private def bind (s : Bounds) (name : String) (value : Expr) : M Bounds := do
   let range := evaluate s value
@@ -205,10 +212,6 @@ private def effects (s : Bounds) : List Stmt → M Bounds
         | .return _ | .returnValues _ | .stop => pure s
         | _ => unsupportedEffects s
       effects next rest
-
-private def visibleResidual (site : SavedHashCleanup) : M α := do
-  modify fun e => { e with currentFile := site.file, stack := site.stack }
-  failAt site.node "bounded memory leaves dirty scalar bytes visible after assembly"
 
 /-- Follow copies of the captured hash through the inlined caller. The only memory it may
 read or restore is the allocator word. A terminal singleton return encodes at [0, 32). -/
