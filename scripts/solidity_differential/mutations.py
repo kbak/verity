@@ -29,6 +29,14 @@ HELPER_SCALAR_BINDING = """    | .scalar value =>
         if (bodyCompoundAssignedIds body).contains pid"""
 
 MUTANTS = {
+    'interval-search-drop-break': ('Compiler/SolidityImport/IntervalSearch.lean',
+        'pure #[Stmt.assignVar doneVar (.literal 1)]', 'pure #[Stmt.assignVar doneVar (.literal 0)]'),
+    'interval-search-keep-midpoint': ('Compiler/SolidityImport/IntervalSearch.lean',
+        '        lowerBody (block #[arm[0]!])',
+        '        let step := arm[0]!\n'
+        '        let assign := child step "expression"\n'
+        '        let mid := child (unparen (child assign "rightHandSide")) "leftExpression"\n'
+        '        lowerBody (block #[step.setObjVal! "expression" (assign.setObjVal! "rightHandSide" mid)])'),
     'helper-scalar-address-word': ('Compiler/SolidityImport/Import.lean', HELPER_SCALAR_BINDING,
         HELPER_SCALAR_BINDING.replace('        if (bodyCompoundAssignedIds',
             '        let converted := if paramType pty == some .address then\n'
@@ -356,6 +364,11 @@ def mutation_campaign(output, selected=None):
             argv = [sys.executable, str(directory / "scripts/solidity_import_differential.py"),
                     "--config", str(directory / "Contracts/SolidityImportSmoke" / config),
                     "--output", str(directory / ".lake/campaign"), "--cases", "8"]
+            if name.startswith("interval-search-"):
+                argv = [sys.executable, "-c",
+                        "import runpy,sys; sys.path.insert(0,'scripts'); "
+                        "runpy.run_module('solidity_differential.check_legacy_interval_search',run_name='__main__')",
+                        "--output", str(directory / ".lake/campaign")]
             if name.startswith("import-legacy-bytes-"):
                 argv = [sys.executable, "-c",
                         "import sys; sys.path.insert(0, 'scripts'); "
@@ -449,7 +462,11 @@ def mutation_campaign(output, selected=None):
                 (directory / "mutation.log").write_text(result.stdout + result.stderr)
                 report_file = directory / ".lake/campaign/results.json"
                 report = json.loads(report_file.read_text()) if report_file.exists() else {}
-                if result.returncode == 1 and report.get("divergences"):
+                detected = result.returncode == 1 and report.get("divergences")
+                if detected and name.startswith("interval-search-"):
+                    from .check_legacy_interval_search import completed_wrong_trace
+                    detected = completed_wrong_trace(report)
+                if detected:
                     status = "detected"
                 elif result.returncode == 0:
                     status = "survived"

@@ -125,7 +125,8 @@ private partial def mutationTarget (node : Json) (env : Env)
         (·.any (mutationTarget · env storageReturns)))
 
 /-- Validate each reached record use before common lowering can scalarize it. -/
-def validate (node : Json) (storageReturns : Array Nat := #[]) : M Unit := do
+def validate (node : Json) (storageReturns : Array Nat := #[])
+    (snapshotAssignments : Std.HashSet Nat := {}) : M Unit := do
   let kind := optStr node "nodeType" |>.getD ""
   let ty := (field? node "typeDescriptions").bind (optStr · "typeString") |>.getD ""
   if ty.startsWith "struct " then
@@ -179,7 +180,8 @@ def validate (node : Json) (storageReturns : Array Nat := #[]) : M Unit := do
     else if kind == "UnaryOperation" && (optStr node "operator").any
         (#["++", "--", "delete"].contains ·) then field? node "subExpression" else none
   if let some target := target then
-    if mutationTarget target (← get) storageReturns then
+    let recordedCopy := ((field? node "id").bind (·.getNat?.toOption)).any snapshotAssignments.contains
+    if mutationTarget target (← get) storageReturns && !recordedCopy then
       failAt target ("Solidity 0.7.6 memory struct writes and rebinding " ++
         "are outside the read-only slice")
 
@@ -190,12 +192,8 @@ private partial def findNode? (predicate : Json → Bool) (node : Json) : Option
     | .obj fields => fields.toList.findSome? (fun (_, child) => findNode? predicate child)
     | _ => none
 
-/-- Flattening does not preserve allocation addresses. Reject assembly throughout
-reached declarations, including helpers/modifiers without a direct record argument. -/
-def validateClosure : M Unit := do
-  let env ← get
-  let declarations := env.included.filterMap fun reached =>
-    env.funs.find? reached.declId <|> env.modifiers.find? reached.declId
+/-- Check allocation-address observability across all source bodies in a slice. -/
+def validateBodies (declarations : Array Json) : M Unit := do
   let hasStruct := declarations.any fun node =>
     (findNode? (fun n =>
       let ty := ((field? n "typeDescriptions").bind (optStr · "typeString")).getD ""
@@ -207,5 +205,12 @@ def validateClosure : M Unit := do
       if let some assembly := findNode?
           (fun n => optStr n "nodeType" == some "InlineAssembly") declaration then
         failAt assembly "legacy memory structs cannot share a reached closure with assembly"
+
+/-- Flattening does not preserve allocation addresses. Check each reached declaration,
+including helpers and modifiers without a direct record argument. -/
+def validateClosure : M Unit := do
+  let env ← get
+  validateBodies <| env.included.filterMap fun reached =>
+    env.funs.find? reached.declId <|> env.modifiers.find? reached.declId
 
 end Compiler.CompilationModel.SolidityImport.LegacyStructs

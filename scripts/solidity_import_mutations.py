@@ -498,6 +498,7 @@ solidity_import both from "{WORK / "base"}" entry "Slice.sol"
 # Compile and execute actual Denote mutants: a build failure is invalid,
 # not a detected semantic mutation. These regressions compare EVM bytes.
 DIFFERENTIAL_MUTANTS = (
+    "interval-search-drop-break", "interval-search-keep-midpoint",
     "helper-scalar-address-word", "helper-scalar-enum-word", "helper-scalar-enum-check",
     "postincrement-new-value", "postincrement-double-write", "postincrement-missing-write",
     "postincrement-local-new-value",
@@ -1123,6 +1124,12 @@ def tasks(update_golden: bool) -> list:
                    "check_loop_observer", "loop-observer-mutation", 400,
                    "--mutation", mutation))
               for mutation in ("continue-exits", "break-continues", "condition-failure-erased")]
+    items += [("interval-record-snapshots", 1, lambda: module_campaign_output(
+        "check_interval_record_snapshots", "interval-record-snapshots", 900))]
+    items += [("interval-progress-interface", 1, lambda: module_campaign_output(
+        "check_interval_progress_interface", "interval-progress-interface", 900))]
+    items += [("legacy-interval-search", 1, lambda: module_campaign_output(
+        "check_legacy_interval_search", "legacy-interval-search", 900, "--prepared"))]
     items += [(f"legacy-loop-source-opt{int(optimized)}", 1,
                lambda optimized=optimized: module_campaign_output(
                    "check_legacy_loop_source", "legacy-loop-source", 600,
