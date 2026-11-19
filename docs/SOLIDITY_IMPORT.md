@@ -2474,6 +2474,21 @@ returned gas and source spans). These typed targets are warm after the code chec
 or inherently warm as precompile 1. STATICCALL has no value stipend to mutate.
 
 
+### Selector-encoded legacy CALL
+
+Under Solidity 0.7.6 ABI-v1, a tuple declaration can bind both results of
+`target.call(abi.encodeWithSelector(selector, args...))`. The existing static
+encoder resolves a literal or type-qualified function selector and encodes the scalar
+arguments. The value-free CALL receives the four selector bytes followed immediately
+by those ABI words. Both successful and reverted calls expose their exact returndata
+as memory bytes. Calling an account without code succeeds with an empty buffer.
+
+A source `require` can test `abi.decode(data, (bool))` on a memory bytes binding,
+including inside `&&` and `||`. Decoding checks for a full word only when that operand
+is evaluated. Under ABI-v1 any nonzero word passes this truth test. A short word
+reverts with empty data during decoding. A false condition takes the source's
+own revert path. The existing post-call storage restrictions apply.
+
 ### Raw legacy STATICCALL and guarded uint256 decoding (development)
 
 Solidity 0.7.6 ABI-v1 tuple initializers of the form
@@ -2495,10 +2510,10 @@ which may be unaligned. Empty responses use the legacy zero-slot pointer. Alloca
 and copying use existing physical-memory statements and retain bytes aliases.
 
 Source checks remain separate statements: a bare `require(ok && data.length >= 32)`
-reverts with empty bytes, regardless of the callee's revert payload. Legacy
-`abi.decode` is admitted here only for one `uint256` from memory bytes under ABI-v1.
+reverts with empty bytes, regardless of the callee's revert payload. ABI-v1
+`abi.decode(data, (uint256))` reads one word from memory bytes.
 The decoder independently checks for at least 32 bytes and reads the first word;
-extra bytes are allowed. Other target types/tuples and calldata decoding reject.
+extra bytes are allowed. The legacy bool truth test described above also applies.
 
 `RawStaticCallFrames` proves six model laws for the checked static-world boundary,
 exact response retention, false failure binding, consumed meter and canonical arm.

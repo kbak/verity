@@ -250,7 +250,7 @@ partial def validateLegacyDeclaration (node : Json) (encodingInput : Bool := fal
           unless init.isNull do
             unless (optStr init "nodeType" == some "Identifier" &&
                 (← mType init) == "bytes memory") || LegacyAbi.isSelectorEncoding init ||
-                LegacyStaticCalls.applies node do
+                LegacyStaticCalls.applies node || LegacyCallTuples.isSelectorCall node do
               failAt node "Solidity 0.7.6 bytes locals require an existing memory buffer"
       if kind == "BinaryOperation" then
         for key in #["leftExpression", "rightExpression"] do

@@ -30,7 +30,16 @@ open Compiler.CompilationModel.SolidityImport
 BODY = ('function run(address target) external view returns(uint256) { '
         '(bool ok,bytes memory data)=target.staticcall(abi.encodeWithSelector(0x12345678)); '
         'require(ok && data.length>=32); return abi.decode(data,(uint256)); }')
+CALL_BODY = BODY.replace('external view', 'external').replace('.staticcall(', '.call(')
 CASES = {
+    'storage-read-after-selector-call': ('', 'uint256 stored; ' + CALL_BODY.replace(
+        'return abi.decode(data,(uint256));', 'return stored;'),
+        'closed trailing continuation with storage-free operands'),
+    'selector-call-missing-flag': ('', CALL_BODY.replace('(bool ok,bytes memory data)',
+        '(,bytes memory data)').replace('ok && ', ''), 'requires a bool and memory bytes tuple'),
+    'selector-call-dynamic-selector': ('', CALL_BODY.replace('0x12345678',
+        'bytes4(uint32(uint160(target)))'), 'legacy selector requires a literal'),
+    'selector-call-v2': ('pragma abicoder v2;', CALL_BODY, 'selector tuples require ABI coder v1'),
     'literal-selector': ('', BODY, None),
     'instance-selector': ('interface I { function f() external view returns(uint256); }',
         BODY.replace('0x12345678', 'I(target).f.selector'), 'type-qualified function'),
