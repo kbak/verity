@@ -1253,6 +1253,8 @@ def tasks(update_golden: bool) -> list:
                    "check_legacy_postincrement_arguments", "legacy-postincrement",
                    1800, *(["--optimized"] if optimized else [])))
               for optimized in (False, True)]
+    items += [("legacy-literal-helper-branches", 1, lambda: module_campaign_output(
+        "check_legacy_literal_helper_branches", "legacy-literal-helper-branches", 900, "--prepared"))]
     items += [("legacy-conditional-rejections", 1, lambda: module_campaign_output(
         "check_legacy_conditional_rejections", "legacy-conditional-rejections", 900))]
     items += [(f"legacy-conditionals-{kind}-opt{int(optimized)}", 1,

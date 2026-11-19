@@ -631,6 +631,12 @@ def isOrderIndependentSibling : Expr → Bool
 partial def evalConstExpr? (env : RBMap String Nat compare) : Expr → Option Nat
   | .literal n => if n < 2 ^ 256 then some n else none
   | .localVar name => env.find? name
+  | .eq a b => do
+      let left ← evalConstExpr? env a
+      let right ← evalConstExpr? env b
+      return if left == right then 1 else 0
+  | .logicalNot value => do
+      return if (← evalConstExpr? env value) == 0 then 1 else 0
   | .shl shift val => do
       let s ← evalConstExpr? env shift
       let v ← evalConstExpr? env val
