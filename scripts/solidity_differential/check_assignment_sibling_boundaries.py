@@ -21,6 +21,16 @@ open Compiler.CompilationModel Compiler.CompilationModel.SolidityImport
   for sibling in [Expr.storage "x", .add siblingRead (.literal 0), .tload (.literal 0)] do
     unless !localAssignmentSibling safe sibling do
       throw (IO.userError "nonlocal sibling accepted")
+  let other := Expr.param "y"
+  for comparison in [Expr.eq siblingRead other, .lt siblingRead other, .le siblingRead other,
+      .gt siblingRead other, .ge siblingRead other, .slt siblingRead other, .sgt siblingRead other,
+      .logicalNot (.slt other (.literal 0))] do
+    unless protectedComparisonSibling safe comparison do
+      throw (IO.userError "disjoint scalar comparison rejected")
+  for comparison in [Expr.eq (.localVar "z") other, .logicalNot (.gt other (.param "z")),
+      .eq (.storage "x") other, .slt (.mload siblingRead) other, .add siblingRead other] do
+    if protectedComparisonSibling safe comparison then
+      throw (IO.userError "dependent or unsupported comparison admitted")
   IO.println "assignment structural boundaries passed"
 '''
 # All dynamic inputs are materialized helper bindings. Root params alone were
@@ -35,6 +45,18 @@ CASES = {
     'nested-own': ('return (z=(x=y))+x;', 'assignment operand with non-atomic sibling'),
     'branch-own': ('return (z=(y>0 ? (x=y) : y))+x;', 'assignment operand with non-atomic sibling'),
     'two-effects': ('return (z=x)+(y=x);', 'assignment operand with non-atomic sibling'),
+    'comparison-left': ('require(((z=x+y)>=x)==(y>=x)); return z;', None),
+    'comparison-right': ('require((x<y)!=((z=x+y)<x)); return z;', None),
+    'comparison-reads-first-target': ('require(((z=x)>y)==(z<y)); return z;',
+        'assignment operand with non-atomic sibling'),
+    'comparison-reads-second-target': ('require((x>=z)==((z=x)>y)); return z;',
+        'assignment operand with non-atomic sibling'),
+    'comparison-with-storage': ('require(((z=x)>y)==(stored<y)); return z;',
+        'assignment operand with non-atomic sibling'),
+    'comparison-two-effects': ('require(((z=x)>y)==((y=x)>z)); return z;',
+        'assignment operand with non-atomic sibling'),
+    'comparison-storage-write': ('require(((stored=x)>y)==(x<y)); return z;',
+        'assignment operand with non-atomic sibling'),
     'non-atomic': ('require((z=x+y)>=(x+1)); return z;', 'assignment operand with non-atomic sibling'),
     'storage-prefix': ('return (stored=y)+x;', 'assignment operand with non-atomic sibling'),
     'storage-sibling': ('return (z=y)+stored;', 'assignment operand with non-atomic sibling'),

@@ -20,4 +20,22 @@ def localAssignmentSibling (pre : List Stmt) : Expr → Bool
   | .localVar name => prefixList [name] pre
   | _ => false
 
+/-- A comparison can read a word literal or a binding protected on every continuing path. -/
+def protectedComparisonWord (pre : List Stmt) : Expr → Bool
+  | .literal _ => prefixList [] pre
+  | .localVar name | .param name => prefixList [name] pre
+  | _ => false
+
+/-- The lowered comparison has two total scalar reads, both independent of the assignment. -/
+def protectedComparison (pre : List Stmt) : Expr → Bool
+  | .eq a b | .lt a b | .le a b | .gt a b | .ge a b | .slt a b | .sgt a b =>
+    protectedComparisonWord pre a && protectedComparisonWord pre b
+  | _ => false
+
+/-- Non-strict signed comparisons and inequality can negate a lowered comparison. -/
+def protectedComparisonSibling (pre : List Stmt) (expr : Expr) : Bool :=
+  match expr with
+  | .logicalNot inner => protectedComparison pre inner
+  | _ => protectedComparison pre expr
+
 end Compiler.CompilationModel.SolidityImport

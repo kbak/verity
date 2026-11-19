@@ -1,4 +1,4 @@
-"""Independent checked-add expectations for protected assignment siblings."""
+"""Independent checked-arithmetic expectations for protected assignment siblings."""
 import argparse
 import json
 import random
@@ -10,7 +10,8 @@ from .check_legacy_state_transitions import campaign, word, error, event, SENDER
 FIXTURE = Path('Contracts/SolidityImportSmoke/LegacyAssignmentSiblings.sol')
 FUNCTIONS = ('add(uint256,uint256)', 'rightSide(uint256,uint256)', 'nested(uint256,uint256)',
     'modified(uint256,uint256)', 'skipped(uint256,uint256,bool)', 'shadowed(uint256,uint256)',
-    'narrow(uint8,uint8)', 'record(uint256,uint256)')
+    'narrow(uint8,uint8)', 'record(uint256,uint256)',
+    'difference(int256,int256)', 'reverseDifference(int8,int8)')
 MASK = (1 << 256) - 1
 
 
@@ -35,6 +36,13 @@ def scenario(kind, caller, layout, **_):
             result, fail = (x+y+1) & MASK, y == MASK or x+y+1 > MASK
         elif name == 'skipped' and not values[2]:
             result, fail = 17, False
+        elif name in ('difference', 'reverseDifference'):
+            bits = 256 if name == 'difference' else 8
+            bound = 1 << (bits - 1)
+            a, b = ((v + bound) % (2 * bound) - bound for v in values)
+            values = [a & MASK, b & MASK]
+            result = (a - b) & MASK
+            fail = not -bound <= a - b < bound
         logs = []
         if not fail and name == 'record':
             logs = [event(caller,'Assigned(uint256)',['uint256'],[(state[slots['count']]+1)&MASK]),
@@ -49,7 +57,8 @@ def scenario(kind, caller, layout, **_):
             'data':error('narrow') if fail and name == 'narrow' else '0x' if fail else word(result),
             'events':logs, 'storage':[[caller,word(slot),word(value)] for slot,value in sorted(state.items())]}
     pairs = [(0,0),(1,0),(0,MASK),(MASK,0),(MASK,1),(MASK-1,1),(MASK-1,2),
-             (1<<255,1<<255),((1<<128)-1,1<<128),(255,1),(128,127)]
+             (1<<255,1<<255),((1<<128)-1,1<<128),(255,1),(128,127),(128,1),(127,MASK),
+             ((1<<255)-1,MASK),(1<<255,1),(1<<255,MASK),(0,1<<255)]
     rng = random.Random(7639)
     pairs += [(rng.getrandbits(256),rng.getrandbits(256)) for _ in range(8)]
     for x,y in pairs:
