@@ -1,6 +1,7 @@
 """Legacy bool queries and fixed-slot installation: independent state/ABI expectations."""
 import argparse
 import random
+from functools import partial
 from pathlib import Path
 from eth_abi import encode
 from eth_utils import keccak
@@ -38,7 +39,7 @@ def error(message):
 def transactions(seed, caller, accounts, random_cases, *, slot=7, query=QUERY,
                  capability=CAPABILITY, install='install', read='readCandidate',
                  changed='Changed(address)', self_error='self', unsupported='unsupported',
-                 extended=True, indexed_event=False):
+                 extended=True, indexed_event=False, address_only=False):
     rng = random.Random(seed)
     balances = {caller: FUNDS, accounts[0]: 5, accounts[1]: 17, EMPTY: 0, SENDER: 1 << 200}
     nonces = {caller: 1, accounts[0]: 1, accounts[1]: 1, EMPTY: 0, SENDER: 3}
@@ -121,6 +122,20 @@ def transactions(seed, caller, accounts, random_cases, *, slot=7, query=QUERY,
                 status, returned = 'revert', failure
             else:
                 returned = encode(['bool', 'bool'], [first != 0, second != 0])
+        elif method in ('guardedWrite', 'addressScratch'):
+            target = values[0]
+            if method == 'guardedWrite':
+                storage[(caller, 0)] = 91
+            ok, failure, word = response(target, encoded('current()', []))
+            decoded = word % (1 << 160)
+            if not ok:
+                status, returned = 'revert', failure
+            elif method == 'addressScratch':
+                returned = encode(['uint256'] * 4, [decoded, 128, word, storage[(target, 1)]])
+            elif decoded != int(sender, 16):
+                status, returned = 'revert', error('forbidden')
+            else:
+                storage[(caller, 0)] = values[1]
         elif method == 'advertises':
             returned = encode(['bool'], [values[0][:4] in (CAPABILITY, PARENT)])
         else:
@@ -144,6 +159,27 @@ def transactions(seed, caller, accounts, random_cases, *, slot=7, query=QUERY,
         wanted = keccak(data) if data else bytes(32)
         add('seedResponse(address,uint256,uint256,uint256,bytes32)',
             [target, word, length, mode, wanted])
+
+    if extended:
+        target = accounts[0]
+        owner = int(SENDER, 16)
+        request = encoded('current()', [])
+        for word, length, mode, wanted in (
+                (owner, 32, 0, request), ((1 << 252) | owner, 65, 0, request),
+                (int(caller, 16), 32, 0, request), (owner, 0, 0, request),
+                (owner, 31, 0, request), (MASK, 33, 1, request),
+                (owner, 32, 2, request), (owner, 32, 3, request),
+                (owner, 32, 0, b'wrong selector')):
+            seed_response(target, word, length, mode, wanted)
+            add('guardedWrite(address,uint256)', [target, length])
+            if word == int(caller, 16) and length == 32:
+                add('guardedWrite(address,uint256)', [target, 74], caller)
+            add('addressScratch(address)', [target])
+        add('guardedWrite(address,uint256)', [EMPTY, 1])
+        add('addressScratch(address)', [EMPTY])
+        add('addressScratch(address)', ['0x' + '00' * 19 + '02'])
+    if address_only:
+        return calls, expected
 
     install_sig = install+'(address)'
     zero = '0x'+'00'*20
@@ -219,12 +255,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--optimized', action='store_true')
+    parser.add_argument('--address-only', action='store_true')
     parser.add_argument('--seed', type=int, default=7601)
     parser.add_argument('--random-cases', type=int, default=12)
     args = parser.parse_args()
+    cases = partial(transactions, address_only=args.address_only)
     return campaign(args.output, optimized=args.optimized, seed=args.seed,
         random_cases=args.random_cases, fixture=FIXTURE, driver_template=DRIVER,
-        make_transactions=transactions, value_transactions=True, oracle_fixture=ORACLE,
+        make_transactions=cases, value_transactions=True, oracle_fixture=ORACLE,
         mock_module='StaticBoolMocks', mock_program='static-bool-oracle-v1', self_sender=True)
 
 

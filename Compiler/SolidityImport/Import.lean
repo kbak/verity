@@ -6766,7 +6766,7 @@ private partial def lowerInterfaceStaticCall (j : Json) : M Val := do
     pure (ps, ← rs.mapM mType)
   let rawParamTypes ← params.mapM mType
   if env.legacyWrapping then
-    if LegacyBoolCalls.applies j env then
+    if LegacyBoolCalls.applies j env || LegacyBoolCalls.addressQuery j env then
       return ← LegacyBoolCalls.lower j decl lowerExpr
     if LegacyVoidCalls.applies j env then
       return ← LegacyVoidCalls.lower j decl lowerExpr
@@ -12856,8 +12856,21 @@ private partial def isPureEqualityPeer (j : Json) : M Bool := do
       return false
   | _ => return false
 
+private partial def admitsQueryPeer (call peer : Json) : M Bool := do
+  let env ← get
+  let addr := env.legacyWrapping && LegacyBoolCalls.addressQuery call env
+  unless addr || !env.stateVars.isEmpty do return false
+  unless ← isInterfaceExternalCall call do return false
+  if addr && optStr peer "nodeType" == some "MemberAccess" &&
+      optStr peer "memberName" == some "sender" then
+    let base ← mField peer "expression"
+    if optStr base "nodeType" == some "Identifier" && optStr base "name" == some "msg" &&
+        (← refInt base) == -15 &&
+        optStr ((field? base "typeDescriptions").getD Json.null) "typeIdentifier" ==
+          some "t_magic_message" then return true
+  isPureEqualityPeer peer
+
 private partial def admittedRequireInterfaceCall? (cond : Json) : M (Option Json) := do
-  unless !(← get).stateVars.isEmpty do return none
   let cond := unparenJson cond
   match ← mKind cond with
   | "BinaryOperation" =>
@@ -12871,9 +12884,9 @@ private partial def admittedRequireInterfaceCall? (cond : Json) : M (Option Json
       else if op == "==" || op == "!=" then
         let left := unparenJson left
         let right := unparenJson right
-        if (← isInterfaceExternalCall left) && (← isPureEqualityPeer right) then
+        if ← admitsQueryPeer left right then
           return some left
-        else if (← isInterfaceExternalCall right) && (← isPureEqualityPeer left) then
+        else if ← admitsQueryPeer right left then
           return some right
         else
           return none

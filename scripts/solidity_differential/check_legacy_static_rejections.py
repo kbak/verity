@@ -7,7 +7,20 @@ I = 'interface I { function query(uint256 x) external view returns(bool); }'
 RUN = 'function run(address target,uint256 x) public { '
 CALL = 'require(I(target).query(x)); '
 SIG = 'run(address,uint256)'
+I_ADDR = 'interface R {function current() external view returns(address);}'
+AUTHORIZED = 'function run(address a) public {require(msg.sender == R(a).current());}'
 CASES = {
+    'address-query-sender': (I_ADDR, AUTHORIZED, 'run(address)', None),
+    'address-query-nonview': (I_ADDR.replace('external view', 'external'), AUTHORIZED,
+        'run(address)', 'external calls require'),
+    'address-query-argument': (I_ADDR.replace('current()', 'current(uint256)'),
+        AUTHORIZED.replace('current()', 'current(1)'), 'run(address)', 'external calls require'),
+    'address-query-v2': ('pragma experimental ABIEncoderV2; '+I_ADDR, AUTHORIZED,
+        'run(address)', 'require ABI coder v1'),
+    'two-address-query-operands': (I_ADDR,
+        'function run(address a,address b) public {require(R(a).current()==R(b).current());}',
+        'run(address,address)', 'legacy address queries require a whole scalar binding'),
+
     'static-then-write': (I, RUN + CALL + 'assembly { sstore(7,x) } }', SIG, None),
     'pure-callee': (I.replace('external view', 'external pure'), RUN + CALL + '}', SIG, None),
     'word-store': ('', 'function run(uint256 x) public { assembly { sstore(7,x) } }', 'run(uint256)', None),
