@@ -1057,6 +1057,8 @@ def tasks(update_golden: bool) -> list:
     items += [("legacy-memory-struct-boundaries", 1, lambda: module_campaign_output(
         "check_legacy_memory_struct_rejections", "legacy-memory-struct-boundaries", 900,
         "--prepared"))]
+    items += [("legacy-signed-mapping-values", 1, lambda: module_campaign_output(
+        "check_legacy_signed_mapping_values", "legacy-signed-mapping-values", 900, "--prepared"))]
     items += [("legacy-signed-boundaries", 1, lambda: module_campaign_output(
         "check_legacy_signed_rejections", "legacy-signed-boundaries", 900, "--prepared"))]
     items += [(f"legacy-storage-references-opt{int(optimized)}", 1,
@@ -1093,6 +1095,11 @@ def tasks(update_golden: bool) -> list:
     items += [(f"legacy-mapping-helpers-opt{int(optimized)}", 1,
                lambda optimized=optimized: module_campaign_output(
                    "check_legacy_mapping_helpers", "legacy-mapping-helpers", 1800,
+                   *(["--optimized"] if optimized else [])))
+              for optimized in (False, True)]
+    items += [(f"legacy-signed-mapping-keys-opt{int(optimized)}", 1,
+               lambda optimized=optimized: module_campaign_output(
+                   "check_legacy_signed_mapping_keys", "legacy-signed-mapping-keys", 1800,
                    *(["--optimized"] if optimized else [])))
               for optimized in (False, True)]
     items += [("legacy-mapping-helpers-single", 1, lambda: module_campaign_output(

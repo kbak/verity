@@ -2775,6 +2775,19 @@ and violate the oracle on all routes. Mathematical narrowing/range and overflow
 comparison laws, and the emitted ABI cleanup evaluation rule, are kernel-checked.
 These laws and finite tests do not constitute a proof of frontend correspondence.
 
+The legacy importer admits direct state mappings with one unsigned integer key
+and an `int8`–`int248` scalar value. Direct indexed reads and public getters
+sign-extend the low bits of the physical slot. Assignments with effect-free scalar keys and
+values update only those bits and preserve the rest of the word. Nested signed
+values, mappings with both signed keys and signed values, and whole-mapping
+parameters carrying signed values require separate support.
+
+A direct `mapping(intN => uintM)` and its public getter hash the key as a
+sign-extended 256-bit word. Internal functions and library methods can forward
+the mapping by storage reference. The captured descriptor carries the declared key
+width and the original storage slot into the helper body. Writes require effect-free
+key and value expressions. Narrow values preserve the unused bits of their slot.
+
 Signed `/` and `%` accept nonzero integer literals and never-assigned integer
 locals whose guards exclude zero on every path to the operation. Each helper
 and modifier must establish its own guard. A guard on a wider value cannot
@@ -2895,7 +2908,7 @@ arrays, multi-word elements, distinct roots, helper forwarding, rollback and
 compiler mutations of stride and bounds.
 
 Whole-record writes/copies, local pointer rebinding, dynamic or nested array record
-paths, nested mapping record paths, signed mapping keys and body-skipping modifiers
+paths, nested mapping record paths, signed keys for record mappings and body-skipping modifiers
 on storage tuple helpers remain unsupported.
 Single-placeholder modifiers preserve their preconditions and post-body effects around
 mixed results; named reference initialization is checked before modifier lowering.

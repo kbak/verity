@@ -448,6 +448,11 @@ private def buildField (types item : Json) : M FieldInfo := do
       throwError "unsupported scalar mapping value encoding {leafEncoding} for {name}"
     let rawLeafType ← mStr (← mField structTy "label")
     let leafType := (← get).userValueTypes.find? rawLeafType |>.getD rawLeafType
+    let rawKey ← mStr (← mField top "key")
+    let keyLabel := (rawKey.dropPrefix "t_").toString
+    let legacyScalar := (← get).legacyWrapping && key2.isNone
+    let signedWidth := if legacyScalar then LegacySigned.mappingValueWidth? keyLabel leafType else none
+    let signedKeyWidth := if legacyScalar then LegacySigned.mappingKeyWidth? keyLabel leafType else none
     let width ←
       if leafType == "bool" then pure 8
       else if leafType == "address" || leafType == "address payable" || leafType.startsWith "contract " then pure 160
@@ -457,6 +462,7 @@ private def buildField (types item : Json) : M FieldInfo := do
         unless bits > 0 && bits ≤ 256 && bits % 8 == 0 do
           throwError "invalid mapping uint width {bits}"
         pure bits
+      else if let some bits := signedWidth then pure bits
       else throwError "unsupported scalar mapping value type {rawLeafType}"
     let bytes ← mNat (← mField structTy "numberOfBytes")
     unless bytes * 8 == width do
@@ -470,8 +476,9 @@ private def buildField (types item : Json) : M FieldInfo := do
       | none => .mappingStruct key1 [member]
     let field : Field := { name, ty, slot := some slot }
     return { slot, field, keyCount := if key2.isSome then 2 else 1,
-             memberNames := #[], opaqueNames := #[], scalarMapping := true,
-             booleanMapping := leafType == "bool" }
+             memberNames := #[], opaqueNames := #[], scalarMapping := true, signedKeyWidth,
+             booleanMapping := leafType == "bool",
+             signedMembers := (signedWidth.map fun w => ("__solidity_value", w)).toArray }
   let (members', names, skipped, booleanMembers, signedMembers, structFixedArrays,
       structMappings, structDynamicArrays, subStructs) ←
     decodeStructLayoutMembers name "" 0 types structTy
@@ -505,6 +512,8 @@ private def rootMappingInfo (name : String) (at_ : Json) : M (Expr × StructMapp
     | failAt at_ "storage mapping arguments require a single mapping key"
   unless info.keyCount == 1 && !info.bytesStorage do
     failAt at_ "storage mapping arguments require scalar or struct values"
+  if info.scalarMapping && !info.signedMembers.isEmpty then
+    failAt at_ "signed scalar mapping values require direct state mapping access"
   let env ← get
   let some item := env.layoutItems.find? name | failAt at_ "missing mapping layout"
   let mapTy ← mField env.layoutTypes (← mStr (← mField item "type"))
@@ -520,7 +529,7 @@ private def rootMappingInfo (name : String) (at_ : Json) : M (Expr × StructMapp
   markField name
   pure (.literal info.slot, {
     member := "", solcType := ← mType at_, wordOffset := 0, keyType,
-    valueWidth, booleanValue := info.booleanMapping, valueStructId })
+    signedKeyWidth := info.signedKeyWidth, valueWidth, booleanValue := info.booleanMapping, valueStructId })
 
 private def readRawStructScalar (pre : Array Stmt) (baseSlot : Expr) (mInfo : RawStructMemberInfo) : M Val := do
   modify fun e => { e with usedRawStorage := true }
@@ -881,7 +890,9 @@ private def scalarMappingRead (pre : Array Stmt) (path : SPath) (at_ : Json) : M
   unless info.scalarMapping && info.keyCount == count do
     failAt at_ "storage or memory path used as a value"
   markField name
-  -- Solidity cleans a storage bool by testing the loaded byte for nonzero.
+  let read := if let some (_, width) := info.signedMembers[0]? then
+      Expr.signextend (.literal (width / 8 - 1)) read
+    else read
   let expr := if info.booleanMapping then Expr.logicalNot (.logicalNot read) else read
   pure { pre, expr }
 
@@ -3114,7 +3125,11 @@ private partial def lowerRef (j : Json) : M Ref := do
         convert "bytes4" (← mType indexExpression) rawKey indexExpression
       else
         pure rawKey
-      let key ← atom convKey
+      let keyWidth ← match base with
+        | .state name _ => pure (← resolveField name j).signedKeyWidth
+        | .structMapping _ _ info => pure info.signedKeyWidth
+        | _ => pure none
+      let key ← atom { convKey with expr := LegacySigned.mappingKeyWord keyWidth convKey.expr }
       match base with
       | .fixedStructArray pre descriptor =>
           let ty ← mType indexExpression
@@ -8846,7 +8861,10 @@ private partial def inlineVoidFn (fnId : Nat) (args : Array CallArg) (at_ : Json
       { e with stack := saved.stack, yulNames := savedYul, yulMemoryArrays := saved.yulMemoryArrays, yulMemoryStructs := saved.yulMemoryStructs, currentFile := savedFile, unchecked := saved.unchecked,
                values := saved.values, writableLocals := saved.writableLocals, zeroInitLocals := saved.zeroInitLocals, paths := saved.paths, storageMappingVars := saved.storageMappingVars, fixedStructArrayVars := saved.fixedStructArrayVars, snapshots := saved.snapshots, mems := saved.mems, abiElements := saved.abiElements, flatStructs := saved.flatStructs, calldataBytes := saved.calldataBytes, scalarArrays := saved.scalarArrays, byteBuffers := saved.byteBuffers, stringBuffers := saved.stringBuffers, storageBytesVars := saved.storageBytesVars, storageDynamicArrayVars := saved.storageDynamicArrayVars, fnPtrs := saved.fnPtrs, bodyAssigned := saved.bodyAssigned, helperResult := savedHelperResult, helperReturnId := savedHelperReturnId, multiHelperResults := saved.multiHelperResults, flatStructHelperResult := saved.flatStructHelperResult, helperPost := saved.helperPost, legacyCleanParams := saved.legacyCleanParams, scalarTy := saved.scalarTy }
     return pre ++ shimStmts
-  if (← get).stateVars.size > 1 && optStr fn "name" == some "flipTick" && args.size == 3 &&
+  -- Legacy storage mapping arguments carry their base in storageMappingVars.
+  -- The source body uses that captured descriptor through ordinary index lowering.
+  if !saved.legacyWrapping && (← get).stateVars.size > 1 &&
+      optStr fn "name" == some "flipTick" && args.size == 3 &&
       (← get).funContract.find? fnId == some "TickBitmap" then
     let p0Id ← mNat (← mField params[0]! "id")
     let p1Id ← mNat (← mField params[1]! "id")
@@ -14946,7 +14964,7 @@ private def lowerPublicVarGetter (varDecl : Json) : M (Array Stmt × Array SrcPa
     modify fun e => { e with publicVarGetterReturns := #[pty] }
     return (#[.returnValues [readExpr]], srcParams)
   else if paramSpecs.size == 1 then
-    let k0 := paramExprs.getD 0 (.literal 0)
+    let k0 := LegacySigned.mappingKeyWord info.signedKeyWidth (paramExprs.getD 0 (.literal 0))
     if let some elemSid := info.dynamicArrayStructId then
       let rawInfo ← resolveRawStructInfo elemSid varDecl
       unless rawInfo.mappings.isEmpty && rawInfo.dynamicArrays.isEmpty && rawInfo.subStructs.isEmpty do
