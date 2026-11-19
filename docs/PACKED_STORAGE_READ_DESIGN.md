@@ -101,6 +101,16 @@ consume this preimage. Scratch writes at 0 and 32 preserve the free-pointer and
 zero words under initial coherence, and preserve arbitrary buffers above 128.
 The disjoint-slice hash frame also handles unaligned buffers.
 
+The canonical source interpreter also executes the capture and lookup in one
+statement sequence. Given the physical preimage at capture, a coherent word
+view and a nonwrapping hash-read window, the caller saves the digest. A witnessed
+sequence of bounded word stores may then overwrite the preimage. The two scratch
+stores consume the saved binding and the resolved layout base. The final local
+contains `solidityMappingSlot(base, savedKey)`. The theorem identifies the whole
+poststate, including the ordered cleanup and scratch writes. It requires no
+collision or storage-disjointness premise for computing this one address.
+[Saved hash and mapping-slot proof](../Compiler/Proofs/IRGeneration/SavedHashMappingSlot.lean)
+
 These existing lemmas justify the physical scratch footprint and its frames.
 The new recognition and interval checks remain trusted frontend code; the lemmas
 do not connect arbitrary Solidity execution to an accepted root, justify tail-only

@@ -62,6 +62,34 @@ private theorem exec_return_bound_word (spec : CompilationModel) (fields : List 
   simp [evalExprList, localEval, wordNormalize_eq_mod]
   exact word.isLt
 
+/-- Capture the digest before a witnessed cleanup and pass the exact poststate to the caller. -/
+theorem exec_saved_hash_cleanup_then (spec : CompilationModel) (fields : List Field)
+    (state : RuntimeState) (name : String) (base length : Expr) (offset size : Nat)
+    (bytes : ByteArray) (cleanup suffix : List Stmt) (writes : List (Nat × Verity.Core.Uint256))
+    (hBase : evalExprCanonical spec fields state base = some offset)
+    (hLength : evalExprCanonical spec fields state length = some size)
+    (coherent : Coherent state.world)
+    (bounded : offset + byteWordCount size * 32 ≤ Compiler.Constants.evmModulus)
+    (preimage : state.world.byteMemory.sliceBytes offset size = bytes)
+    (block : BindingMstoreBlock (bindValue state.bindings name (keccakBytesWord bytes).val)
+      cleanup writes) :
+    let saved := { state with
+      bindings := bindValue state.bindings name (keccakBytesWord bytes).val }
+    execStmtsCanonical spec fields state (.assignVar name (.keccak256 base length) ::
+      (cleanup ++ suffix)) =
+        execStmtsCanonical spec fields (mstoreBlockState saved writes) suffix := by
+  dsimp only
+  let saved := { state with bindings := bindValue state.bindings name (keccakBytesWord bytes).val }
+  have digest := eval_canonical_keccak_of_physical_slice spec fields state base length offset
+    size bytes hBase hLength coherent bounded preimage
+  have capture : execStmtCanonical spec fields state (.assignVar name (.keccak256 base length)) =
+      .continue saved := by
+    unfold evalExprCanonical at digest
+    simp only [execStmtCanonical, execStmtWithHelpers.eq_def, digest, saved]
+  rw [exec_canonical_cons_of_continue spec fields state saved _ _ capture,
+    exec_canonical_append_of_continue spec fields saved _ cleanup _
+      (exec_binding_mstore_block spec fields saved cleanup writes block)]
+
 /-- Capture the original hash, run the witnessed stores, and return the saved binding.
 Stores may overwrite the preimage. The result specifies both the returned word and the poststate. -/
 theorem exec_saved_hash_return (spec : CompilationModel) (fields : List Field)
@@ -82,19 +110,8 @@ theorem exec_saved_hash_return (spec : CompilationModel) (fields : List Field)
       .stop { mstoreBlockState saved writes with
         observedReturnWords := some [(keccakBytesWord bytes).val] } := by
   dsimp only
-  let saved := { state with bindings := bindValue state.bindings name (keccakBytesWord bytes).val }
-  have digest := eval_canonical_keccak_of_physical_slice spec fields state base length offset
-    size bytes hBase hLength coherent bounded preimage
-  have capture : execStmtCanonical spec fields state (.assignVar name (.keccak256 base length)) =
-      .continue saved := by
-    unfold execStmtCanonical
-    rw [execStmtWithHelpers.eq_def]
-    simp only
-    unfold evalExprCanonical at digest
-    rw [digest]
-  rw [exec_canonical_cons_of_continue spec fields state saved _ _ capture,
-    exec_canonical_append_of_continue spec fields saved _ cleanup _
-      (exec_binding_mstore_block spec fields saved cleanup writes block)]
+  rw [exec_saved_hash_cleanup_then spec fields state name base length offset size bytes cleanup _
+    writes hBase hLength coherent bounded preimage block]
   apply exec_return_bound_word
   exact lookupValue_bindValue_same _ _ _
 
