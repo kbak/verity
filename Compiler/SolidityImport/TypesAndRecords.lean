@@ -66,6 +66,8 @@ structure StructMappingInfo where
   solcType : String
   wordOffset : Nat
   keyType : MappingKeyType
+  /-- Declared signed key width used when hashing a captured legacy scalar mapping. -/
+  signedKeyWidth : Option Nat := none
   valueWidth : Nat
   booleanValue : Bool := false
   valueStructId : Option Nat := none
@@ -226,6 +228,8 @@ structure FieldInfo where
   structMembers : Array StructMember := #[]
   booleanScalar : Bool := false
   scalarMapping : Bool := false
+  /-- Declared signed key width for one-key legacy mappings to unsigned storage. -/
+  signedKeyWidth : Option Nat := none
   booleanMapping : Bool := false
   bytesStorage : Bool := false
   stringStorage : Bool := false

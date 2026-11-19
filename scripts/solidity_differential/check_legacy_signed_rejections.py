@@ -15,9 +15,15 @@ CASES = {
         '{ return h(uint8(-1)); }', 'run()', 'assembly reads require full-word or literal'),
     'signed-mapping-key': ('', 'mapping(int128=>uint256) m; '
         'function run(int128 x) external view returns(uint256) { return m[x]; }',
-        'run(int128)', 'signed mapping storage is outside'),
+        'run(int128)', None),
     'signed-mapping-key-getter': ('', 'mapping(int128=>uint256) public m;',
-        'm(int128)', 'signed mapping storage is outside'),
+        'm(int128)', None),
+    'signed-key-effectful-write': ('', 'mapping(int128=>uint256) m; '
+        'function h() internal returns(uint256) { m[0]=1; return 3; } '
+        'function run(int128 x) external { m[x]=h(); }', 'run(int128)',
+        'signed mapping writes require effect-free scalar keys and values'),
+    'signed-key-bool-getter': ('', 'mapping(int16=>bool) public m;',
+        'm(int16)', 'signed mapping storage is outside'),
     'signed-mapping-value-getter': ('', 'mapping(uint256=>int256) public m;',
         'm(uint256)', 'signed mapping storage is outside'),
     'address-to-narrow-signed-getter': ('', 'mapping(address=>int24) public m;',

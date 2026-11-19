@@ -6,6 +6,17 @@ those uses. All arithmetic here reuses the wrapping expression lowering. -/
 namespace Compiler.CompilationModel.SolidityImport.LegacySigned
 open Lean
 
+/-- Solidity hashes an integer key as a full word, extended at its declared width. -/
+def mappingKeyWidth? (key value : String) : Option Nat := do
+  guard (value.startsWith "uint" && (bitsOf value).isSome)
+  signedBitsOf key
+
+/-- Canonicalize the key before computing the Solidity storage address. -/
+def mappingKeyWord (width : Option Nat) (key : Expr) : Expr :=
+  match width with
+  | some bits => if bits < 256 then .signextend (.literal (bits / 8 - 1)) key else key
+  | none => key
+
 /-- Inspect mapping key/value types without expanding unrelated struct layouts. -/
 private partial def hasSignedType (node : Json) : Bool :=
   ((field? node "typeDescriptions").bind (optStr · "typeString")).any
@@ -20,17 +31,18 @@ def mappingValueWidth? (key value : String) : Option Nat := do
   guard (width < 256)
   return width
 
-private def declaredMappingWidth? (decl : Json) : Option Nat := do
+private def declaredMappingWidth? (decl : Json) (widthOf : String → String → Option Nat) :
+    Option Nat := do
   let ty ← field? decl "typeName"
   guard (optStr ty "nodeType" == some "Mapping")
   let typeOf := fun (node : Json) => (field? node "typeDescriptions").bind (optStr · "typeString")
-  mappingValueWidth? (← typeOf (← field? ty "keyType")) (← typeOf (← field? ty "valueType"))
+  widthOf (← typeOf (← field? ty "keyType")) (← typeOf (← field? ty "valueType"))
 
 private def directMappingAccess (node : Json) (width : Nat) (env : Env) : Bool := (do
   let base ← field? node "baseExpression"
   guard (optStr base "nodeType" == some "Identifier")
   let id ← (← field? base "referencedDeclaration").getNat?.toOption
-  return declaredMappingWidth? (← env.stateVars.find? id) == some width
+  return declaredMappingWidth? (← env.stateVars.find? id) mappingValueWidth? == some width
   : Option Bool).getD false
 
 /-- Validate signed expressions and declaration-bound storage uses in the legacy profile. -/
@@ -53,7 +65,8 @@ def validate (node : Json) (observedLocals : Bool := false) : M Unit := do
   if let some decl := declaration then
     let typeName := field? decl "typeName" |>.getD Json.null
     if optStr typeName "nodeType" == some "Mapping" && hasSignedType typeName &&
-        (declaredMappingWidth? decl).isNone then
+        (declaredMappingWidth? decl mappingValueWidth?).isNone &&
+        (declaredMappingWidth? decl mappingKeyWidth?).isNone then
       failAt node "Solidity 0.7.6 signed mapping storage is outside the scalar slice"
   if kind == "BinaryOperation" then
     let left ← mType (← mField node "leftExpression")
@@ -68,11 +81,15 @@ def validate (node : Json) (observedLocals : Bool := false) : M Unit := do
         failAt node "Solidity 0.7.6 signed unary operators require negation"
   if kind == "Assignment" then
     let target ← mField node "leftHandSide"
-    if let some width := signedBitsOf (← mType target) then
-      if directMappingAccess target width env && optStr node "operator" == some "=" then
-        unless LegacyStructs.totalArgument (← mField target "indexExpression") true &&
-            LegacyStructs.totalArgument (← mField node "rightHandSide") true do
-          failAt node "signed mapping writes require effect-free scalar keys and values"
+    let width := signedBitsOf (← mType target)
+    let signedKey := ((field? target "baseExpression").bind (field? · "typeDescriptions") >>=
+      (optStr · "typeString")).any (·.startsWith "mapping(int")
+    if signedKey || (optStr node "operator" == some "=" &&
+        width.any (fun w => directMappingAccess target w env)) then
+      unless LegacyStructs.totalArgument (← mField target "indexExpression") true &&
+          LegacyStructs.totalArgument (← mField node "rightHandSide") true do
+        failAt node "signed mapping writes require effect-free scalar keys and values"
+    if width.isSome then
       let localArithmetic := observedLocals && optStr target "nodeType" == some "Identifier" &&
         !((field? target "referencedDeclaration").bind (·.getNat?.toOption)).any env.stateVars.contains &&
         (optStr node "operator").any (#["+=", "-=", "*="].contains ·)

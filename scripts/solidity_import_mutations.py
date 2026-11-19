@@ -1097,6 +1097,11 @@ def tasks(update_golden: bool) -> list:
                    "check_legacy_mapping_helpers", "legacy-mapping-helpers", 1800,
                    *(["--optimized"] if optimized else [])))
               for optimized in (False, True)]
+    items += [(f"legacy-signed-mapping-keys-opt{int(optimized)}", 1,
+               lambda optimized=optimized: module_campaign_output(
+                   "check_legacy_signed_mapping_keys", "legacy-signed-mapping-keys", 1800,
+                   *(["--optimized"] if optimized else [])))
+              for optimized in (False, True)]
     items += [("legacy-mapping-helpers-single", 1, lambda: module_campaign_output(
         "check_legacy_mapping_helpers", "legacy-mapping-helpers-single", 1800, "--single"))]
     items += [("mapping-member-helper", 1, lambda: module_campaign_output(
