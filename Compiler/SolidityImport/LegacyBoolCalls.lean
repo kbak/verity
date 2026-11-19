@@ -1,25 +1,38 @@
 import Compiler.SolidityImport.LegacyMemory
 import Compiler.SolidityImport.SourceGasCalls
 
-/-! Resolved ABI-v1 bool-returning static calls with captured scalar arguments.
-No newer strict bool decoder or allocator behavior is reused for legacy sources. -/
+/-! ABI-v1 scalar static queries with captured arguments and legacy scratch-memory decoding. -/
 namespace Compiler.CompilationModel.SolidityImport.LegacyBoolCalls
 open Lean
 
-/-- Recognize a resolved external view/pure declaration returning one bool. -/
-def applies (node : Json) (env : Env) : Bool := Id.run do
-  unless optStr node "kind" == some "functionCall" do return false
+/-- Resolve a scalar query to its declaration before selecting the ABI-v1 decoder. -/
+private def queryDecl? (node : Json) (env : Env) : Option Json := do
+  guard (optStr node "kind" == some "functionCall")
   let callee := field? node "expression" |>.getD Json.null
   let ty := (field? callee "typeDescriptions").bind (optStr · "typeString") |>.getD ""
-  unless (ty.splitOn " external").length > 1 do return false
-  let some id := (field? callee "referencedDeclaration").bind (·.getNat?.toOption)
-    | return false
-  let some decl := env.funs.find? id | return false
-  let returns := ((field? decl "returnParameters").bind (field? · "parameters")).bind
-    (·.getArr?.toOption) |>.getD #[]
-  return #[some "view", some "pure"].contains (optStr decl "stateMutability") &&
-    returns.size == 1 && ((field? returns[0]! "typeDescriptions").bind
-      (optStr · "typeString")) == some "bool"
+  guard ((ty.splitOn " external").length > 1)
+  let id ← (← field? callee "referencedDeclaration").getNat?.toOption
+  env.funs.find? id
+
+private def singleResult? (decl : Json) : Option String := do
+  let parameters ← (← field? (← field? decl "returnParameters") "parameters").getArr?.toOption
+  guard (parameters.size == 1)
+  optStr (← field? parameters[0]! "typeDescriptions") "typeString"
+
+/-- Recognize a resolved external view/pure declaration returning one bool. -/
+def applies (node : Json) (env : Env) : Bool := (queryDecl? node env).any fun decl =>
+  #[some "view", some "pure"].contains (optStr decl "stateMutability") &&
+    singleResult? decl == some "bool"
+
+/-- Only a resolved zero-argument interface view can use the address result decoder. -/
+def addressQuery (node : Json) (env : Env) : Bool := (do
+  let decl ← queryDecl? node env
+  let id ← (← field? decl "id").getNat?.toOption
+  let owner ← env.funContractId.find? id
+  let params ← (← field? (← field? decl "parameters") "parameters").getArr?.toOption
+  return env.contractKinds.find? owner == some "interface" && params.isEmpty &&
+    optStr decl "stateMutability" == some "view" && singleResult? decl == some "address"
+  : Option Bool).getD false
 
 /-- Only the resolved `type(I).interfaceId` constant bypasses builtin-call checks.
 The shared lowering independently validates the interface and selector inventory. -/
@@ -39,18 +52,25 @@ def interfaceId (node : Json) (env : Env) : Bool := Id.run do
     | return false
   return env.contractKinds.find? id == some "interface"
 
-/-- Encode effect-free scalars into one closed static transport. -/
+/-- Call the legacy scalar transport, whose physical output word retains all response bits. -/
 def lower (node decl : Json) (scalar : Json → M Val) : M Val := do
   let env ← get
+  let addressResult := addressQuery node env
+  let resultType := if addressResult then "address" else "bool"
   if env.legacyAbiV2Files.contains env.currentFile then
-    failAt node "legacy bool calls require ABI coder v1 at the call site"
+    failAt node s!"legacy {resultType} calls require ABI coder v1 at the call site"
+  if addressResult then
+    if env.sourceGas then
+      failAt node "legacy address queries require the gas-independent call profile"
+    unless env.admittedInterfaceCalls.contains (← mNat (← mField node "id")) do
+      failAt node "legacy address queries require a whole scalar binding or a guarded equality"
   let callee ← mField node "expression"
   let base ← mField callee "expression"
   unless optStr base "kind" == some "typeConversion" do
-    failAt base "legacy bool call requires an explicit interface conversion"
+    failAt base s!"legacy {resultType} call requires an explicit interface conversion"
   let receiver ← mArr (← mField base "arguments")
   unless receiver.size == 1 && #["address", "address payable"].contains (← mType receiver[0]!) do
-    failAt base "legacy bool call receiver requires an address"
+    failAt base s!"legacy {resultType} call receiver requires an address"
   let params ← mArr (← mField (← mField decl "parameters") "parameters")
   let args ← mArr (← mField node "arguments")
   unless args.size == params.size do failAt node "legacy bool argument count differs"
@@ -59,7 +79,7 @@ def lower (node decl : Json) (scalar : Json → M Val) : M Val := do
     | failAt callee "legacy bool selector invalid"
   unless hex.length == 8 do failAt callee "legacy bool selector length invalid"
   let target ← scalar receiver[0]!
-  unless target.pre.isEmpty do failAt base "legacy bool receiver must be effect-free"
+  unless target.pre.isEmpty do failAt base s!"legacy {resultType} receiver must be effect-free"
   let mut values := [LegacyMemory.cleanScalar .address target.expr]
   for (param, arg) in params.zip args do
     let ty ← mType param
@@ -80,7 +100,14 @@ def lower (node decl : Json) (scalar : Json → M Val) : M Val := do
   let result ← fresh
   modify fun e => { e with encodingMemory := true }
   let mod ← SourceGasCalls.module node result (.bool selector params.size)
-  return { pre := #[.ecm mod values]
-           expr := .localVar result }
+  let call := Stmt.ecm mod values
+  if addressResult then
+    -- The normalised bool binding is unused. The closed transport writes the exact
+    -- output word at its entry free pointer. Capture that pointer before the call.
+    let pointer ← fresh
+    let addr := LegacyMemory.cleanScalar .address (.mload (.localVar pointer))
+    return { pre := #[.letVar pointer (.mload (.literal 64)), call, .assignVar result addr],
+             expr := .localVar result }
+  return { pre := #[call], expr := .localVar result }
 
 end Compiler.CompilationModel.SolidityImport.LegacyBoolCalls

@@ -1928,6 +1928,23 @@ explicit external-environment obligations. Complete application execution and re
 Callback installation uses the separately described static-query/storage slice below.
 
 
+### ABI-v1 zero-argument address queries
+
+In the gas-independent Solidity 0.7.6 profile, a declared interface `view` function
+returning one `address` can be called through an explicit conversion of an
+effect-free address. A scalar initializer or assignment captures the result.
+A `require` equality or inequality can compare the call with a simple local
+address or `msg.sender`, including in a modifier.
+
+The call encodes the four-byte selector at the entry free pointer, checks for
+callee code, and issues a zero-value `STATICCALL`. Failure forwards the callee's
+revert bytes. A successful response needs at least 32 bytes. The result uses
+the low 160 bits of the first word. The physical output word preserves its
+high bits, the free pointer stays in place for a standard heap, and the complete
+return-data buffer remains observable. The execution environment supplies the
+target's code and static response. The differential checks use a distinct child
+account and ample gas. Metered execution needs separate source-gas evidence.
+
 ### ABI-v1 bool static calls and constant-slot stores (experimental)
 
 Solidity 0.7.6 admits resolved view/pure interface calls returning one bool. The

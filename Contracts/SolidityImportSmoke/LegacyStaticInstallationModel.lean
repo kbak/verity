@@ -21,6 +21,8 @@ solidity_import imported from "Contracts/SolidityImportSmoke" entry "LegacyStati
   function storeWord(uint256)
   function probe(address,bytes32)
   function probeMany(address,uint256,bytes32,address,bool,bytes32)
+  function guardedWrite(address,uint256)
+  function addressScratch(address)
   function probeEmpty(address)
   function probePair(address,address)
   function advertises(bytes32)

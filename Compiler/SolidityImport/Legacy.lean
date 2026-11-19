@@ -345,7 +345,8 @@ partial def validateLegacyDeclaration (node : Json) (encodingInput : Bool := fal
           -- The lowering independently resolves and validates the declaration,
           -- receiver, argument types and ABI-v1 bytes4 return transport.
           unless ty == "function (bytes32,bytes memory) view external returns (bytes4)" ||
-              LegacyVoidCalls.applies node (← get) || LegacyBoolCalls.applies node (← get) do
+              LegacyVoidCalls.applies node (← get) || LegacyBoolCalls.applies node (← get) ||
+              LegacyBoolCalls.addressQuery node (← get) do
             failAt node "Solidity 0.7.6 external calls require the ABI-v1 bytes4 view slice"
         if optStr callee "nodeType" == some "Identifier" then
           -- Legacy builtins retain duplicate negative overloadedDeclarations.

@@ -10,6 +10,9 @@ interface ICapability is IStaticFlag {
     function beforeAction(uint256 n) external;
     function afterAction(bytes32 word, bool success) external;
 }
+interface IAddressSource {
+    function current() external view returns (address);
+}
 interface IResponse {
     function configure(uint256 word, uint256 length, uint256 mode, bytes32 expected) external;
 }
@@ -70,6 +73,27 @@ contract LegacyStaticInstallation {
         first = IStaticFlag(firstTarget).ready();
         second = IStaticFlag(secondTarget).ready();
     }
+    modifier recordAttempt() { marker = 91; _; }
+    modifier callerMatches(address target) {
+        require(msg.sender == IAddressSource(target).current(), "forbidden");
+        _;
+    }
+    function guardedWrite(address target, uint256 word) external recordAttempt callerMatches(target) {
+        marker = word;
+    }
+    function addressScratch(address target)
+        external view returns (address value, uint256 free, uint256 raw, uint256 size)
+    {
+        value = IAddressSource(target).current();
+        assembly { size := returndatasize() }
+        assembly {
+            let ptr := mload(64)
+            free := ptr
+            raw := mload(ptr)
+            mstore(ptr, raw)
+        }
+    }
+
     function advertises(bytes32 tag) public pure returns(bool) {
         return bytes4(tag) == type(ICapability).interfaceId || bytes4(tag) == type(IStaticFlag).interfaceId;
     }
