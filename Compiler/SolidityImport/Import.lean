@@ -12856,21 +12856,20 @@ private partial def isPureEqualityPeer (j : Json) : M Bool := do
       return false
   | _ => return false
 
-private partial def admitsQueryPeer (call peer : Json) : M Bool := do
-  let env ← get
-  let addr := env.legacyWrapping && LegacyBoolCalls.addressQuery call env
-  unless addr || !env.stateVars.isEmpty do return false
-  unless ← isInterfaceExternalCall call do return false
-  if addr && optStr peer "nodeType" == some "MemberAccess" &&
-      optStr peer "memberName" == some "sender" then
-    let base ← mField peer "expression"
-    if optStr base "nodeType" == some "Identifier" && optStr base "name" == some "msg" &&
-        (← refInt base) == -15 &&
-        optStr ((field? base "typeDescriptions").getD Json.null) "typeIdentifier" ==
-          some "t_magic_message" then return true
-  isPureEqualityPeer peer
-
 private partial def admittedRequireInterfaceCall? (cond : Json) : M (Option Json) := do
+  let admitsQueryPeer (call peer : Json) : M Bool := do
+    let env ← get
+    let addr := env.legacyWrapping && LegacyBoolCalls.addressQuery call env
+    unless addr || !env.stateVars.isEmpty do return false
+    unless ← isInterfaceExternalCall call do return false
+    if addr && optStr peer "nodeType" == some "MemberAccess" &&
+        optStr peer "memberName" == some "sender" then
+      let base ← mField peer "expression"
+      if optStr base "nodeType" == some "Identifier" && optStr base "name" == some "msg" &&
+          (← refInt base) == -15 &&
+          optStr ((field? base "typeDescriptions").getD Json.null) "typeIdentifier" ==
+            some "t_magic_message" then return true
+    isPureEqualityPeer peer
   let cond := unparenJson cond
   match ← mKind cond with
   | "BinaryOperation" =>
