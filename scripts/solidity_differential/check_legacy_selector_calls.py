@@ -144,7 +144,7 @@ def campaign(out):
     paths = [json.dumps(str(out / name)) for name in ('model.yul', 'input.json', 'model.json')]
     driver = out / 'Replay.lean'
     driver.write_text(MODEL.read_text() +
-        f'\n#eval SolidityImportSmoke.LegacySelectorCall.replay {selectors} ' + ' '.join(paths) + '\n')
+        f'\n#eval SolidityImportSmoke.LegacySelectorCall.compileAndRun {selectors} ' + ' '.join(paths) + '\n')
     command(['turbo-lean', 'eval', driver, '--project-dir', ROOT, '--timeout-ms', '180000'],
             timeout=210, log=out / 'eval.log')
     generated = compile_input(out, 'Generated', (out / 'model.yul').read_text(), 'Yul', SOLC,

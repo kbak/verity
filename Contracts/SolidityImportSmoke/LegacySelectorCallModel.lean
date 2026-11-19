@@ -16,7 +16,7 @@ solidity_import imported from "Contracts/SolidityImportSmoke" entry "LegacySelec
   function inspect(address,address,uint256)
 
 /-- Emit Yul for bytecode replay and run the same model against recording child accounts. -/
-def replay (selectors : List Nat) (yul input output : String) : IO Unit := do
+def compileAndRun (selectors : List Nat) (yul input output : String) : IO Unit := do
   let compiled ← IO.ofExcept (compile imported.model selectors)
   IO.FS.writeFile yul (Compiler.Yul.render (Compiler.emitYul compiled))
   let status ← SolidityImport.SequenceRunner.run imported.model SolidityImport.Differential.oracle
