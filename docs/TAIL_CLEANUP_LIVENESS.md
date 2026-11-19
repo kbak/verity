@@ -1,7 +1,8 @@
 # Tail-only cleanup and caller liveness
 
 The importer admits an inlined helper with tail-only cleanup when the caller
-returns the saved hash or uses it to read and update record fields. Earlier fork work covers bounded-memory
+returns the saved hash or uses it to read and update record fields. A terminal scalar custom error
+can revert a field write and its log. Earlier fork work covers bounded-memory
 lowering and full-cleanup storage reads. [PR #39](https://github.com/kbak/verity/pull/39)
 and [PR #56](https://github.com/kbak/verity/pull/56).
 
@@ -51,8 +52,8 @@ The 10,206 calls are finite source-EVM evidence under the pinned Solidity 0.8.26
 Cancun, via-IR and optimizer settings. There are 3,024 required mismatches. Missing
 observations, reverts, wrong return widths, unexpected mismatches and missing
 sensitivity all fail the campaign. The saved-hash probe must also match every independent return in imported Denote
-and generated Cancun bytecode. The seven other continuations and the write-then-revert root must
-produce located rejections. The original storage-reference reads and successful updates must
+and generated Cancun bytecode. The seven other caller continuations must produce located rejections.
+The original storage-reference reads, successful updates and reverted writes must
 match the archived observations on all three routes. Separate import controls
 exercise a reassigned result, a missing restore and a different final pointer.
 
@@ -224,21 +225,25 @@ The suffix can read and write that slot and fields at literal word offsets.
 A full-word update can use an untouched ABI parameter. A packed update can mask
 the old field word and merge in the new bits. Scalar events write their signature
 and data words before observing them. The final static return contains record
-fields and fits below byte 128. Heap observations after a write, substituted
-mapping keys and write-then-revert continuations still reject.
+fields and fits below byte 128. A terminal custom error takes tracked scalar words
+and uses the existing bounded encoder. It hashes the initialized signature and
+writes the selector and arguments before returning the revert bytes. Heap reads
+inside the error argument, substituted mapping keys, conditional errors and
+empty reverts remain outside this admission path.
 
-The original and shifted layouts replay all 26 successful transactions from the
-frozen state archives on source Solidity, imported Denote and generated Cancun
-bytecode. A revert can be omitted only when the archive records the same storage
-as the preceding transaction and no emitted logs. Each successful transaction
-must touch the three physical slots for its key and match the archived return,
-logs and storage on the cumulative union of accessed slots and independent
-sentinels. This includes updates to initially empty records, interleaved keys,
-repeated writes and the upper padding bits of the narrow field. The wrong-base
-and wrong-field variants must produce storage mismatches on every route.
+The original and shifted layouts replay the complete frozen sequence on source
+Solidity, imported Denote and generated Cancun bytecode. A reverting count update
+touches the selected count word, including for an initially empty record. Its
+storage and logs roll back. A successful return reads all three record words.
+Each later read checks the target, other keys and sentinels against the cumulative
+union of slots discovered on the three routes.
 
-Replaying the full sequence with rollback and validating the pinned downstream
-wrapper remain part of #32.
+Removing the revert must commit the count and emit its event, with the updated
+state visible to later reads. Replacing the selector must preserve the argument.
+Changing the argument must preserve the selector and encode the changed value in
+one ABI word. The wrong-base and wrong-field controls must also produce storage
+mismatches on every route. This finite campaign uses the existing hash and
+environment assumptions. The pinned downstream integration is tracked in #32.
 
 ## Running and interpreting the gate
 
@@ -250,5 +255,6 @@ PYTHONPATH=scripts python3 -m solidity_differential.check_tail_cleanup_liveness 
 `--prepared` reuses the importer and differential runner. The default gate
 requires the saved-hash caller to pass all three routes, the source perturbations
 to expose the expected bytes, and unsupported callers to produce located
-rejections. `--require-composition` also requires the broader tail-only work,
-including rollback, and still reports it as pending.
+rejections. Saved-key storage rollback is required by default. The optional
+`--require-composition` gate also covers the broader observing callers, whose
+composition remains open.

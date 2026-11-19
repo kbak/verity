@@ -58,11 +58,17 @@ def source_variants(source):
                                               'drop-revert')}
     result['void-return'] = replace_once(full, returns + ' returns (uint128, uint256, uint256)',
                                         returns)
-    result['wrong-error-argument'] = replace_once(full, 'revert Rejected(next);',
-        'uint128 changedError = next ^ 1; revert Rejected(changedError);')
-    result['wrong-error-selector'] = full.replace('Rejected(', 'DifferentRejected(')
-    result['empty-revert'] = replace_once(full, 'revert Rejected(next);', 'revert();')
-    return result
+    return {**result, **error_variants(full)}
+
+
+def error_variants(source):
+    """Change only the terminal error, preserving the chosen cleanup and mapping layout."""
+    return {
+        'wrong-error-argument': replace_once(source, 'revert Rejected(next);',
+            'uint128 changedError = next ^ 1; revert Rejected(changedError);'),
+        'wrong-error-selector': source.replace('Rejected(', 'DifferentRejected('),
+        'empty-revert': replace_once(source, 'revert Rejected(next);', 'revert();'),
+    }
 
 
 def require_source_result(result, spec, mutant=None):

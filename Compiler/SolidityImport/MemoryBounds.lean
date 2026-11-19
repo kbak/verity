@@ -234,14 +234,14 @@ private def mappedWord (s : Bounds) (slot : String) (locals : Std.HashMap String
   | .param name => if s.versions.contains name then none else some .scalar
   | .literal _ => some .scalar
   | .bitAnd value (.literal _) => mappedWord s slot locals value
-  | .bitOr a b => do
+  | .bitOr a b | .bitXor a b => do
     let _ ← mappedWord s slot locals a
     let _ ← mappedWord s slot locals b
     return .scalar
   | _ => none
 
-/-- Audit field reads and writes through the saved-key reference. Scalar logs initialize their
-own payload. The final ABI return contains only record fields and fits below the heap. -/
+/-- Audit field reads and writes through the saved-key reference. Scalar logs and terminal
+errors initialize their payloads. A successful return contains only fields below the heap. -/
 private def mappedSuffix (site : SavedHashCleanup) (s : Bounds) (slot : String)
     (locals : Std.HashMap String MappedWord) : List Stmt → M Bounds
   | .letVar name value :: tail => do
@@ -256,6 +256,10 @@ private def mappedSuffix (site : SavedHashCleanup) (s : Bounds) (slot : String)
       unless args.all (fun arg => (mappedWord s slot locals arg).isSome) do visibleResidual site
       checkEvent s name args
       mappedSuffix site s slot locals tail
+  | [.requireError (.literal 0) name args] | [.revertError name args] => do
+      unless args.all (fun arg => (mappedWord s slot locals arg).isSome) do visibleResidual site
+      checkTerminalError s name args
+      return { s with savedHashCleanup := none }
   | [.returnValues words] => do
       unless !words.isEmpty && words.length * 32 ≤ 128 &&
           words.all (fun word => mappedWord s slot locals word == some .field) do

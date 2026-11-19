@@ -31,8 +31,8 @@ def record_slot(key, mapping_base):
     return int.from_bytes(keccak_256(bytes.fromhex(key) + word(mapping_base)), 'big')
 
 
-def specification(target, sender, layout_shift=0):
-    """Fixed input sequence with explicit storage, return bytes, logs and rollback at every step."""
+def specification(target, sender, layout_shift=0, *, commit_reverts=False):
+    """Specify every step of the fixed sequence. Removing the revert commits the count update."""
     if layout_shift not in (0, 1):
         raise HarnessError('unsupported fixture layout shift')
     base = BASE_SLOT + layout_shift
@@ -82,12 +82,13 @@ def specification(target, sender, layout_shift=0):
             'data': selector(signature) + b''.join(word(n) for n in arguments).hex(),
             'value': '0x0', 'timestamp': 1000000100 + index, 'blockNumber': 2 + index})
         events, status = [], 'ok'
-        if operation == 'writeThenRevert':
+        if operation == 'writeThenRevert' and not commit_reverts:
             # No successful state or logs survive, even for a previously absent record.
             status, data = 'revert', selector('Rejected(uint128)') + word(next_word).hex()
         else:
             if operation != 'read':
-                field = {'setCount': 0, 'setAccumulator': 1, 'setCheckpoint': 2}[operation]
+                field = {'setCount': 0, 'writeThenRevert': 0,
+                         'setAccumulator': 1, 'setCheckpoint': 2}[operation]
                 at = (slot + field) % 2**256
                 state[at] = ((state[at] & ~COUNT_MASK) | next_word if field == 0 else next_word)
                 events = [{'address': target, 'topics': [EVENT, hexword(field)],

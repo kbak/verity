@@ -3,8 +3,7 @@
 The read-only slice of #32 covers full cleanup and a tail-only helper that
 captures its hash before cleanup. Full-cleanup writes and logs have a separate
 [campaign](PACKED_STORAGE_UPDATES.md). The tail-only campaign covers successful
-field writes and logs. Tail-only rollback and the pinned downstream wrapper
-remain open. [Tail-only cleanup and caller liveness](TAIL_CLEANUP_LIVENESS.md)
+field writes, logs and write-then-revert rollback. [Tail-only cleanup and caller liveness](TAIL_CLEANUP_LIVENESS.md)
 
 ## Executable boundary
 
@@ -141,10 +140,9 @@ alone cannot pass the composition gate. Repository, warning, proof, differential
 and mutation checks remain required on the exact PR head.
 
 Tail-only cleanup needs a separate caller liveness/frame argument, prepared in
-[the caller-liveness design](TAIL_CLEANUP_LIVENESS.md). Successful writes and logs
-have a separate gate; rollback and the always-reverting value-return root remain later work,
-followed by validation of the pinned downstream wrapper tracked in #32. Full
-cleanup does not substitute for any of those acceptance criteria.
+[the caller-liveness design](TAIL_CLEANUP_LIVENESS.md). The saved-key storage campaign runs the full
+sequence, including writes, logs and the always-reverting value-return root.
+The pinned downstream integration is tracked in #32.
 
 ## Running the regression
 
