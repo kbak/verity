@@ -10,9 +10,9 @@ from solidity_differential.check_packed_memory_hash_routes import case
 from solidity_differential.check_tail_cleanup_liveness import (
     CONTINUATIONS, FIXTURE, POISONS, REJECTION, SIGNATURE, archive_expectations,
     caller_cases, check_observations, preparation_exit, require_saved_routes, required_mismatches,
-    source_variants, successful_transactions,
+    source_variants,
 )
-from solidity_differential.check_packed_storage_read import require_rejection
+from solidity_differential.check_packed_storage_read import require_record_slots, require_rejection
 from solidity_differential.engine import HarnessError
 from solidity_differential.pinned_sequence import SENDERS, create_address
 from solidity_differential.storage_reference_oracle import specification
@@ -54,20 +54,42 @@ class TailCleanupLivenessTests(unittest.TestCase):
                        return_value=changed), self.assertRaises(HarnessError):
                 archive_expectations(Path(tmp))
 
-    def test_storage_replay_keeps_every_successful_transaction_and_its_frozen_world(self):
-        full = specification(create_address(SENDERS[0]), SENDERS[0])
-        spec = successful_transactions(full)
-        indices = [i for i, row in enumerate(full['expected']) if row['status'] == 'ok']
-        self.assertEqual(len(indices), 26)
-        for key in ('transactions', 'expected'):
-            self.assertEqual(spec[key], [full[key][i] for i in indices])
-        self.assertEqual(spec['initialStorage'], full['initialStorage'])
-        for field in ('id', 'status', 'storage', 'events'):
-            bad = copy.deepcopy(full)
-            row = next(w for w in bad['expected'] if w['status'] == 'revert')
-            row[field] = 'changed'
-            with self.subTest(field=field), self.assertRaises(HarnessError):
-                successful_transactions(bad)
+    def test_removing_revert_commits_the_count_and_event_on_the_same_inputs(self):
+        target = create_address(SENDERS[0])
+        full = specification(target, SENDERS[0])
+        committed = specification(target, SENDERS[0], commit_reverts=True)
+        self.assertEqual(committed['transactions'], full['transactions'])
+        self.assertEqual(committed['initialStorage'], full['initialStorage'])
+        for i, (tx, want) in enumerate(zip(full['transactions'], full['expected'], strict=True)):
+            if tx['function'] == 'writeThenRevert':
+                self.assertEqual(want['status'], 'revert')
+                self.assertEqual(want['storage'], full['expected'][i - 1]['storage'])
+                self.assertEqual(want['events'], [])
+                got = committed['expected'][i]
+                self.assertEqual(got['status'], 'ok')
+                self.assertEqual(int(got['data'][2:66], 16), tx['args'][-1])
+                self.assertEqual(len(got['events']), 1)
+                self.assertEqual(int(got['events'][0]['data'], 16), tx['args'][-1])
+
+    def test_reverted_count_write_touches_its_physical_slot_on_each_route(self):
+        spec = specification(create_address(SENDERS[0]), SENDERS[0])
+        i = next(i for i, tx in enumerate(spec['transactions']) if tx['function'] == 'writeThenRevert')
+        tx = spec['transactions'][i]
+        key = next(j for j, read in enumerate(spec['transactions'][:6])
+                   if read['args'] == tx['args'][:4])
+        touched = [[tx['target'], spec['recordSlots'][key]]]
+        spec = {**spec, 'transactions': [tx], 'expected': [spec['expected'][i]]}
+        rows = [{'id': tx['id'], 'touched': touched}]
+        result = {stage: {r: copy.deepcopy(rows) for r in ('source', 'model', 'compiled')}
+                  for stage in ('discovery', 'observations')}
+        require_record_slots(result, spec)
+        for stage, routes in result.items():
+            for route in routes:
+                for bad in ([], [[tx['target'], spec['recordSlots'][key + 1]]]):
+                    changed = copy.deepcopy(result)
+                    changed[stage][route][0]['touched'] = bad
+                    with self.subTest(stage=stage, route=route), self.assertRaises(HarnessError):
+                        require_record_slots(changed, spec)
 
     def test_exposure_inventory_includes_zero_poison_alias_and_byte_boundaries(self):
         rows = [case(f'{poison}:{offset}', SIGNATURE, [0, 0, 0, 0, 0, poison, offset], '00' * 32)

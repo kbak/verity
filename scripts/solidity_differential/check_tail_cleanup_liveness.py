@@ -1,6 +1,5 @@
 """Execute the saved-hash caller on three routes and check the remaining caller boundaries."""
 import argparse
-import copy
 import json
 from pathlib import Path
 
@@ -9,7 +8,8 @@ from .check_packed_memory_hash import SETTINGS, SHIFTS
 from .check_packed_memory_hash_import import observe
 from .check_packed_memory_hash_routes import case, run_root
 from .check_packed_storage_read import require_record_slots, require_rejection
-from .check_packed_storage_updates import SUCCESS_ROOTS, require_source_mutant
+from .check_packed_storage_rollback import error_variants, replace_once, require_rollback_mutation
+from .check_packed_storage_updates import require_source_mutant
 from .check_storage_reference import CONTRACT as STORAGE_CONTRACT, compile_variant as compile_storage
 from .check_storage_reference import variants as storage_variants
 from .check_storage_reference_routes import PACKED_FIXTURE, STATE_ARCHIVES, require_outcome, run_routes
@@ -19,7 +19,8 @@ from .hash_execution import (
 )
 from .identity import ImplementationIdentity
 from .pinned_sequence import SENDERS, create_address
-from .storage_reference_oracle import PACKED_ARCHIVE_SHA256, SIGNATURES, specification
+from .stateful import ROUTES
+from .storage_reference_oracle import PACKED_ARCHIVE_SHA256, SIGNATURES, compare_expected, specification
 from .storage_sequence_execution import prepare_model
 
 FIXTURE = ROOT / 'Contracts/SolidityImportSmoke/TailCleanupCaller.sol'
@@ -135,69 +136,69 @@ def check_saved_return_boundaries(output, source):
     return results
 
 
-def successful_transactions(spec):
-    """Skip only frozen reverts whose poststate equals the preceding state and whose log is empty."""
-    transactions, expected = [], []
-    previous = spec['initialStorage']
-    for tx, want in zip(spec['transactions'], spec['expected'], strict=True):
-        if tx['id'] != want['id']:
-            raise HarnessError('state archive transaction identity changed')
-        if tx['function'] == 'writeThenRevert':
-            if want['status'] != 'revert' or want['events'] or want['storage'] != previous:
-                raise HarnessError('skipped revert must preserve storage and logs')
-        else:
-            if tx['function'] not in SUCCESS_ROOTS or want['status'] != 'ok':
-                raise HarnessError('unknown successful storage operation')
-            transactions.append(tx)
-            expected.append(want)
-        previous = want['storage']
-    return copy.deepcopy({**spec, 'transactions': transactions, 'expected': expected})
-
-
 def check_storage_updates(output, solc, compiler):
     variants = storage_variants(PACKED_FIXTURE.read_text())
+    rollback_mutants = ('drop-revert', 'wrong-error-selector', 'wrong-error-argument')
+    variants.update(error_variants(variants['original']))
     results = {}
-    for name in ('original', 'shifted-layout', 'wrong-mapping-base', 'wrong-field'):
+    for name in ('original', 'shifted-layout', 'wrong-mapping-base', 'wrong-field', *rollback_mutants):
         directory = output / f'{name}-storage'
         directory.mkdir()
         source = directory / PACKED_FIXTURE.name
         built = compile_storage(directory, variants[name], solc)
         layout = int(name == 'shifted-layout')
-        spec = successful_transactions(json.loads(
-            (output / f'expectations-layout-{layout}.json').read_text()))
+        spec = json.loads((output / f'expectations-layout-{layout}.json').read_text())
         driver, snapshot = prepare_model(directory / 'imported', source, STORAGE_CONTRACT,
-                                         [SIGNATURES[root] for root in SUCCESS_ROOTS], compiler)
+                                         list(SIGNATURES.values()), compiler)
         compiled = compile_generated(directory / 'imported', snapshot, solc)
         result = run_routes(directory / 'routes', spec, source, built, driver, compiled)
         if name in ('wrong-mapping-base', 'wrong-field'):
             require_source_mutant(result, 'storage')
+        elif name in rollback_mutants:
+            require_rollback_mutation(result, spec, name, ROUTES)
+            if name == 'drop-revert':
+                committed = specification(spec['target'], SENDERS[0], layout, commit_reverts=True)
+                for route in ROUTES:
+                    if compare_expected(committed, result['observations'][route]):
+                        raise HarnessError(f'{route} differs from the committed count update and log')
+                require_record_slots(result, committed)
+            else:
+                require_record_slots(result, spec)
         else:
             require_outcome(result)
             require_record_slots(result, spec)
         results[name] = {'routes': result['routes'], 'mismatches': result['mismatches'],
                          'transactions': len(spec['transactions']), 'sourceDigest': snapshot['digest']}
-        if name == 'original':
-            rollback = observe(directory, source.name, STORAGE_CONTRACT, SIGNATURES['writeThenRevert'])
-            require_rejection(rollback, REJECTION)
-            results[name]['writeThenRevert'] = rollback
-    directory = output / 'observe-heap-after-write'
-    directory.mkdir()
-    anchor = '        emit Changed(1, next);'
-    if variants['original'].count(anchor) != 1:
-        raise HarnessError('storage update observation site changed')
-    observed = variants['original'].replace(anchor, """
-        uint256 observed;
-        assembly { let p := mload(0x40) observed := mload(p) }
-        emit Changed(1, observed);""")
-    compile_storage(directory, observed, solc)
-    observation = observe(directory, PACKED_FIXTURE.name, STORAGE_CONTRACT, SIGNATURES['setAccumulator'])
-    require_rejection(observation, REJECTION)
-    results['observe-heap-after-write'] = observation
+    for name, text, root in rejected_storage_suffixes(variants['original']):
+        directory = output / name
+        directory.mkdir()
+        compile_storage(directory, text, solc)
+        observation = observe(directory, PACKED_FIXTURE.name, STORAGE_CONTRACT, SIGNATURES[root])
+        require_rejection(observation, REJECTION)
+        results[name] = observation
     return results
 
 
+def rejected_storage_suffixes(source):
+    yield 'observe-heap-after-write', replace_once(source, '        emit Changed(1, next);', """
+        uint256 observed;
+        assembly { let p := mload(0x40) observed := mload(p) }
+        emit Changed(1, observed);"""), 'setAccumulator'
+    guard = 'revert Rejected(next);'
+    for name, replacement in (
+        ('heap-error-argument', """uint256 observed;
+        assembly { let p := mload(0x40) observed := mload(p) }
+        uint128 arg = uint128(observed);
+        revert Rejected(arg);"""),
+        ('conditional-error', 'if (next == 0) revert Rejected(next); '
+         'return (row.count, row.accumulator, row.checkpoint);'),
+        ('empty-revert', 'revert();'),
+    ):
+        yield name, replace_once(source, guard, replacement), 'writeThenRevert'
+
+
 def preparation_exit(require_composition):
-    # More general observing callers and the original rollback root still lack composition.
+    # More general observing callers still lack composition.
     return 1 if require_composition else 0
 
 
@@ -251,18 +252,19 @@ def run(output, *, prepared=False, require_composition=False):
         'worktreeStatus': command(['git', 'status', '--porcelain'], cwd=ROOT),
         'compiler': compiler, 'settings': SETTINGS, 'fork': 'cancun',
         'stateArchivesSha256': STATE_ARCHIVES, 'packedArchiveSha256': PACKED_ARCHIVE_SHA256,
-        'scope': 'saved hash, successful record updates and reads on three routes; source caller perturbations',
+        'scope': 'saved hash and full storage sequence including rollback on three routes',
         'savedHashRoutes': ['source', 'denote', 'generatedEvm'],
-        'limits': ['the state replay omits write-then-revert transactions',
+        'limits': ['general callers that observe residual heap bytes remain outside this gate',
                    'no universal liveness, storage sequence, gas or compiler correspondence claim'],
     })
     write_json(output / 'results.json', {'preparationPassed': True,
         'savedHashThreeRouteAgreement': True, 'storageReadThreeRouteAgreement': True,
-        'successfulStorageUpdatesThreeRouteAgreement': True, 'tailThreeRouteAgreement': False,
+        'successfulStorageUpdatesThreeRouteAgreement': True, 'storageRollbackThreeRouteAgreement': True,
+        'tailThreeRouteAgreement': False,
         'variants': results, 'savedReturnBoundaries': boundaries, 'storageUpdates': storage})
     calls = sum(row['execution']['calls'] for row in results.values())
     print(f'{calls} source calls; saved hash agrees on three routes; '
-          'successful storage updates agree; observing callers and rollback remain blocked')
+          'saved-key updates and rollback agree; general observing callers remain blocked')
     return preparation_exit(require_composition)
 
 

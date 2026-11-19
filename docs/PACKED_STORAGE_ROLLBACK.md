@@ -2,7 +2,7 @@
 
 The bounded-memory audit admits a terminal scalar custom error after full-cleanup
 packed storage writes and scalar events. This is the rollback slice of fork #32.
-Tail-only cleanup and the pinned downstream wrapper remain open.
+The [tail-only campaign](TAIL_CLEANUP_LIVENESS.md) covers rollback through the saved hash.
 
 ## Regression contract
 
@@ -101,12 +101,12 @@ the shared replay plan, including independently selected sentinels.
 
 Acceptance requires rollback-sensitive execution mutants on each implemented
 route, exact errors and continued post-revert state checks. Source mutants alone
-are preparation evidence. Existing read/update, tail-cleanup rejection and
+are preparation evidence. Existing read/update, residual-memory rejection and
 supplied-key control gates must remain green, together with exact-head repository
 verification. Do not claim that finite execution proves importer/compiler
 correspondence, general frame equivalence, gas/resource adequacy or constructors.
 Existing memory/frame hypotheses and hash/environment premises remain unchanged.
-Tail-only cleanup and the pinned downstream wrapper remain separate #32 work.
+The pinned downstream integration is tracked in #32.
 
 ## Running the rollback campaign
 
