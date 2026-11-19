@@ -5,6 +5,7 @@ from pathlib import Path
 
 from keccak256 import selector
 from setup_solc_import import file_sha256
+from .check_packed_memory_hash import word
 from .check_packed_memory_hash_import import driver_text, observe
 from .check_packed_storage_read import require_rejection
 from .check_packed_storage_updates import EFFECT_REJECTION
@@ -17,12 +18,15 @@ from .engine import HarnessError, ROOT, command, write_json
 from .hash_execution import compile_generated, pinned_compiler
 from .identity import ImplementationIdentity
 from .pinned_sequence import SENDERS, create_address
-from .storage_reference_oracle import PACKED_ARCHIVE_SHA256, SIGNATURES, replay_expected, specification
+from .storage_reference_oracle import (
+    PACKED_ARCHIVE_SHA256, SIGNATURES, compare_expected, replay_expected, specification,
+)
 from .stateful import ROUTES
 from .storage_sequence_execution import eval_json, prepare_model
 
 POSITIVE = ('original', 'renamed', 'shifted-layout', 'void-return')
-MUTANTS = ('drop-revert', 'wrong-error-argument', 'wrong-error-selector', 'empty-revert')
+ERROR_MUTANTS = ('wrong-error-argument', 'wrong-error-selector', 'empty-revert')
+MUTANTS = ('drop-revert', *ERROR_MUTANTS)
 COMPILER_REJECTION = (
     "Compilation error: function 'writeThenRevert' declares return values but not all "
     'control-flow paths end in return/revert (Issue #738 (exhaustive return-path analysis))')
@@ -66,11 +70,35 @@ def require_source_result(result, spec, mutant=None):
     if (result.get('routes') != ['source']
             or set(result.get('mismatches', {})) != {'source'}):
         raise HarnessError('rollback preparation requires the actual source route')
-    require_rollback_rows(result['mismatches']['source'], spec, mutant)
+    require_rollback_route(result, 'source', spec, mutant)
 
 
-def require_rollback_rows(rows, spec, mutant):
+def require_exact_error_payloads(result, route, spec, mutant):
+    """Compare the replay to the frozen world with only the mutant's revert bytes changed."""
+    observations = result.get('observations', {}).get(route)
+    if not isinstance(observations, list):
+        raise HarnessError(f'{route} missing replay observations for {mutant}')
+    expected = []
+    for tx, want in zip(spec['transactions'], spec['expected'], strict=True):
+        if want['status'] == 'revert':
+            if mutant == 'wrong-error-argument':
+                payload = want['data'][:10] + word(tx['args'][-1] ^ 1).hex()
+            elif mutant == 'wrong-error-selector':
+                payload = selector('DifferentRejected(uint128)') + want['data'][10:]
+            elif mutant == 'empty-revert':
+                payload = '0x'
+            else:
+                raise HarnessError('unknown custom-error control')
+            want = {**want, 'data': payload}
+        expected.append(want)
+    differences = compare_expected({**spec, 'expected': expected}, observations)
+    if differences:
+        raise HarnessError(f'{route} {mutant} produced unexpected replay differences {differences[:3]}')
+
+
+def require_rollback_route(result, route, spec, mutant):
     """A successful execution mutant must change the predicted transaction observations."""
+    rows = result['mismatches'][route]
     ids = {tx['id'] for tx in spec['transactions']}
     if (len({row['id'] for row in rows}) != len(rows)
             or any(row['id'] not in ids or not row['fields'] for row in rows)):
@@ -89,9 +117,12 @@ def require_rollback_rows(rows, spec, mutant):
                            and failures.get(tx['id']) == {'data', 'storage'}
                            for tx in spec['transactions'])):
             raise HarnessError('removed revert must expose writes, logs and later read corruption')
-    elif mutant in MUTANTS:
-        if failures != {ident: {'data'} for ident in reverted}:
+    elif mutant in ERROR_MUTANTS:
+        expected = [{'id': row['id'], 'fields': ['data']}
+                    for row in spec['expected'] if row['status'] == 'revert']
+        if rows != expected:
             raise HarnessError('error-payload mutant must change only every exact revert payload')
+        require_exact_error_payloads(result, route, spec, mutant)
     else:
         raise HarnessError('unknown rollback mutation')
 
@@ -103,7 +134,7 @@ def require_rollback_mutation(result, spec, mutant, mutated_routes):
             or bool(result['divergences']) != (set(mutated_routes) != set(ROUTES))):
         raise HarnessError('rollback mutation requires all three execution routes')
     for route in ROUTES:
-        require_rollback_rows(mismatches[route], spec, mutant if route in mutated_routes else None)
+        require_rollback_route(result, route, spec, mutant if route in mutated_routes else None)
 
 
 def require_compilation(result, terminal=True):
@@ -137,15 +168,6 @@ def probe_compilation(directory, source, contract, signature, tail_case='zero'):
     return eval_json(driver, COMPILATION_MARKER)
 
 
-def require_error_mutation(result, spec):
-    """All actual routes must preserve rollback while detecting exactly the changed payloads."""
-    expected = [{'id': row['id'], 'fields': ['data']}
-                for row in spec['expected'] if row['status'] == 'revert']
-    if (result.get('routes') != list(ROUTES) or result.get('divergences') != []
-            or result.get('mismatches') != {route: expected for route in ROUTES}):
-        raise HarnessError('custom-error mutation requires exact three-route payload evidence')
-
-
 def execute_declared_control(directory, source, built, spec, solc, compiler):
     """The original declared-return control now must execute, including exact rollback bytes."""
     driver, snapshot = prepare_model(directory / 'model', source, CONTROL_CONTRACT,
@@ -161,7 +183,7 @@ def execute_declared_control(directory, source, built, spec, solc, compiler):
                                              list(CONTROL_SIGNATURES.values()), compiler)
     bad_compiled = compile_generated(mutated / 'model', bad_snapshot, solc)
     bad = run_routes(mutated / 'routes', spec, bad_source, bad_built, bad_driver, bad_compiled)
-    require_error_mutation(bad, spec)
+    require_rollback_mutation(bad, spec, 'wrong-error-argument', ROUTES)
     return {'threeRouteAgreement': True, 'errorPayloadMutationDetected': True}
 
 

@@ -22,6 +22,21 @@ class PackedStorageRollbackTests(unittest.TestCase):
     def result(self, rows):
         return {'routes': ['source'], 'mismatches': {'source': rows}}
 
+    def error_result(self, spec, mutant, routes):
+        observations = [{**row, 'touched': []} for row in spec['expected']]
+        for tx, row in zip(spec['transactions'], observations, strict=True):
+            if row['status'] == 'revert':
+                argument = tx['args'][-1]
+                row['data'] = {
+                    'wrong-error-argument': f'0xacdeab74{argument ^ 1:064x}',
+                    'wrong-error-selector': f'0xebcb6ada{argument:064x}',
+                    'empty-revert': '0x',
+                }[mutant]
+        mismatches = compare_expected(spec, observations)
+        return {'routes': list(routes), 'divergences': [],
+                'observations': {r: copy.deepcopy(observations) for r in routes},
+                'mismatches': {r: copy.deepcopy(mismatches) for r in routes}}
+
     def test_full_archives_remain_frozen_including_rollback_and_following_reads(self):
         for shift, digest in rollback.STATE_ARCHIVES.items():
             spec = specification(create_address(SENDERS[0]), SENDERS[0], shift)
@@ -50,17 +65,20 @@ class PackedStorageRollbackTests(unittest.TestCase):
                 rollback.require_source_result(self.result(rows), self.spec, 'drop-revert')
 
     def test_error_mutations_cannot_hide_state_log_status_or_successful_call_changes(self):
-        rows = [{'id': ident, 'fields': ['data']} for ident in self.reverted]
-        for mutant in rollback.MUTANTS[1:]:
-            rollback.require_source_result(self.result(rows), self.spec, mutant)
+        for mutant in rollback.ERROR_MUTANTS:
+            good = self.error_result(self.spec, mutant, ('source',))
+            rollback.require_source_result(good, self.spec, mutant)
+            rows = good['mismatches']['source']
             for field in ('status', 'events', 'storage'):
                 bad = copy.deepcopy(rows)
                 bad[0]['fields'].append(field)
                 with self.assertRaises(HarnessError):
-                    rollback.require_source_result(self.result(bad), self.spec, mutant)
+                    rollback.require_source_result({**good, 'mismatches': {'source': bad}},
+                                                   self.spec, mutant)
             for bad in (rows[:-1], rows + [{'id': self.spec['expected'][0]['id'], 'fields': ['data']}]):
                 with self.assertRaises(HarnessError):
-                    rollback.require_source_result(self.result(bad), self.spec, mutant)
+                    rollback.require_source_result({**good, 'mismatches': {'source': bad}},
+                                                   self.spec, mutant)
         for bad in ({}, {'routes': [], 'mismatches': {'source': []}},
                     {'routes': ['source'], 'mismatches': {}},
                     {'routes': ['source', 'model'], 'mismatches': {'source': [], 'model': []}}):
@@ -137,17 +155,40 @@ class PackedStorageRollbackTests(unittest.TestCase):
                     rollback.probe_compilation(directory, directory / 'Source.sol',
                                                'ScalarControl', 'fail(uint128)')
 
+    def test_agreeing_routes_cannot_substitute_another_controls_payload(self):
+        for actual in rollback.ERROR_MUTANTS:
+            result = self.error_result(self.spec, actual, rollback.ROUTES)
+            for claimed in rollback.ERROR_MUTANTS:
+                if actual != claimed:
+                    with self.subTest(actual=actual, claimed=claimed), self.assertRaisesRegex(
+                            HarnessError, 'unexpected replay differences'):
+                        rollback.require_rollback_mutation(result, self.spec, claimed, rollback.ROUTES)
+
     def test_declared_control_needs_exact_errors_and_rollback_on_every_actual_route(self):
-        rows = [{'id': ident, 'fields': ['data']} for ident in self.reverted]
-        good = {'routes': list(rollback.ROUTES), 'divergences': [],
-                'mismatches': {route: copy.deepcopy(rows) for route in rollback.ROUTES}}
-        rollback.require_error_mutation(good, self.spec)
+        spec = rollback.control_inputs(self.spec)
+        mutant = 'wrong-error-argument'
+        good = self.error_result(spec, mutant, rollback.ROUTES)
+
+        def check(result):
+            rollback.require_rollback_mutation(result, spec, mutant, rollback.ROUTES)
+
+        check(good)
         for route in rollback.ROUTES:
             for field in ('status', 'events', 'storage'):
                 bad = copy.deepcopy(good)
                 bad['mismatches'][route][0]['fields'].append(field)
                 with self.assertRaises(HarnessError):
-                    rollback.require_error_mutation(bad, self.spec)
+                    check(bad)
+            for truncate in (True, False):
+                bad = copy.deepcopy(good)
+                row = next(r for r in bad['observations'][route] if r['status'] == 'revert')
+                row['data'] = row['data'][:-2] if truncate else row['data'] + '00'
+                with self.assertRaisesRegex(HarnessError, 'unexpected replay differences'):
+                    check(bad)
+            bad = copy.deepcopy(good)
+            del bad['observations'][route]
+            with self.assertRaisesRegex(HarnessError, 'missing replay observations'):
+                check(bad)
             for defect in ('missing-route', 'missed-error', 'divergence'):
                 bad = copy.deepcopy(good)
                 if defect == 'missing-route':
@@ -157,7 +198,7 @@ class PackedStorageRollbackTests(unittest.TestCase):
                 else:
                     bad['divergences'] = ['payload']
                 with self.assertRaises(HarnessError):
-                    rollback.require_error_mutation(bad, self.spec)
+                    check(bad)
 
 
 if __name__ == '__main__':
