@@ -10,7 +10,7 @@ from solidity_differential.check_packed_memory_hash_routes import case
 from solidity_differential.check_tail_cleanup_liveness import (
     CONTINUATIONS, FIXTURE, POISONS, REJECTION, SIGNATURE, archive_expectations,
     caller_cases, check_observations, preparation_exit, require_saved_routes, required_mismatches,
-    source_variants,
+    source_variants, successful_transactions,
 )
 from solidity_differential.check_packed_storage_read import require_rejection
 from solidity_differential.engine import HarnessError
@@ -53,6 +53,21 @@ class TailCleanupLivenessTests(unittest.TestCase):
             with patch('solidity_differential.check_tail_cleanup_liveness.specification',
                        return_value=changed), self.assertRaises(HarnessError):
                 archive_expectations(Path(tmp))
+
+    def test_storage_replay_keeps_every_successful_transaction_and_its_frozen_world(self):
+        full = specification(create_address(SENDERS[0]), SENDERS[0])
+        spec = successful_transactions(full)
+        indices = [i for i, row in enumerate(full['expected']) if row['status'] == 'ok']
+        self.assertEqual(len(indices), 26)
+        for key in ('transactions', 'expected'):
+            self.assertEqual(spec[key], [full[key][i] for i in indices])
+        self.assertEqual(spec['initialStorage'], full['initialStorage'])
+        for field in ('id', 'status', 'storage', 'events'):
+            bad = copy.deepcopy(full)
+            row = next(w for w in bad['expected'] if w['status'] == 'revert')
+            row[field] = 'changed'
+            with self.subTest(field=field), self.assertRaises(HarnessError):
+                successful_transactions(bad)
 
     def test_exposure_inventory_includes_zero_poison_alias_and_byte_boundaries(self):
         rows = [case(f'{poison}:{offset}', SIGNATURE, [0, 0, 0, 0, 0, poison, offset], '00' * 32)

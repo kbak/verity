@@ -2,8 +2,9 @@
 
 The read-only slice of #32 covers full cleanup and a tail-only helper that
 captures its hash before cleanup. Full-cleanup writes and logs have a separate
-[campaign](PACKED_STORAGE_UPDATES.md). Tail-only writes, rollback and the pinned
-downstream wrapper remain open.
+[campaign](PACKED_STORAGE_UPDATES.md). The tail-only campaign covers successful
+field writes and logs. Tail-only rollback and the pinned downstream wrapper
+remain open. [Tail-only cleanup and caller liveness](TAIL_CLEANUP_LIVENESS.md)
 
 ## Executable boundary
 

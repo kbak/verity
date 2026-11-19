@@ -214,33 +214,58 @@ private def effects (s : Bounds) : List Stmt → M Bounds
         | _ => unsupportedEffects s
       effects next rest
 
-/-- A raw storage word at the generated mapping slot or a constant record offset, with an
-optional literal field mask. Copies can use only previously validated read results. -/
-private def mappedRead (slot : String) (reads : Std.HashSet String) : Expr → Bool
-  | .storageArrayElement field index =>
-    field == rawStorageFieldName && match index with
-      | .localVar name | .add (.localVar name) (.literal _) => name == slot
-      | _ => false
-  | .bitAnd value (.literal _) => mappedRead slot reads value
-  | .localVar name => reads.contains name
+/-- Only the generated mapping slot and its literal record offsets address this reference. -/
+private def mappedIndex (slot : String) : Expr → Bool
+  | .localVar name | .add (.localVar name) (.literal _) => name == slot
   | _ => false
 
-/-- The return encoder fills each static ABI word. Bound its entire output below the heap
-where the helper left residual bytes. Only words from the selected record may escape. -/
-private def mappedReadReturn (site : SavedHashCleanup) (s : Bounds) (slot : String)
-    (reads : Std.HashSet String) : List Stmt → M Bounds
+private inductive MappedWord where
+  | field
+  | scalar
+  deriving BEq
+
+/-- Classify suffix words by provenance. Masking a field or copying it preserves its origin.
+Packed updates can merge masked words, and event arguments can use untouched ABI parameters. -/
+private def mappedWord (s : Bounds) (slot : String) (locals : Std.HashMap String MappedWord) :
+    Expr → Option MappedWord
+  | .storageArrayElement field index =>
+    if field == rawStorageFieldName && mappedIndex slot index then some .field else none
+  | .localVar name => locals[name]?
+  | .param name => if s.versions.contains name then none else some .scalar
+  | .literal _ => some .scalar
+  | .bitAnd value (.literal _) => mappedWord s slot locals value
+  | .bitOr a b => do
+    let _ ← mappedWord s slot locals a
+    let _ ← mappedWord s slot locals b
+    return .scalar
+  | _ => none
+
+/-- Audit field reads and writes through the saved-key reference. Scalar logs initialize their
+own payload. The final ABI return contains only record fields and fits below the heap. -/
+private def mappedSuffix (site : SavedHashCleanup) (s : Bounds) (slot : String)
+    (locals : Std.HashMap String MappedWord) : List Stmt → M Bounds
   | .letVar name value :: tail => do
-      unless name != slot && mappedRead slot reads value do visibleResidual site
-      mappedReadReturn site (← bind s name value) slot (reads.insert name) tail
+      let some origin := mappedWord s slot locals value | visibleResidual site
+      unless name != slot do visibleResidual site
+      mappedSuffix site (← bind s name value) slot (locals.insert name origin) tail
+  | .setStorageArrayElement field index value :: tail => do
+      unless field == rawStorageFieldName && mappedIndex slot index &&
+          (mappedWord s slot locals value).isSome do visibleResidual site
+      mappedSuffix site s slot locals tail
+  | .emit name args :: tail => do
+      unless args.all (fun arg => (mappedWord s slot locals arg).isSome) do visibleResidual site
+      checkEvent s name args
+      mappedSuffix site s slot locals tail
   | [.returnValues words] => do
       unless !words.isEmpty && words.length * 32 ≤ 128 &&
-          words.all (mappedRead slot reads) do visibleResidual site
+          words.all (fun word => mappedWord s slot locals word == some .field) do
+        visibleResidual site
       return { s with savedHashCleanup := none }
   | _ => visibleResidual site
 
 /-- Follow copies of the captured hash through the inlined caller. The only memory it may
 read or restore is the allocator word. It can return the hash directly or use it as the key
-of a provenance-checked, read-only storage lookup. -/
+of a provenance-checked storage reference. -/
 private def savedReturn (site : SavedHashCleanup) (s : Bounds) (saved : Std.HashSet String) :
     List Stmt → M Bounds
   | [.returnValues [.localVar result]] => do
@@ -252,7 +277,7 @@ private def savedReturn (site : SavedHashCleanup) (s : Bounds) (saved : Std.Hash
       unless saved.contains keyName && s.mappingScratch.contains slot && independentScalar baseSlot
           && base.lo == base.hi && s.free == exact 128 do visibleResidual site
       let next ← bind s slot (.keccak256 (.literal 0) (.literal 64))
-      mappedReadReturn site next slot {} tail
+      mappedSuffix site next slot {} tail
   | stmt :: rest => do
       match stmt with
       | .letVar name value | .assignVar name value =>
