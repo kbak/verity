@@ -448,6 +448,9 @@ private def buildField (types item : Json) : M FieldInfo := do
       throwError "unsupported scalar mapping value encoding {leafEncoding} for {name}"
     let rawLeafType ← mStr (← mField structTy "label")
     let leafType := (← get).userValueTypes.find? rawLeafType |>.getD rawLeafType
+    let rawKey ← mStr (← mField top "key")
+    let signedWidth := if (← get).legacyWrapping && key2.isNone then
+      LegacySigned.mappingValueWidth? (rawKey.dropPrefix "t_").toString leafType else none
     let width ←
       if leafType == "bool" then pure 8
       else if leafType == "address" || leafType == "address payable" || leafType.startsWith "contract " then pure 160
@@ -457,6 +460,7 @@ private def buildField (types item : Json) : M FieldInfo := do
         unless bits > 0 && bits ≤ 256 && bits % 8 == 0 do
           throwError "invalid mapping uint width {bits}"
         pure bits
+      else if let some bits := signedWidth then pure bits
       else throwError "unsupported scalar mapping value type {rawLeafType}"
     let bytes ← mNat (← mField structTy "numberOfBytes")
     unless bytes * 8 == width do
@@ -471,7 +475,8 @@ private def buildField (types item : Json) : M FieldInfo := do
     let field : Field := { name, ty, slot := some slot }
     return { slot, field, keyCount := if key2.isSome then 2 else 1,
              memberNames := #[], opaqueNames := #[], scalarMapping := true,
-             booleanMapping := leafType == "bool" }
+             booleanMapping := leafType == "bool",
+             signedMembers := (signedWidth.map fun w => ("__solidity_value", w)).toArray }
   let (members', names, skipped, booleanMembers, signedMembers, structFixedArrays,
       structMappings, structDynamicArrays, subStructs) ←
     decodeStructLayoutMembers name "" 0 types structTy
@@ -505,6 +510,8 @@ private def rootMappingInfo (name : String) (at_ : Json) : M (Expr × StructMapp
     | failAt at_ "storage mapping arguments require a single mapping key"
   unless info.keyCount == 1 && !info.bytesStorage do
     failAt at_ "storage mapping arguments require scalar or struct values"
+  if info.scalarMapping && !info.signedMembers.isEmpty then
+    failAt at_ "signed scalar mapping values require direct state mapping access"
   let env ← get
   let some item := env.layoutItems.find? name | failAt at_ "missing mapping layout"
   let mapTy ← mField env.layoutTypes (← mStr (← mField item "type"))
@@ -881,7 +888,9 @@ private def scalarMappingRead (pre : Array Stmt) (path : SPath) (at_ : Json) : M
   unless info.scalarMapping && info.keyCount == count do
     failAt at_ "storage or memory path used as a value"
   markField name
-  -- Solidity cleans a storage bool by testing the loaded byte for nonzero.
+  let read := if let some (_, width) := info.signedMembers[0]? then
+      Expr.signextend (.literal (width / 8 - 1)) read
+    else read
   let expr := if info.booleanMapping then Expr.logicalNot (.logicalNot read) else read
   pure { pre, expr }
 

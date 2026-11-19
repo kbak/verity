@@ -20,6 +20,21 @@ CASES = {
         'm(int128)', 'signed mapping storage is outside'),
     'signed-mapping-value-getter': ('', 'mapping(uint256=>int256) public m;',
         'm(uint256)', 'signed mapping storage is outside'),
+    'address-to-narrow-signed-getter': ('', 'mapping(address=>int24) public m;',
+        'm(address)', 'signed mapping storage is outside'),
+    'nested-narrow-signed-value': ('', 'mapping(uint256=>mapping(uint256=>int24)) public m;',
+        'm(uint256,uint256)', 'signed mapping storage is outside'),
+    'narrow-signed-mapping-compound': ('', 'mapping(uint24=>int24) m; '
+        'function run(uint24 k) external { m[k] += 1; }',
+        'run(uint24)', 'signed compound assignments are outside'),
+    'narrow-signed-mapping-order': ('', 'mapping(uint24=>int24) m; uint24 key; '
+        'function next() internal returns(int24) { key=2; return -1; } '
+        'function run() external { m[key] = next(); }', 'run()',
+        'signed mapping writes require effect-free scalar keys and values'),
+    'narrow-signed-mapping-helper': ('', 'mapping(uint24=>int24) m; '
+        'function h(mapping(uint24=>int24) storage rows, uint24 k) internal view '
+        'returns(int24) { return rows[k]; } function run(uint24 k) external view '
+        'returns(int24) { return h(m,k); }', 'run(uint24)', 'signed scalar mapping values require direct'),
     'nested-signed-mapping': ('', 'mapping(uint256=>mapping(int128=>uint256)) m; '
         'function run(int128 x) external view returns(uint256) { return m[0][x]; }',
         'run(int128)', 'signed mapping storage is outside'),

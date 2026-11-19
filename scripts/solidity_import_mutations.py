@@ -1057,6 +1057,8 @@ def tasks(update_golden: bool) -> list:
     items += [("legacy-memory-struct-boundaries", 1, lambda: module_campaign_output(
         "check_legacy_memory_struct_rejections", "legacy-memory-struct-boundaries", 900,
         "--prepared"))]
+    items += [("legacy-signed-mapping-values", 1, lambda: module_campaign_output(
+        "check_legacy_signed_mapping_values", "legacy-signed-mapping-values", 900, "--prepared"))]
     items += [("legacy-signed-boundaries", 1, lambda: module_campaign_output(
         "check_legacy_signed_rejections", "legacy-signed-boundaries", 900, "--prepared"))]
     items += [(f"legacy-storage-references-opt{int(optimized)}", 1,

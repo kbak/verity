@@ -2768,6 +2768,13 @@ and violate the oracle on all routes. Mathematical narrowing/range and overflow
 comparison laws, and the emitted ABI cleanup evaluation rule, are kernel-checked.
 These laws and finite tests do not constitute a proof of frontend correspondence.
 
+The legacy importer admits direct state mappings with one unsigned integer key
+and an `int8`–`int248` scalar value. Direct indexed reads and public getters
+sign-extend the low bits of the physical slot. Assignments with effect-free scalar keys and
+values update only those bits and preserve the rest of the word. Signed-key mappings, nested signed
+mapping values and whole-mapping parameters carrying these values require
+separate support.
+
 Signed `/` and `%` accept nonzero integer literals and never-assigned integer
 locals whose guards exclude zero on every path to the operation. Each helper
 and modifier must establish its own guard. A guard on a wider value cannot
