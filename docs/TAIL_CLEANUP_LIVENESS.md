@@ -1,7 +1,7 @@
 # Tail-only cleanup and caller liveness
 
 The importer admits an inlined helper with tail-only cleanup when the caller
-returns the saved hash. Earlier fork work covers bounded-memory
+returns the saved hash or uses it to read and update record fields. Earlier fork work covers bounded-memory
 lowering and full-cleanup storage reads. [PR #39](https://github.com/kbak/verity/pull/39)
 and [PR #56](https://github.com/kbak/verity/pull/56).
 
@@ -21,7 +21,7 @@ the fresh hash and final store bindings, checks each zeroing store's heap bounds
 and follows copies of the result through the caller. Reassigning a binding drops
 its previous value. The caller may read allocator word `0x40` and restore it to
 the entry value `0x80`. With that pointer restored, the caller can return the saved word directly
-or use it as the key for a read-only record lookup. Writes carrying dirty scalar bits must stay in
+or use it as the mapping key for a record lookup and field update. Writes carrying dirty scalar bits must stay in
 the heap. A memory-safe annotation grants no additional access.
 
 ## Executable coverage
@@ -51,14 +51,14 @@ The 10,206 calls are finite source-EVM evidence under the pinned Solidity 0.8.26
 Cancun, via-IR and optimizer settings. There are 3,024 required mismatches. Missing
 observations, reverts, wrong return widths, unexpected mismatches and missing
 sensitivity all fail the campaign. The saved-hash probe must also match every independent return in imported Denote
-and generated Cancun bytecode. The seven other continuations and the four write or rollback
-roots must produce located rejections. The original storage-reference read must
+and generated Cancun bytecode. The seven other continuations and the write-then-revert root must
+produce located rejections. The original storage-reference reads and successful updates must
 match the archived observations on all three routes. Separate import controls
 exercise a reassigned result, a missing restore and a different final pointer.
 
 The harness archives source variants, inputs, real observations, runtimes,
 compiler/node identities, implementation identities and the frozen expectation
-checksums. The storage campaigns replay the state archives. The tail-only read also checks every accessed physical slot against the
+checksums. The storage campaigns replay the state archives. The tail-only lookup also checks every accessed physical slot against the
 independent mapping address, including reads of empty records.
 
 ## Proposed caller contract
@@ -220,20 +220,25 @@ three-route campaign exercises that connection for the pinned compiler profile.
 The importer follows copies of the saved hash into the key word of a generated
 mapping preimage. It checks the fresh slot binding, the exact layout base and
 the restored allocator before accepting the hash of scratch bytes 0 through 63.
-The suffix may read the resulting raw storage slot and fields at literal word
-offsets, apply a literal field mask and return those words. Its static return
-buffer must fit below byte 128. A substituted key, a memory observation, a write
-or a revert in this suffix still rejects.
+The suffix can read and write that slot and fields at literal word offsets.
+A full-word update can use an untouched ABI parameter. A packed update can mask
+the old field word and merge in the new bits. Scalar events write their signature
+and data words before observing them. The final static return contains record
+fields and fits below byte 128. Heap observations after a write, substituted
+mapping keys and write-then-revert continuations still reject.
 
-The original read runs on source Solidity, imported Denote and generated Cancun
-bytecode using the frozen initial reads. Each route must touch the exact three
-record slots for each key, return the expected bytes and preserve storage and
-logs. A shifted-layout control and a wrong-base control exercise slot selection.
+The original and shifted layouts replay all 26 successful transactions from the
+frozen state archives on source Solidity, imported Denote and generated Cancun
+bytecode. A revert can be omitted only when the archive records the same storage
+as the preceding transaction and no emitted logs. Each successful transaction
+must touch the three physical slots for its key and match the archived return,
+logs and storage on the cumulative union of accessed slots and independent
+sentinels. This includes updates to initially empty records, interleaved keys,
+repeated writes and the upper padding bits of the narrow field. The wrong-base
+and wrong-field variants must produce storage mismatches on every route.
 
-The original tail-only storage helper must then pass its unchanged
-29-transaction state sequence on all three routes, including adjacent slots,
-other keys, events and rollback. That broader storage support and the pinned
-downstream wrapper remain later #32 acceptance work, not claims of this PR.
+Replaying the full sequence with rollback and validating the pinned downstream
+wrapper remain part of #32.
 
 ## Running and interpreting the gate
 
@@ -246,4 +251,4 @@ PYTHONPATH=scripts python3 -m solidity_differential.check_tail_cleanup_liveness 
 requires the saved-hash caller to pass all three routes, the source perturbations
 to expose the expected bytes, and unsupported callers to produce located
 rejections. `--require-composition` also requires the broader tail-only work,
-including writes and rollback, and still reports it as pending.
+including rollback, and still reports it as pending.

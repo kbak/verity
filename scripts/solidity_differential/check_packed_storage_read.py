@@ -189,12 +189,15 @@ def require_combined(result, mutant=False, *, mutation_fields=('data',)):
 
 
 def require_record_slots(result, spec):
-    """Even an empty record must be read at its independently computed physical slots."""
+    """Every lookup must touch its own three fields, including repeated keys and empty records."""
+    slots = {tuple(int(n) % 2**256 for n in spec['packedExpectations'][i]['values']): int(slot, 16)
+             for i, slot in zip(spec['keyIndices'], spec['recordSlots'], strict=True)}
     for stage in ('discovery', 'observations'):
         for route in ('source', 'model', 'compiled'):
             rows = result[stage][route]
-            for tx, slot, row in zip(spec['transactions'], spec['recordSlots'], rows, strict=True):
-                expected = {(tx['target'], '0x' + word(int(slot, 16) + offset).hex())
+            for tx, row in zip(spec['transactions'], rows, strict=True):
+                slot = slots[tuple(tx['args'][:4])]
+                expected = {(tx['target'], '0x' + word(slot + offset).hex())
                             for offset in range(3)}
                 if row['id'] != tx['id'] or set(map(tuple, row['touched'])) != expected:
                     raise HarnessError(f'{stage} {route} {tx["id"]}: wrong physical record slots')
