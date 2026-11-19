@@ -8893,6 +8893,9 @@ Compiler.CompilationModel.SolidityImport.lookup_bind_other
 Compiler.CompilationModel.SolidityImport.stmt_frame
 Compiler.CompilationModel.SolidityImport.list_frame
 Compiler.CompilationModel.SolidityImport.local_assignment_sibling_frame
+-- Compiler.CompilationModel.SolidityImport.protected_comparison_word_eval_eq  -- private
+-- Compiler.CompilationModel.SolidityImport.protected_comparison_eval_eq  -- private
+Compiler.CompilationModel.SolidityImport.protected_comparison_sibling_eval_eq
 Compiler.CompilationModel.SolidityImport.exec_append
 Compiler.CompilationModel.SolidityImport.split_prefix
 Compiler.CompilationModel.SolidityImport.split_prefix_continue
@@ -12390,4 +12393,4 @@ run_cmd do
     for line in lines do
       liftIO <| IO.println line
 
--- Total: 11464 theorems/lemmas (8964 public, 2500 private, 0 sorry'd)
+-- Total: 11467 theorems/lemmas (8965 public, 2502 private, 0 sorry'd)

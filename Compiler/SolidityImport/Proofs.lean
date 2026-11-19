@@ -1,6 +1,7 @@
 import Mathlib.Data.Nat.Basic
 import Compiler.SolidityImport.Access
 import Compiler.SolidityImport.AssignmentOrder
+import Compiler.SolidityImport.Coverage
 
 /-!
 Lemmas for proofs about an imported model's `Denote` execution: 256-bit word
@@ -164,6 +165,47 @@ theorem local_assignment_sibling_frame (oracle : DenoteOracle) (fields : List Fi
   have frame := list_frame oracle fields before pre [name] admitted
   rw [executed] at frame
   exact ⟨frame.1, congrArg some (frame.2 name (by simp only [List.mem_singleton]))⟩
+
+private theorem protected_comparison_word_eval_eq (o : DenoteOracle) (fs : List Field)
+    {s t : DenoteState} {pre : List Stmt} (word : Expr)
+    (admitted : protectedComparisonWord pre word = true)
+    (executed : execStmtList o fs s pre = .continue t) :
+    evalExpr o fs t word = evalExpr o fs s word := by
+  cases word <;> simp only [protectedComparisonWord, Bool.false_eq_true] at admitted
+  · rfl
+  all_goals
+    rename_i name
+    have frame := list_frame o fs s pre [name] admitted
+    rw [executed] at frame
+    exact congrArg some (frame.2 name (by simp only [List.mem_singleton]))
+
+private theorem protected_comparison_eval_eq (o : DenoteOracle) (fs : List Field)
+    {s t : DenoteState} {pre : List Stmt} (comparison : Expr)
+    (admitted : protectedComparison pre comparison = true)
+    (executed : execStmtList o fs s pre = .continue t) :
+    evalExpr o fs t comparison = evalExpr o fs s comparison := by
+  unfold protectedComparison at admitted
+  split at admitted <;> try contradiction
+  all_goals
+    rename_i left right
+    obtain ⟨hl, hr⟩ := Bool.and_eq_true_iff.mp admitted
+    simp only [evalExpr_eq_arm, evalExpr_lt_arm, evalExpr_le_arm, evalExpr_gt_arm,
+      evalExpr_ge_arm, evalExpr_slt_arm, evalExpr_sgt_arm,
+      protected_comparison_word_eval_eq o fs left hl executed,
+      protected_comparison_word_eval_eq o fs right hr executed]
+
+/-- The scalar comparison beside a local assignment has the same value before and after
+a successful assignment prelude, including when signed comparison lowering negates it. -/
+theorem protected_comparison_sibling_eval_eq (o : DenoteOracle) (fs : List Field)
+    {s t : DenoteState} {pre : List Stmt} (sibling : Expr)
+    (admitted : protectedComparisonSibling pre sibling = true)
+    (executed : execStmtList o fs s pre = .continue t) :
+    evalExpr o fs t sibling = evalExpr o fs s sibling := by
+  unfold protectedComparisonSibling at admitted
+  split at admitted
+  · rename_i inner
+    simp only [evalExpr_logicalNot_arm, protected_comparison_eval_eq o fs inner admitted executed]
+  · exact protected_comparison_eval_eq o fs sibling admitted executed
 
 theorem exec_append (o : DenoteOracle) (fs : List Field) (s : DenoteState)
     (a b : List Stmt) : execStmtList o fs s (a ++ b) =

@@ -28,6 +28,12 @@ library CheckedWordOps {
     function narrow(uint8 x, uint8 y) internal pure returns (uint8 z) {
         require((z = x + y) >= x, "narrow");
     }
+    function difference(int256 a, int256 b) internal pure returns (int256 result) {
+        require(((result = a - b) <= a) == (b >= 0));
+    }
+    function reverseDifference(int8 a, int8 b) internal pure returns (int8 result) {
+        require((b >= 0) == ((result = a - b) <= a));
+    }
 }
 contract LegacyAssignmentSiblings {
     uint256 public count;
@@ -52,6 +58,12 @@ contract LegacyAssignmentSiblings {
     }
     function narrow(uint8 x, uint8 y) external pure returns (uint8) {
         return CheckedWordOps.narrow(x, y);
+    }
+    function difference(int256 a, int256 b) external pure returns (int256) {
+        return CheckedWordOps.difference(a, b);
+    }
+    function reverseDifference(int8 a, int8 b) external pure returns (int8) {
+        return CheckedWordOps.reverseDifference(a, b);
     }
     function record(uint256 x, uint256 y) external returns (uint256) {
         count += 1;

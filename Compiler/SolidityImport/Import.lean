@@ -3833,12 +3833,13 @@ private partial def lowerBinary (j : Json) : M Val := do
   let mut left ← lowerExpr leftNode
   let mut right ← lowerExpr rightNode
   unless op == "&&" || op == "||" do
-    if (assignmentIn leftNode && (!right.pre.isEmpty ||
-        !(isOrderIndependentSibling right.expr ||
-          localAssignmentSibling left.pre.toList right.expr))) ||
-        (assignmentIn rightNode && (!left.pre.isEmpty ||
-        !(isOrderIndependentSibling left.expr ||
-          localAssignmentSibling right.pre.toList left.expr))) then
+    let preservesSibling (assigned sibling : Val) :=
+      sibling.pre.isEmpty &&
+        (isOrderIndependentSibling sibling.expr ||
+          localAssignmentSibling assigned.pre.toList sibling.expr ||
+          (env.legacyWrapping && protectedComparisonSibling assigned.pre.toList sibling.expr))
+    if (assignmentIn leftNode && !preservesSibling left right) ||
+        (assignmentIn rightNode && !preservesSibling right left) then
       failAt j "assignment operand with non-atomic sibling requires explicit evaluation-order support"
   if let some fnId := (field? j "function").bind (fun v => v.getNat?.toOption) then
     let targetId := resolveInContracts env env.linearizedBases.toList fnId |>.getD fnId

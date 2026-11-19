@@ -1084,7 +1084,7 @@ prerequisite for CREATE2 key-derivation helpers, not an implementation of code d
 | Pre-placeholder modifiers (`ModifierDefinition` / `ModifierInvocation`) | Modifiers whose body ends with a single trailing `_;` (`PlaceholderStatement`) and contains no earlier `_;`, no `return;`, and no `virtual` specifier are inlined in declaration order before root and helper bodies with their own lexical frame and `unchecked := false`. |
 | `unchecked { ... }` (`UncheckedBlock`) | Enables wrapping unsigned arithmetic (`+`, `-`, `*` masked to `2 ^ bits - 1` when `bits < 256`) within the lexical block while preserving division/modulo-by-zero panic (`0x12`) and resetting `unchecked := false` across helper and modifier call boundaries. |
 | Compound assignments (`+=`, `-=`) | Supported on declaration-bound unsigned scalar locals, unsigned scalar storage fields, unsigned scalar mappings, and unsigned mapping struct members, honoring checked vs `unchecked` arithmetic. |
-| Scalar assignment expressions (`(x = rhs)`) and constant `**` | Supported for `=` on declaration-bound scalar locals and scalar storage identifiers when any binary sibling operand is an existing order-independent atom or a protected local read (see below), and call sites are single-argument; integer constant `a ** b` lowers when `a ^ b < 2 ^ 256`. |
+| Scalar assignment expressions (`(x = rhs)`) and constant `**` | Supported for `=` on declaration-bound scalar locals and scalar storage identifiers when any binary sibling operand is an existing order-independent atom or a protected local read (also a protected scalar comparison in 0.7.6, see below), and call sites are single-argument; integer constant `a ** b` lowers when `a ^ b < 2 ^ 256`. |
 
 ### Development slice: multi-return helper inlining, tuple destructuring, parameter compound assignments, and narrow constant event arguments
 
@@ -2627,6 +2627,13 @@ to other names, conditional branches satisfying the same rule, and panic exits.
 Every branch must protect the sibling binding. Storage/memory writes, calls,
 loops and other unmodeled statements in this new path remain rejected. The older
 order-independent atom cases are unchanged, including their existing restrictions.
+
+In 0.7.6 a prelude-free equality or ordering comparison may also sit beside the
+assignment. Each operand must lower to a literal or a parameter/local binding
+that the complete assignment prelude preserves. This includes the negation used
+for signed non-strict comparisons. A comparison that reads the assigned binding
+or has effects of its own is rejected. The model theorem
+`protected_comparison_sibling_eval_eq` proves value preservation on continuation.
 
 This admits checked wrapping sums such as `require((z = x + y) >= x)` in inlined
 helpers. The sum wraps under Solidity 0.7.6; the explicit source guard rejects an
