@@ -2810,7 +2810,7 @@ private partial def lowerExpr (j : Json) : M Val := do
             failAt j s!"unsupported bitwise negation type {jTy}"
         else
           failAt j "unsupported unary operation"
-  | "BinaryOperation" => lowerBinary j
+  | "BinaryOperation" => lowerBinary j lowerExpr
   | "Conditional" => lowerConditional j
   | "FunctionCall" => lowerCall j
   | "Assignment" => lowerAssignmentExpr j
@@ -3826,7 +3826,7 @@ private partial def lowerSelectorMemberAccess (at_ base : Json) : M Ref := do
   else
     failAt at_ "function .selector member access is outside this slice"
 
-private partial def lowerBinary (j : Json) : M Val := do
+private partial def lowerBinary (j : Json) (operand : Json → M Val) : M Val := do
   let op ← mStr (← mField j "operator")
   let leftNode ← mField j "leftExpression"
   let rightNode ← mField j "rightExpression"
@@ -3845,8 +3845,8 @@ private partial def lowerBinary (j : Json) : M Val := do
     if statefulCallIn leftNode env ||
         statefulCallIn rightNode env then
       failAt j "stateful helper operands require explicit evaluation-order support"
-  let mut left ← lowerExpr leftNode
-  let mut right ← lowerExpr rightNode
+  let mut left ← operand leftNode
+  let mut right ← operand rightNode
   unless op == "&&" || op == "||" do
     let preservesSibling (assigned sibling : Val) :=
       sibling.pre.isEmpty &&
@@ -7070,7 +7070,8 @@ result. Neither local may be read anywhere else. `none` when `s` is not a
 low-level call declaration. -/
 private partial def lowerLowLevelCallSequence? (s : Json) (following : List Json) :
     M (Option (Array Stmt)) := do
-  if LegacyNativeCalls.applies s then return none
+  if LegacyNativeCalls.applies s ||
+      ((← get).legacyWrapping && LegacyCallTuples.isSelectorCall s) then return none
   let some init := (field? s "initialValue").filter (!·.isNull) | return none
   let some member ← lowLevelCallMember? init | return none
   let callee ← mField init "expression"
@@ -12912,12 +12913,31 @@ private partial def admittedRequireInterfaceCall? (cond : Json) : M (Option Json
         return none
   | _ => return none
 
+/-- ABI-v1 accepts every nonzero bool word in a truth test. Keep the length check
+inside its source short-circuit branch and leave general bool bindings out of scope. -/
+private partial def lowerLegacyPredicate (cond : Json) : M Val := do
+  let cond := unparenJson cond
+  if optStr cond "nodeType" == some "BinaryOperation" &&
+      #[some "&&", some "||"].contains (optStr cond "operator") then
+    return ← lowerBinary cond lowerLegacyPredicate
+  unless (← isAbiDecodeCall cond) && (← mType cond) == "bool" do return ← lowerExpr cond
+  if (← get).legacyAbiV2Files.contains (← get).currentFile then
+    failAt cond "legacy abi.decode requires ABI coder v1"
+  let args ← mArr (← mField cond "arguments")
+  unless args.size == 2 && (← mType args[0]!) == "bytes memory" &&
+      (← mKind args[0]!) == "Identifier" do
+    failAt cond "legacy bool predicate requires a memory bytes binding"
+  let buf ← lowerEncodedBytes args[0]!
+  let length := Expr.mload (.sub buf.pointer (.literal 32))
+  return { pre := buf.pre.push (AbiLowering.guard (.ge length (.literal 32))),
+           expr := .logicalNot (.logicalNot (.mload buf.pointer)) }
+
 private partial def lowerRequire (statement : Json) : M (Array Stmt) :=
   lowerRequireWith statement fun cond => do
     let extra ← admittedRequireInterfaceCall? cond
     let extraIds := (extra.bind fun n => (field? n "id").bind (·.getNat?.toOption)).toList
     modify fun e => { e with admittedInterfaceCalls := (e.admittedInterfaceCalls ++ extraIds).eraseDups }
-    lowerExpr cond
+    if (← get).legacyWrapping then lowerLegacyPredicate cond else lowerExpr cond
 
 /-- A builtin `require` whose condition is lowered by `lowerCondition`. -/
 private partial def lowerRequireWith (statement : Json) (lowerCondition : Json → M Val) :
@@ -13338,8 +13358,9 @@ private partial def lowerLocal (s : Json) : M (Array Stmt) := do
   withAdmittedInterfaceCall (if single then field? s "initialValue" else none) (lowerLocalCore s)
 
 private partial def lowerLocalCore (s : Json) : M (Array Stmt) := do
-  if LegacyStaticCalls.applies s then
-    return ← LegacyStaticCalls.lower s lowerExpr lowerEncodedBytes
+  if LegacyStaticCalls.applies s ||
+      ((← get).legacyWrapping && LegacyCallTuples.isSelectorCall s) then
+    return ← LegacyCallTuples.lower s lowerExpr lowerEncodedBytes
   if LegacyNativeCalls.applies s then return ← LegacyNativeCalls.lower s lowerExpr
   let assignedHere := bodyAssignedIds s
   if !assignedHere.isEmpty then
@@ -16096,6 +16117,7 @@ def finishImportReport (pkgRoot : System.FilePath) (contract : String)
   let callWorldSrc ← moduleText sourceRoot "Verity/Core/Model/CallWorld.lean"
   let legacyCallsSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyCalls.lean"
   let nativeCallsSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyNativeCalls.lean"
+  let callTuplesSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyCallTuples.lean"
   let staticCallsSrc ← moduleText sourceRoot "Compiler/SolidityImport/LegacyStaticCalls.lean"
   let ecmSrc ← moduleText sourceRoot "Verity/Core/Model/ECM.lean"
   let denoteSrc ← moduleText sourceRoot "Verity/Core/Model/Denote.lean"
@@ -16149,6 +16171,7 @@ def finishImportReport (pkgRoot : System.FilePath) (contract : String)
       ("CallWorld.lean", Json.str callWorldSrc),
       ("LegacyCalls.lean", Json.str legacyCallsSrc),
       ("LegacyNativeCalls.lean", Json.str nativeCallsSrc),
+      ("LegacyCallTuples.lean", Json.str callTuplesSrc),
       ("LegacyStaticCalls.lean", Json.str staticCallsSrc),
       ("ECM.lean", Json.str ecmSrc), ("Denote.lean", Json.str denoteSrc),
       ("WordShifts.lean", Json.str (← moduleText sourceRoot "Verity/Core/Model/WordShifts.lean"))])]

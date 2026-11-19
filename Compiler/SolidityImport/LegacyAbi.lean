@@ -91,7 +91,8 @@ def lower (node : Json) (lowerScalar : Json → M Val) : M EncodedBytes := do
   let size := offset + 32 * words.size
   pre := pre.push (.letVar headerName (.mload (.literal 64)))
   if let some selector := selector then
-    pre := pre.push (.mstore data (.literal (selector * 2^224)))
+    let tail := Expr.bitAnd (.mload data) (.literal (2^224 - 1))
+    pre := pre.push (.mstore data (.bitOr (.literal (selector * 2^224)) tail))
   for (word, index) in words.zipIdx do
     pre := pre.push (.mstore (.add data (.literal (offset + 32 * index))) word)
   pre := pre ++ #[.mstore header (.literal size),
